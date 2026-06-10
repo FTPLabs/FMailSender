@@ -2,8 +2,8 @@ name: Build EmailSenderPro Windows .exe
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
@@ -18,7 +18,7 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -30,147 +30,118 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      # Qt WebEngine требует системные зависимости
-      - name: Install system dependencies
-        run: |
-          choco install -y innosetup
-        shell: pwsh
-
-      - name: Upgrade pip
+      - name: Upgrade pip + wheel
         run: python -m pip install --upgrade pip wheel setuptools
 
       - name: Install Python dependencies
         run: |
-          pip install -r email_sender_pro/requirements.txt
-          pip install pyinstaller>=6.0
-        working-directory: .
+          pip install PyQt6>=6.6.0
+          pip install PyQt6-Qt6>=6.6.0
+          pip install PyQt6-WebEngine>=6.6.0
+          pip install PyQt6-WebEngine-Qt6>=6.6.0
+          pip install aiosmtplib>=3.0.0
+          pip install cryptography>=41.0.0
+          pip install PyJWT>=2.8.0
+          pip install dnspython>=2.4.0
+          pip install openpyxl>=3.1.2
+          pip install reportlab>=4.0.0
+          pip install psutil>=5.9.0
+          pip install requests>=2.31.0
+          pip install pywin32>=306
+          pip install wmi>=1.5.1
+          pip install pyinstaller>=6.3.0
+          pip install pyinstaller-hooks-contrib>=2024.0
 
-      # PyQt6-WebEngine нужно устанавливать отдельно
-      - name: Install PyQt6 WebEngine
+      - name: Verify imports
         run: |
-          pip install PyQt6-Qt6>=6.6.0 PyQt6-WebEngine>=6.6.0
-
-      - name: Determine version
-        id: version
-        run: |
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $ver = "${{ github.ref_name }}".TrimStart("v")
-          } else {
-            $ver = "${{ github.event.inputs.version }}"
-            if ([string]::IsNullOrEmpty($ver)) { $ver = "1.0.0" }
-          }
-          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
-          echo "Building version: $ver"
-        shell: pwsh
-
-      - name: Run build script
-        run: |
-          $onefile = "${{ github.event.inputs.onefile }}"
-          if ($onefile -eq "true") {
-            python build.py --onefile
-          } else {
-            python build.py
-          }
+          python -c "import PyQt6; print('PyQt6 OK')"
+          python -c "from PyQt6.QtWebEngineWidgets import QWebEngineView; print('WebEngine OK')"
+          python -c "import aiosmtplib; print('aiosmtplib OK')"
+          python -c "import cryptography; print('cryptography OK')"
         working-directory: email_sender_pro
-        shell: pwsh
 
-      - name: Verify build output
+      - name: Build with PyInstaller
+        run: python build.py
+        working-directory: email_sender_pro
+        shell: cmd
+
+      - name: List dist output
+        run: |
+          dir /s dist\
+        working-directory: email_sender_pro
+        shell: cmd
+        continue-on-error: true
+
+      - name: Verify EXE exists
         run: |
           if (Test-Path "dist\EmailSenderPro\EmailSenderPro.exe") {
             $size = (Get-Item "dist\EmailSenderPro\EmailSenderPro.exe").Length / 1MB
-            Write-Host "✓ EmailSenderPro.exe found ($($size.ToString("F1")) MB)"
+            Write-Host "✓ EmailSenderPro.exe ($($size.ToString('F1')) MB)"
           } elseif (Test-Path "dist\EmailSenderPro.exe") {
             $size = (Get-Item "dist\EmailSenderPro.exe").Length / 1MB
-            Write-Host "✓ EmailSenderPro.exe (onefile) found ($($size.ToString("F1")) MB)"
+            Write-Host "✓ EmailSenderPro.exe onefile ($($size.ToString('F1')) MB)"
           } else {
-            Write-Error "✗ Build output not found!"
+            Write-Error "EXE not found in dist/"
             exit 1
           }
         working-directory: email_sender_pro
         shell: pwsh
 
-      # Упаковываем папку в ZIP
-      - name: Package build output
-        run: |
-          $ver = "${{ steps.version.outputs.VERSION }}"
-          if (Test-Path "dist\EmailSenderPro") {
-            Compress-Archive -Path "dist\EmailSenderPro\*" -DestinationPath "dist\EmailSenderPro-$ver-windows.zip"
-            echo "ARTIFACT_PATH=email_sender_pro/dist/EmailSenderPro-$ver-windows.zip" >> $env:GITHUB_OUTPUT
-          } elseif (Test-Path "dist\EmailSenderPro.exe") {
-            Compress-Archive -Path "dist\EmailSenderPro.exe" -DestinationPath "dist\EmailSenderPro-$ver-windows-onefile.zip"
-            echo "ARTIFACT_PATH=email_sender_pro/dist/EmailSenderPro-$ver-windows-onefile.zip" >> $env:GITHUB_OUTPUT
-          }
+      - name: Package to ZIP
         id: package
+        run: |
+          $ver = "1.0.0"
+          $zipName = "EmailSenderPro-$ver-windows.zip"
+          if (Test-Path "dist\EmailSenderPro") {
+            Compress-Archive -Path "dist\EmailSenderPro\*" -DestinationPath "dist\$zipName" -Force
+          } elseif (Test-Path "dist\EmailSenderPro.exe") {
+            Compress-Archive -Path "dist\EmailSenderPro.exe" -DestinationPath "dist\$zipName" -Force
+          }
+          Write-Host "ZIP: dist\$zipName"
+          echo "ZIPNAME=$zipName" >> $env:GITHUB_OUTPUT
         working-directory: email_sender_pro
         shell: pwsh
 
-      # Инсталлятор через Inno Setup (если dist/EmailSenderPro папка)
-      - name: Build Inno Setup installer
-        if: github.event.inputs.onefile != 'true'
+      - name: Build Inno Setup Installer
         run: |
+          choco install innosetup --no-progress -y
           if (Test-Path "dist\EmailSenderPro\EmailSenderPro.exe") {
             & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\setup.iss"
-            if ($LASTEXITCODE -ne 0) {
-              Write-Warning "Inno Setup failed (non-fatal)"
-            } else {
-              Write-Host "✓ Installer created"
-            }
-          } else {
-            Write-Warning "Skipping installer: dist folder not found"
+            if ($LASTEXITCODE -eq 0) { Write-Host "✓ Installer built" }
           }
         working-directory: email_sender_pro
         shell: pwsh
         continue-on-error: true
 
-      - name: Upload build artifact (ZIP)
+      - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: EmailSenderPro-${{ steps.version.outputs.VERSION }}-windows
-          path: |
-            email_sender_pro/dist/*.zip
-          retention-days: 30
+          name: EmailSenderPro-portable
+          path: email_sender_pro/dist/*.zip
+          retention-days: 90
+          if-no-files-found: error
 
-      - name: Upload installer artifact
+      - name: Upload installer (if built)
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: EmailSenderPro-${{ steps.version.outputs.VERSION }}-installer
+          name: EmailSenderPro-installer
           path: |
             email_sender_pro/dist/installer/*.exe
-          retention-days: 30
+          retention-days: 90
+          if-no-files-found: ignore
 
-      # Создаём GitHub Release при теге
       - name: Create GitHub Release
-        if: github.ref_type == 'tag'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          name: Email Sender Pro ${{ steps.version.outputs.VERSION }}
+          name: Email Sender Pro ${{ github.ref_name }}
           draft: false
           prerelease: false
           files: |
             email_sender_pro/dist/*.zip
             email_sender_pro/dist/installer/*.exe
           body: |
-            ## Email Sender Pro ${{ steps.version.outputs.VERSION }}
-
-            ### Установка
-            1. Скачайте `EmailSenderPro-${{ steps.version.outputs.VERSION }}-windows.zip`
-            2. Распакуйте архив
-            3. Запустите `EmailSenderPro.exe`
-            4. Введите лицензионный ключ на экране активации
-
-            ### Или используйте установщик
-            Скачайте `EmailSenderPro-${{ steps.version.outputs.VERSION }}-Setup.exe` для полной установки.
-
-            ### Требования
-            - Windows 10 / 11 (x64)
-            - 200 MB свободного места
-
-            ### Что нового
-            - Полный GUI: 7 экранов
-            - SMTP-движок с ротацией аккаунтов
-            - Спам-анализатор
-            - Warm-up планировщик
-            - Аналитика с экспортом PDF/CSV
+            ## Email Sender Pro ${{ github.ref_name }}
+            Скачайте ZIP, распакуйте, запустите EmailSenderPro.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
