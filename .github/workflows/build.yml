@@ -50,62 +50,78 @@ jobs:
         shell: cmd
 
       - name: Check installed packages
-        run: |
-          python -m pip list | findstr /I "pyqt pyinstaller crypto jwt dns"
+        run: python -m pip list | findstr /I "pyqt pyinstaller crypto jwt dns"
         shell: cmd
 
       - name: Run PyInstaller build
         run: python build.py
-        working-directory: email_sender_pro
         shell: cmd
 
       - name: List build output
-        run: |
-          if exist dist\ (dir /s /b dist\*.exe) else (echo "dist folder missing")
-        working-directory: email_sender_pro
+        run: dir /s /b dist\*.exe
         shell: cmd
         continue-on-error: true
 
-      - name: Verify EXE exists and package to ZIP
+      - name: Verify EXE and package to ZIP
         id: package
+        shell: pwsh
         run: |
-          $exeFolder = "dist\EmailSenderPro\EmailSenderPro.exe"
-          $exeOne   = "dist\EmailSenderPro.exe"
-          $zipPath  = "dist\EmailSenderPro-1.0.0-windows.zip"
+          $exeDir = "dist\EmailSenderPro\EmailSenderPro.exe"
+          $exeOne = "dist\EmailSenderPro.exe"
+          $zipPath = "dist\EmailSenderPro-1.0.0-windows.zip"
 
-          if (Test-Path $exeFolder) {
-            $sz = [math]::Round((Get-Item $exeFolder).Length / 1MB, 1)
-            Write-Host "EXE (folder): $sz MB"
+          if (Test-Path $exeDir) {
+            $sz = [math]::Round((Get-Item $exeDir).Length / 1MB, 1)
+            Write-Host "EXE (folder mode): $sz MB"
             Compress-Archive -Path "dist\EmailSenderPro\*" -DestinationPath $zipPath -Force
           } elseif (Test-Path $exeOne) {
             $sz = [math]::Round((Get-Item $exeOne).Length / 1MB, 1)
-            Write-Host "EXE (onefile): $sz MB"
+            Write-Host "EXE (onefile mode): $sz MB"
             Compress-Archive -Path $exeOne -DestinationPath $zipPath -Force
           } else {
-            Write-Error "EmailSenderPro.exe not found!"
-            Get-ChildItem dist\ -Recurse | Select-Object FullName | Out-Host
+            Write-Error "EmailSenderPro.exe not found in dist\"
+            Get-ChildItem dist\ -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
             exit 1
           }
-          $zipSz = [math]::Round((Get-Item $zipPath).Length / 1MB, 1)
-          Write-Host "ZIP created: $zipPath ($zipSz MB)"
-        working-directory: email_sender_pro
-        shell: pwsh
 
-      - name: Upload portable ZIP artifact
+          $zipSz = [math]::Round((Get-Item $zipPath).Length / 1MB, 1)
+          Write-Host "ZIP: $zipPath ($zipSz MB)"
+
+      - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
         with:
           name: EmailSenderPro-1.0.0-windows-portable
-          path: email_sender_pro/dist/EmailSenderPro-1.0.0-windows.zip
+          path: dist/EmailSenderPro-1.0.0-windows.zip
           retention-days: 90
           if-no-files-found: error
 
-      - name: Create GitHub Release (on tag push)
+      - name: Build Inno Setup Installer
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          choco install innosetup --no-progress -y
+          if (Test-Path "dist\EmailSenderPro\EmailSenderPro.exe") {
+            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\setup.iss"
+            Write-Host "Installer build exit: $LASTEXITCODE"
+          } else {
+            Write-Host "Skipping installer (no folder build)"
+          }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: EmailSenderPro-1.0.0-windows-installer
+          path: dist/installer/*.exe
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: Email Sender Pro ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          files: email_sender_pro/dist/EmailSenderPro-1.0.0-windows.zip
+          files: |
+            dist/EmailSenderPro-1.0.0-windows.zip
+            dist/installer/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
