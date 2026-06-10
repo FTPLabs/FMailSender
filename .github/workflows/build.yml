@@ -1,130 +1,157 @@
 name: Build EmailSenderPro Windows .exe
 
-on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version (e.g. 1.0.0)"
-        required: false
-        default: "1.0.0"
+  on:
+    push:
+      branches: [main]
+      tags: ["v*"]
+    workflow_dispatch:
+      inputs:
+        version:
+          description: "Version (e.g. 1.0.0)"
+          required: false
+          default: "1.0.0"
 
-jobs:
-  build-windows:
-    runs-on: windows-latest
-    timeout-minutes: 60
+  jobs:
+    build-windows:
+      runs-on: windows-latest
+      timeout-minutes: 60
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
+        - name: Determine version
+          id: ver
+          shell: pwsh
+          run: |
+            $v = "${{ inputs.version }}"
+            if ("${{ github.ref }}" -like "refs/tags/v*") {
+              $v = "${{ github.ref_name }}"
+            }
+            if ([string]::IsNullOrWhiteSpace($v)) { $v = "1.0.0" }
+            $v = $v.TrimStart("v")
+            echo "ver=$v" >> $env:GITHUB_OUTPUT
+            Write-Host "Building version: $v"
 
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip wheel setuptools
+        - name: Set up Python 3.11
+          uses: actions/setup-python@v5
+          with:
+            python-version: "3.11"
+            cache: "pip"
 
-      - name: Install all dependencies
-        run: |
-          pip install PyQt6==6.6.1
-          pip install PyQt6-Qt6==6.6.1
-          pip install PyQt6-WebEngine==6.6.0
-          pip install PyQt6-WebEngine-Qt6==6.6.0
-          pip install aiosmtplib>=3.0.0
-          pip install cryptography>=41.0.0
-          pip install PyJWT>=2.8.0
-          pip install dnspython>=2.4.0
-          pip install openpyxl>=3.1.2
-          pip install reportlab>=4.0.0
-          pip install psutil>=5.9.0
-          pip install requests>=2.31.0
-          pip install pywin32>=306
-          pip install wmi>=1.5.1
-          pip install pyinstaller>=6.3.0
-          pip install pyinstaller-hooks-contrib>=2024.0
-        shell: cmd
+        - name: Upgrade pip
+          run: python -m pip install --upgrade pip wheel setuptools
 
-      - name: Check installed packages
-        run: python -m pip list | findstr /I "pyqt pyinstaller crypto jwt dns"
-        shell: cmd
+        - name: Install dependencies
+          shell: pwsh
+          run: |
+            pip install "PyQt6==6.6.1"
+            pip install "PyQt6-Qt6==6.6.1"
+            pip install "PyQt6-WebEngine==6.6.1"
+            pip install "PyQt6-WebEngine-Qt6==6.6.1"
+            pip install "aiosmtplib>=3.0.0"
+            pip install "cryptography>=41.0.0"
+            pip install "PyJWT>=2.8.0"
+            pip install "dnspython>=2.4.0"
+            pip install "openpyxl>=3.1.2"
+            pip install "reportlab>=4.0.0"
+            pip install "psutil>=5.9.0"
+            pip install "requests>=2.31.0"
+            pip install "pywin32>=306"
+            pip install "wmi>=1.5.1"
+            pip install "pyinstaller>=6.3.0"
+            pip install "pyinstaller-hooks-contrib>=2024.0"
 
-      - name: Run PyInstaller build
-        run: python build.py
-        shell: cmd
-        env:
-          PYTHONIOENCODING: utf-8
-          PYTHONUTF8: 1
+        - name: Check installed packages
+          shell: pwsh
+          run: python -m pip list | Select-String -Pattern "pyqt|pyinstaller|crypto|jwt|dns"
 
-      - name: List build output
-        run: dir /s /b dist\*.exe
-        shell: cmd
-        continue-on-error: true
+        - name: Run PyInstaller build
+          shell: pwsh
+          run: python build.py
+          env:
+            PYTHONIOENCODING: utf-8
+            PYTHONUTF8: 1
 
-      - name: Verify EXE and package to ZIP
-        id: package
-        shell: pwsh
-        run: |
-          $exeDir = "dist\EmailSenderPro\EmailSenderPro.exe"
-          $exeOne = "dist\EmailSenderPro.exe"
-          $zipPath = "dist\EmailSenderPro-1.0.0-windows.zip"
+        - name: List build output
+          shell: pwsh
+          continue-on-error: true
+          run: Get-ChildItem dist -Recurse -Filter "*.exe" | Select-Object FullName, Length
 
-          if (Test-Path $exeDir) {
-            $sz = [math]::Round((Get-Item $exeDir).Length / 1MB, 1)
-            Write-Host "EXE (folder mode): $sz MB"
-            Compress-Archive -Path "dist\EmailSenderPro\*" -DestinationPath $zipPath -Force
-          } elseif (Test-Path $exeOne) {
-            $sz = [math]::Round((Get-Item $exeOne).Length / 1MB, 1)
-            Write-Host "EXE (onefile mode): $sz MB"
-            Compress-Archive -Path $exeOne -DestinationPath $zipPath -Force
-          } else {
-            Write-Error "EmailSenderPro.exe not found in dist\"
-            Get-ChildItem dist\ -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
-            exit 1
-          }
+        - name: Package to ZIP
+          id: package
+          shell: pwsh
+          run: |
+            $ver = "${{ steps.ver.outputs.ver }}"
+            $zipName = "EmailSenderPro-$ver-windows.zip"
+            $zipPath = "dist/$zipName"
+            $exeDir  = "dist/EmailSenderPro/EmailSenderPro.exe"
+            $exeOne  = "dist/EmailSenderPro.exe"
 
-          $zipSz = [math]::Round((Get-Item $zipPath).Length / 1MB, 1)
-          Write-Host "ZIP: $zipPath ($zipSz MB)"
+            if (Test-Path $exeDir) {
+              Write-Host "Folder mode EXE: $([math]::Round((Get-Item $exeDir).Length/1MB,1)) MB"
+              Compress-Archive -Path "dist/EmailSenderPro/*" -DestinationPath $zipPath -Force
+            } elseif (Test-Path $exeOne) {
+              Write-Host "Single EXE: $([math]::Round((Get-Item $exeOne).Length/1MB,1)) MB"
+              Compress-Archive -Path $exeOne -DestinationPath $zipPath -Force
+            } else {
+              Write-Error "EmailSenderPro.exe not found in dist/"
+              Get-ChildItem dist/ -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
+              exit 1
+            }
 
-      - name: Upload portable ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: EmailSenderPro-1.0.0-windows-portable
-          path: dist/EmailSenderPro-1.0.0-windows.zip
-          retention-days: 90
-          if-no-files-found: error
+            Write-Host "ZIP: $zipPath ($([math]::Round((Get-Item $zipPath).Length/1MB,1)) MB)"
+            echo "zip_name=$zipName" >> $env:GITHUB_OUTPUT
+            echo "zip_path=$zipPath" >> $env:GITHUB_OUTPUT
 
-      - name: Build Inno Setup Installer
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          choco install innosetup --no-progress -y
-          if (Test-Path "dist\EmailSenderPro\EmailSenderPro.exe") {
-            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\setup.iss"
-            Write-Host "Installer build exit: $LASTEXITCODE"
-          } else {
-            Write-Host "Skipping installer (no folder build)"
-          }
+        - name: Upload portable ZIP
+          uses: actions/upload-artifact@v4
+          with:
+            name: EmailSenderPro-${{ steps.ver.outputs.ver }}-windows-portable
+            path: ${{ steps.package.outputs.zip_path }}
+            retention-days: 90
+            if-no-files-found: error
 
-      - name: Upload installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: EmailSenderPro-1.0.0-windows-installer
-          path: dist/installer/*.exe
-          retention-days: 90
-          if-no-files-found: ignore
+        - name: Build Inno Setup Installer
+          shell: pwsh
+          continue-on-error: true
+          run: |
+            choco install innosetup --no-progress -y
+            if (Test-Path "dist/EmailSenderPro/EmailSenderPro.exe") {
+              & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer/setup.iss"
+              Write-Host "Installer exit: $LASTEXITCODE"
+            } else {
+              Write-Host "Skipping installer — no folder build"
+            }
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: Email Sender Pro ${{ github.ref_name }}
-          files: |
-            dist/EmailSenderPro-1.0.0-windows.zip
-            dist/installer/*.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        - name: Upload installer
+          uses: actions/upload-artifact@v4
+          with:
+            name: EmailSenderPro-${{ steps.ver.outputs.ver }}-windows-installer
+            path: dist/installer/*.exe
+            retention-days: 90
+            if-no-files-found: ignore
+
+        - name: Create GitHub Release
+          if: startsWith(github.ref, 'refs/tags/v')
+          uses: softprops/action-gh-release@v2
+          with:
+            name: "Email Sender Pro v${{ steps.ver.outputs.ver }}"
+            body: |
+              ## Email Sender Pro v${{ steps.ver.outputs.ver }}
+
+              ### Установка
+              1. Скачайте ZIP-архив ниже
+              2. Распакуйте в любую папку
+              3. Запустите `EmailSenderPro.exe`
+
+              ### Демо-ключ
+              ```
+              ESP-DEMO0-DEMO0-DEMO0-DEMO0
+              ```
+            files: |
+              dist/EmailSenderPro-${{ steps.ver.outputs.ver }}-windows.zip
+              dist/installer/*.exe
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
