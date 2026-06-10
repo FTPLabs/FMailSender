@@ -1,482 +1,390 @@
 """
-Экран 2: SMTP-аккаунты.
-Таблица аккаунтов, добавление/редактирование, тест подключения, ротация.
-"""
-import asyncio
-import json
-import threading
-from pathlib import Path
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QDialog,
-    QFormLayout, QLineEdit, QComboBox, QSpinBox, QCheckBox,
-    QFrame, QMessageBox, QProgressDialog, QTextEdit
-)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor
-
-from core.sender import SmtpAccount, test_smtp_connection, get_smtp_config_for_domain
-from gui.theme import Colors, Spacing
-
-ACCOUNTS_FILE = Path("data/accounts.json")
-
-
-def _load_accounts() -> list[SmtpAccount]:
-    if ACCOUNTS_FILE.exists():
-        try:
-            with open(ACCOUNTS_FILE, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            accounts = []
-            for d in raw:
-                a = SmtpAccount(
-                    email=d["email"],
-                    password=d["password"],
-                    host=d["host"],
-                    port=d["port"],
-                    use_ssl=d.get("use_ssl", True),
-                    use_tls=d.get("use_tls", False),
-                    display_name=d.get("display_name", ""),
-                    daily_limit=d.get("daily_limit", 500),
-                    hourly_limit=d.get("hourly_limit", 50),
-                    warmup_day=d.get("warmup_day", 0),
-                )
-                accounts.append(a)
-            return accounts
-        except Exception:
-            pass
-    return []
-
-
-def _save_accounts(accounts: list[SmtpAccount]) -> None:
-    ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    data = []
-    for a in accounts:
-        data.append({
-            "email": a.email,
-            "password": a.password,
-            "host": a.host,
-            "port": a.port,
-            "use_ssl": a.use_ssl,
-            "use_tls": a.use_tls,
-            "display_name": a.display_name,
-            "daily_limit": a.daily_limit,
-            "hourly_limit": a.hourly_limit,
-            "warmup_day": a.warmup_day,
-        })
-    with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-class AddAccountDialog(QDialog):
-    """Диалог добавления/редактирования SMTP-аккаунта."""
-
-    def __init__(self, account: SmtpAccount = None, parent=None):
-        super().__init__(parent)
-        self._account = account
-        self.setWindowTitle("Добавить SMTP-аккаунт" if not account else "Редактировать аккаунт")
-        self.setMinimumWidth(480)
-        self.setModal(True)
-        self._setup_ui()
-        if account:
-            self._fill_from_account(account)
-
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(Spacing.LG)
-        layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
-
-        # Провайдер (быстрый выбор)
-        provider_row = QHBoxLayout()
-        provider_label = QLabel("Провайдер:")
-        provider_label.setFixedWidth(120)
-        provider_row.addWidget(provider_label)
-
-        self.provider_combo = QComboBox()
-        self.provider_combo.addItems([
-            "Custom SMTP", "Gmail", "Outlook/Hotmail", "Yahoo Mail",
-            "Mail.ru", "Yandex", "iCloud"
-        ])
-        self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
-        provider_row.addWidget(self.provider_combo)
-        layout.addLayout(provider_row)
-
-        # Форма
-        form = QFormLayout()
-        form.setSpacing(Spacing.MD)
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-
-        self.display_name_input = QLineEdit()
-        self.display_name_input.setPlaceholderText("Иван Иванов (необязательно)")
-        form.addRow("Имя отправителя:", self.display_name_input)
-
-        self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("your@email.com")
-        self.email_input.textChanged.connect(self._on_email_changed)
-        form.addRow("Email:", self.email_input)
-
-        self.password_input = QLineEdit()
-        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_input.setPlaceholderText("Пароль или App Password")
-        form.addRow("Пароль:", self.password_input)
-
-        self.host_input = QLineEdit()
-        self.host_input.setPlaceholderText("smtp.example.com")
-        form.addRow("SMTP Host:", self.host_input)
-
-        self.port_input = QSpinBox()
-        self.port_input.setRange(1, 65535)
-        self.port_input.setValue(465)
-        form.addRow("Порт:", self.port_input)
-
-        self.ssl_check = QCheckBox("SSL/TLS (порт 465)")
-        self.ssl_check.setChecked(True)
-        form.addRow("", self.ssl_check)
-
-        self.starttls_check = QCheckBox("STARTTLS (порт 587)")
-        form.addRow("", self.starttls_check)
-
-        self.daily_limit_input = QSpinBox()
-        self.daily_limit_input.setRange(1, 10000)
-        self.daily_limit_input.setValue(500)
-        form.addRow("Лимит в день:", self.daily_limit_input)
-
-        self.hourly_limit_input = QSpinBox()
-        self.hourly_limit_input.setRange(1, 1000)
-        self.hourly_limit_input.setValue(50)
-        form.addRow("Лимит в час:", self.hourly_limit_input)
-
-        layout.addLayout(form)
-
-        # Лог тестирования
-        self.test_log = QTextEdit()
-        self.test_log.setReadOnly(True)
-        self.test_log.setMaximumHeight(120)
-        self.test_log.setPlaceholderText("Нажмите 'Тест' для проверки подключения...")
-        layout.addWidget(self.test_log)
-
-        # Кнопки
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(Spacing.SM)
-
-        self.test_btn = QPushButton("Тест подключения")
-        self.test_btn.clicked.connect(self._test_connection)
-        btn_row.addWidget(self.test_btn)
-        btn_row.addStretch()
-
-        cancel_btn = QPushButton("Отмена")
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(cancel_btn)
-
-        self.save_btn = QPushButton("Сохранить")
-        self.save_btn.setObjectName("btn_primary")
-        self.save_btn.clicked.connect(self._save)
-        btn_row.addWidget(self.save_btn)
-
-        layout.addLayout(btn_row)
-
-    def _on_email_changed(self, text: str):
-        """Автоопределение настроек по домену."""
-        if "@" in text:
-            domain = text.split("@")[-1].lower().strip()
-            cfg = get_smtp_config_for_domain(domain)
-            if cfg:
-                self.host_input.setText(cfg.get("host", ""))
-                self.port_input.setValue(cfg.get("port", 465))
-                self.ssl_check.setChecked(cfg.get("use_ssl", True))
-                self.starttls_check.setChecked(cfg.get("use_tls", False))
-                self.provider_combo.setCurrentText(self._domain_to_provider(domain))
-
-    def _domain_to_provider(self, domain: str) -> str:
-        mapping = {
-            "gmail.com": "Gmail",
-            "googlemail.com": "Gmail",
-            "outlook.com": "Outlook/Hotmail",
-            "hotmail.com": "Outlook/Hotmail",
-            "live.com": "Outlook/Hotmail",
-            "yahoo.com": "Yahoo Mail",
-            "mail.ru": "Mail.ru",
-            "yandex.ru": "Yandex",
-            "yandex.com": "Yandex",
-            "icloud.com": "iCloud",
-        }
-        return mapping.get(domain, "Custom SMTP")
-
-    def _on_provider_changed(self, provider: str):
-        configs = {
-            "Gmail": ("smtp.gmail.com", 465, True, False),
-            "Outlook/Hotmail": ("smtp.office365.com", 587, False, True),
-            "Yahoo Mail": ("smtp.mail.yahoo.com", 465, True, False),
-            "Mail.ru": ("smtp.mail.ru", 465, True, False),
-            "Yandex": ("smtp.yandex.ru", 465, True, False),
-            "iCloud": ("smtp.mail.me.com", 587, False, True),
-        }
-        if provider in configs:
-            host, port, ssl, tls = configs[provider]
-            self.host_input.setText(host)
-            self.port_input.setValue(port)
-            self.ssl_check.setChecked(ssl)
-            self.starttls_check.setChecked(tls)
-
-    def _fill_from_account(self, a: SmtpAccount):
-        self.email_input.setText(a.email)
-        self.password_input.setText(a.password)
-        self.host_input.setText(a.host)
-        self.port_input.setValue(a.port)
-        self.ssl_check.setChecked(a.use_ssl)
-        self.starttls_check.setChecked(a.use_tls)
-        self.display_name_input.setText(a.display_name)
-        self.daily_limit_input.setValue(a.daily_limit)
-        self.hourly_limit_input.setValue(a.hourly_limit)
-
-    def _test_connection(self):
-        self.test_btn.setEnabled(False)
-        self.test_log.setText("Тестирование подключения...")
-
-        account = self._build_account()
-        if not account:
-            self.test_log.setText("Заполните все обязательные поля")
-            self.test_btn.setEnabled(True)
-            return
-
-        def run():
-            loop = asyncio.new_event_loop()
-            success, log = loop.run_until_complete(test_smtp_connection(account))
-            loop.close()
-
-            def update():
-                self.test_log.setText(log)
-                if success:
-                    self.test_log.setStyleSheet(f"color: {Colors.SUCCESS};")
-                else:
-                    self.test_log.setStyleSheet(f"color: {Colors.ERROR};")
-                self.test_btn.setEnabled(True)
-
-            QTimer.singleShot(0, update)
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def _build_account(self) -> SmtpAccount | None:
-        email = self.email_input.text().strip()
-        password = self.password_input.text()
-        host = self.host_input.text().strip()
-        if not email or not password or not host:
-            return None
-        return SmtpAccount(
-            email=email,
-            password=password,
-            host=host,
-            port=self.port_input.value(),
-            use_ssl=self.ssl_check.isChecked(),
-            use_tls=self.starttls_check.isChecked(),
-            display_name=self.display_name_input.text().strip(),
-            daily_limit=self.daily_limit_input.value(),
-            hourly_limit=self.hourly_limit_input.value(),
-        )
-
-    def _save(self):
-        account = self._build_account()
-        if not account:
-            QMessageBox.warning(self, "Ошибка", "Заполните обязательные поля: Email, Пароль, Host")
-            return
-        self._result_account = account
-        self.accept()
-
-    def get_account(self) -> SmtpAccount | None:
-        return getattr(self, "_result_account", None)
-
-
-class AccountsScreen(QWidget):
-    """Экран управления SMTP-аккаунтами."""
-
-    accounts_changed = pyqtSignal(list)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._accounts: list[SmtpAccount] = _load_accounts()
-        self._setup_ui()
-        self._refresh_table()
-
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
-        layout.setSpacing(Spacing.LG)
-
-        # ── Заголовок и кнопки ───────────────────
-        header_row = QHBoxLayout()
-        title = QLabel("SMTP-аккаунты")
-        title.setObjectName("section_header")
-        header_row.addWidget(title)
-        header_row.addStretch()
-
-        self.rotation_combo = QComboBox()
-        self.rotation_combo.addItems(["Ротация: round-robin", "Ротация: random", "Ротация: weighted"])
-        self.rotation_combo.setFixedWidth(200)
-        header_row.addWidget(self.rotation_combo)
-
-        add_btn = QPushButton("+ Добавить аккаунт")
-        add_btn.setObjectName("btn_primary")
-        add_btn.clicked.connect(self._add_account)
-        header_row.addWidget(add_btn)
-
-        layout.addLayout(header_row)
-
-        # ── Таблица аккаунтов ────────────────────
-        self.table = QTableWidget()
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels([
-            "Email", "Провайдер", "Статус", "Warm-up",
-            "Лимит/день", "Отправлено", "Действия"
-        ])
-        self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
-        self.table.setAlternatingRowColors(True)
-        layout.addWidget(self.table)
-
-        # ── Нижняя панель ─────────────────────────
-        bottom_row = QHBoxLayout()
-        self.count_label = QLabel(f"Аккаунтов: 0")
-        self.count_label.setObjectName("label_muted")
-        bottom_row.addWidget(self.count_label)
-        bottom_row.addStretch()
-
-        import_btn = QPushButton("Импорт из CSV")
-        import_btn.clicked.connect(self._import_csv)
-        bottom_row.addWidget(import_btn)
-
-        layout.addLayout(bottom_row)
-
-    def _refresh_table(self):
-        self.table.setRowCount(len(self._accounts))
-        for row, acc in enumerate(self._accounts):
-            self.table.setItem(row, 0, QTableWidgetItem(acc.email))
-
-            # Провайдер (определяем по хосту)
-            domain = acc.email.split("@")[-1] if "@" in acc.email else ""
-            provider_map = {
-                "gmail.com": "Gmail", "googlemail.com": "Gmail",
-                "outlook.com": "Outlook", "hotmail.com": "Outlook",
-                "yahoo.com": "Yahoo", "mail.ru": "Mail.ru",
-                "yandex.ru": "Yandex", "yandex.com": "Yandex",
-            }
-            provider = provider_map.get(domain, "Custom")
-            self.table.setItem(row, 1, QTableWidgetItem(provider))
-
-            # Статус
-            status_item = QTableWidgetItem("● Активен" if acc.is_active else "● Неактивен")
-            status_item.setForeground(
-                QColor(Colors.SUCCESS) if acc.is_active else QColor(Colors.ERROR)
-            )
-            self.table.setItem(row, 2, status_item)
-
-            # Warm-up day
-            warmup_text = f"День {acc.warmup_day}" if acc.warmup_day > 0 else "Не запущен"
-            self.table.setItem(row, 3, QTableWidgetItem(warmup_text))
-
-            self.table.setItem(row, 4, QTableWidgetItem(str(acc.daily_limit)))
-            self.table.setItem(row, 5, QTableWidgetItem(str(acc.sent_today)))
-
-            # Кнопки действий
-            actions_widget = QWidget()
-            actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setContentsMargins(4, 2, 4, 2)
-            actions_layout.setSpacing(4)
-
-            edit_btn = QPushButton("Изменить")
-            edit_btn.setFixedHeight(26)
-            edit_btn.clicked.connect(lambda _, r=row: self._edit_account(r))
-            actions_layout.addWidget(edit_btn)
-
-            del_btn = QPushButton("Удалить")
-            del_btn.setObjectName("btn_danger")
-            del_btn.setFixedHeight(26)
-            del_btn.clicked.connect(lambda _, r=row: self._delete_account(r))
-            actions_layout.addWidget(del_btn)
-
-            self.table.setCellWidget(row, 6, actions_widget)
-            self.table.setRowHeight(row, 46)
-
-        self.count_label.setText(f"Аккаунтов: {len(self._accounts)} | "
-                                  f"Активных: {sum(1 for a in self._accounts if a.is_active)}")
-
-    def _add_account(self):
-        dialog = AddAccountDialog(parent=self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            account = dialog.get_account()
-            if account:
-                self._accounts.append(account)
-                _save_accounts(self._accounts)
-                self._refresh_table()
-                self.accounts_changed.emit(self._accounts)
-
-    def _edit_account(self, row: int):
-        account = self._accounts[row]
-        dialog = AddAccountDialog(account=account, parent=self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            updated = dialog.get_account()
-            if updated:
-                self._accounts[row] = updated
-                _save_accounts(self._accounts)
-                self._refresh_table()
-                self.accounts_changed.emit(self._accounts)
-
-    def _delete_account(self, row: int):
-        email = self._accounts[row].email
-        reply = QMessageBox.question(
-            self, "Удалить аккаунт",
-            f"Удалить аккаунт {email}?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self._accounts.pop(row)
-            _save_accounts(self._accounts)
-            self._refresh_table()
-            self.accounts_changed.emit(self._accounts)
-
-    def _import_csv(self):
-        from PyQt6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Импорт аккаунтов из CSV", "", "CSV files (*.csv)"
-        )
-        if path:
-            try:
-                import csv
-                with open(path, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    imported = 0
-                    for row in reader:
-                        if "email" in row and "password" in row:
-                            domain = row["email"].split("@")[-1]
-                            cfg = get_smtp_config_for_domain(domain) or {}
-                            acc = SmtpAccount(
-                                email=row["email"],
-                                password=row["password"],
-                                host=row.get("host", cfg.get("host", "")),
-                                port=int(row.get("port", cfg.get("port", 465))),
-                                use_ssl=row.get("use_ssl", str(cfg.get("use_ssl", True))).lower() == "true",
-                                display_name=row.get("display_name", ""),
-                                daily_limit=int(row.get("daily_limit", 500)),
-                            )
-                            if acc.host:
-                                self._accounts.append(acc)
-                                imported += 1
-                _save_accounts(self._accounts)
-                self._refresh_table()
-                self.accounts_changed.emit(self._accounts)
-                QMessageBox.information(self, "Импорт", f"Импортировано {imported} аккаунтов")
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка импорта", str(e))
-
-    def get_accounts(self) -> list[SmtpAccount]:
-        return self._accounts
-
-    def get_rotation_mode(self) -> str:
-        text = self.rotation_combo.currentText()
-        if "random" in text:
-            return "random"
-        elif "weighted" in text:
-            return "weighted"
-        return "round-robin"
+  Screen 2: SMTP Account Management.
+  Add, test, delete accounts. Passwords stored encrypted via Fernet.
+  """
+  import asyncio
+  import json
+  import os
+  from pathlib import Path
+  from PyQt6.QtWidgets import (
+      QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+      QLineEdit, QComboBox, QSpinBox, QCheckBox, QTableWidget,
+      QTableWidgetItem, QHeaderView, QDialog, QFormLayout,
+      QMessageBox, QDialogButtonBox, QTextEdit, QFrame
+  )
+  from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
+  from PyQt6.QtGui import QColor
+
+  from core.license import _get_fernet_key
+  from core.sender import SmtpAccount, test_smtp_connection, get_smtp_config_for_domain
+  from gui.theme import Colors, Spacing
+
+  try:
+      from cryptography.fernet import Fernet
+      _HAS_FERNET = True
+  except ImportError:
+      _HAS_FERNET = False
+
+
+  ACCOUNTS_FILE = Path(os.environ.get("APPDATA", ".")) / "EmailSenderPro" / "accounts.dat"
+
+
+  def _encrypt_password(password: str) -> str:
+      if not _HAS_FERNET:
+          return password
+      try:
+          f = Fernet(_get_fernet_key())
+          return f.encrypt(password.encode()).decode()
+      except Exception:
+          return password
+
+
+  def _decrypt_password(encrypted: str) -> str:
+      if not _HAS_FERNET:
+          return encrypted
+      try:
+          f = Fernet(_get_fernet_key())
+          return f.decrypt(encrypted.encode()).decode()
+      except Exception:
+          return encrypted
+
+
+  def save_accounts(accounts: list[SmtpAccount]) -> None:
+      ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+      data = []
+      for a in accounts:
+          data.append({
+              "email": a.email,
+              "password_enc": _encrypt_password(a.password),
+              "host": a.host,
+              "port": a.port,
+              "use_ssl": a.use_ssl,
+              "use_tls": a.use_tls,
+              "display_name": a.display_name,
+              "daily_limit": a.daily_limit,
+              "hourly_limit": a.hourly_limit,
+              "is_active": a.is_active,
+          })
+      ACCOUNTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+  def load_accounts() -> list[SmtpAccount]:
+      if not ACCOUNTS_FILE.exists():
+          return []
+      try:
+          data = json.loads(ACCOUNTS_FILE.read_text(encoding="utf-8"))
+          result = []
+          for d in data:
+              raw_pw = d.get("password_enc") or d.get("password", "")
+              try:
+                  password = _decrypt_password(raw_pw)
+              except Exception:
+                  password = raw_pw
+              result.append(SmtpAccount(
+                  email=d["email"],
+                  password=password,
+                  host=d["host"],
+                  port=d["port"],
+                  use_ssl=d.get("use_ssl", True),
+                  use_tls=d.get("use_tls", False),
+                  display_name=d.get("display_name", ""),
+                  daily_limit=d.get("daily_limit", 500),
+                  hourly_limit=d.get("hourly_limit", 50),
+                  is_active=d.get("is_active", True),
+              ))
+          return result
+      except Exception:
+          return []
+
+
+  class AccountDialog(QDialog):
+      def __init__(self, parent=None, account: SmtpAccount = None):
+          super().__init__(parent)
+          self.setWindowTitle("Добавить аккаунт" if not account else "Редактировать аккаунт")
+          self.setMinimumWidth(460)
+          self._editing = account
+          self._setup_ui()
+          if account:
+              self._fill(account)
+
+      def _setup_ui(self):
+          layout = QVBoxLayout(self)
+          layout.setSpacing(Spacing.LG)
+          layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+
+          form = QFormLayout()
+          form.setSpacing(Spacing.MD)
+
+          self.email_input = QLineEdit()
+          self.email_input.setPlaceholderText("user@example.com")
+          self.email_input.textChanged.connect(self._on_email_changed)
+          form.addRow("Email:", self.email_input)
+
+          self.password_input = QLineEdit()
+          self.password_input.setPlaceholderText("Пароль или App Password")
+          self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+          form.addRow("Пароль:", self.password_input)
+
+          self.display_name_input = QLineEdit()
+          self.display_name_input.setPlaceholderText("Имя отправителя (необязательно)")
+          form.addRow("Имя:", self.display_name_input)
+
+          host_row = QHBoxLayout()
+          self.host_input = QLineEdit()
+          self.host_input.setPlaceholderText("smtp.gmail.com")
+          host_row.addWidget(self.host_input)
+          self.port_spin = QSpinBox()
+          self.port_spin.setRange(1, 65535)
+          self.port_spin.setValue(465)
+          self.port_spin.setFixedWidth(80)
+          host_row.addWidget(QLabel("Порт:"))
+          host_row.addWidget(self.port_spin)
+          form.addRow("SMTP сервер:", host_row)
+
+          ssl_row = QHBoxLayout()
+          self.ssl_check = QCheckBox("SSL (порт 465)")
+          self.ssl_check.setChecked(True)
+          ssl_row.addWidget(self.ssl_check)
+          self.tls_check = QCheckBox("STARTTLS (порт 587)")
+          ssl_row.addWidget(self.tls_check)
+          ssl_row.addStretch()
+          form.addRow("Шифрование:", ssl_row)
+
+          limits_row = QHBoxLayout()
+          self.daily_spin = QSpinBox()
+          self.daily_spin.setRange(1, 100000)
+          self.daily_spin.setValue(500)
+          self.daily_spin.setSuffix("/день")
+          limits_row.addWidget(self.daily_spin)
+          self.hourly_spin = QSpinBox()
+          self.hourly_spin.setRange(1, 10000)
+          self.hourly_spin.setValue(50)
+          self.hourly_spin.setSuffix("/час")
+          limits_row.addWidget(self.hourly_spin)
+          form.addRow("Лимиты:", limits_row)
+
+          layout.addLayout(form)
+
+          test_btn = QPushButton("Проверить подключение")
+          test_btn.setObjectName("btn_icon")
+          test_btn.clicked.connect(self._test_connection)
+          layout.addWidget(test_btn)
+
+          self.test_result = QTextEdit()
+          self.test_result.setReadOnly(True)
+          self.test_result.setMaximumHeight(80)
+          self.test_result.setPlaceholderText("Результат проверки...")
+          layout.addWidget(self.test_result)
+
+          buttons = QDialogButtonBox(
+              QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+          )
+          buttons.accepted.connect(self.accept)
+          buttons.rejected.connect(self.reject)
+          layout.addWidget(buttons)
+
+      def _on_email_changed(self, email: str):
+          if "@" in email:
+              domain = email.split("@")[1].lower()
+              config = get_smtp_config_for_domain(domain)
+              if config:
+                  self.host_input.setText(config["host"])
+                  self.port_spin.setValue(config["port"])
+                  self.ssl_check.setChecked(config.get("use_ssl", False))
+                  self.tls_check.setChecked(config.get("use_tls", False))
+
+      def _fill(self, account: SmtpAccount):
+          self.email_input.setText(account.email)
+          self.password_input.setText(account.password)
+          self.display_name_input.setText(account.display_name)
+          self.host_input.setText(account.host)
+          self.port_spin.setValue(account.port)
+          self.ssl_check.setChecked(account.use_ssl)
+          self.tls_check.setChecked(account.use_tls)
+          self.daily_spin.setValue(account.daily_limit)
+          self.hourly_spin.setValue(account.hourly_limit)
+
+      def _test_connection(self):
+          account = self.get_account()
+          if not account:
+              return
+          self.test_result.setPlainText("Подключение...")
+
+          async def run():
+              return await test_smtp_connection(account)
+
+          import threading
+
+          def do():
+              import asyncio
+              loop = asyncio.new_event_loop()
+              success, log = loop.run_until_complete(run())
+              loop.close()
+              color = Colors.SUCCESS if success else Colors.ERROR
+              self.test_result.setStyleSheet(f"color:{color};")
+              self.test_result.setPlainText(log)
+
+          threading.Thread(target=do, daemon=True).start()
+
+      def get_account(self) -> SmtpAccount | None:
+          email = self.email_input.text().strip()
+          password = self.password_input.text()
+          host = self.host_input.text().strip()
+          if not email or not password or not host:
+              return None
+          return SmtpAccount(
+              email=email,
+              password=password,
+              host=host,
+              port=self.port_spin.value(),
+              use_ssl=self.ssl_check.isChecked(),
+              use_tls=self.tls_check.isChecked(),
+              display_name=self.display_name_input.text().strip(),
+              daily_limit=self.daily_spin.value(),
+              hourly_limit=self.hourly_spin.value(),
+          )
+
+
+  class AccountsScreen(QWidget):
+      accounts_changed = pyqtSignal(list)
+
+      def __init__(self, parent=None):
+          super().__init__(parent)
+          self._accounts: list[SmtpAccount] = load_accounts()
+          self._setup_ui()
+          self._refresh_table()
+
+      def _setup_ui(self):
+          layout = QVBoxLayout(self)
+          layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+          layout.setSpacing(Spacing.LG)
+
+          header_row = QHBoxLayout()
+          title = QLabel("SMTP Аккаунты")
+          title.setObjectName("section_header")
+          header_row.addWidget(title)
+          header_row.addStretch()
+          add_btn = QPushButton("+ Добавить аккаунт")
+          add_btn.setObjectName("btn_primary")
+          add_btn.clicked.connect(self._add_account)
+          header_row.addWidget(add_btn)
+          layout.addLayout(header_row)
+
+          stats_card = QFrame()
+          stats_card.setObjectName("card")
+          stats_layout = QHBoxLayout(stats_card)
+          self.stats_label = QLabel("Аккаунтов: 0 | Активных: 0")
+          self.stats_label.setObjectName("label_muted")
+          stats_layout.addWidget(self.stats_label)
+          stats_layout.addStretch()
+          layout.addWidget(stats_card)
+
+          self.table = QTableWidget()
+          self.table.setColumnCount(7)
+          self.table.setHorizontalHeaderLabels([
+              "Email", "SMTP Сервер", "Порт", "Шифр.",
+              "Лимит/день", "Лимит/час", "Статус"
+          ])
+          self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+          self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+          self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+          self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+          self.table.setAlternatingRowColors(True)
+          layout.addWidget(self.table, 1)
+
+          actions_row = QHBoxLayout()
+          edit_btn = QPushButton("Редактировать")
+          edit_btn.clicked.connect(self._edit_selected)
+          actions_row.addWidget(edit_btn)
+          test_btn = QPushButton("Проверить подключение")
+          test_btn.clicked.connect(self._test_selected)
+          actions_row.addWidget(test_btn)
+          toggle_btn = QPushButton("Вкл/Выкл")
+          toggle_btn.clicked.connect(self._toggle_selected)
+          actions_row.addWidget(toggle_btn)
+          del_btn = QPushButton("Удалить")
+          del_btn.setObjectName("btn_danger")
+          del_btn.clicked.connect(self._delete_selected)
+          actions_row.addWidget(del_btn)
+          actions_row.addStretch()
+          layout.addLayout(actions_row)
+
+      def _refresh_table(self):
+          self.table.setRowCount(len(self._accounts))
+          for i, acc in enumerate(self._accounts):
+              self.table.setItem(i, 0, QTableWidgetItem(acc.email))
+              self.table.setItem(i, 1, QTableWidgetItem(acc.host))
+              self.table.setItem(i, 2, QTableWidgetItem(str(acc.port)))
+              enc = "SSL" if acc.use_ssl else ("TLS" if acc.use_tls else "Нет")
+              self.table.setItem(i, 3, QTableWidgetItem(enc))
+              self.table.setItem(i, 4, QTableWidgetItem(str(acc.daily_limit)))
+              self.table.setItem(i, 5, QTableWidgetItem(str(acc.hourly_limit)))
+              status_item = QTableWidgetItem("Активен" if acc.is_active else "Отключён")
+              status_item.setForeground(
+                  QColor(Colors.SUCCESS) if acc.is_active else QColor(Colors.TEXT_MUTED)
+              )
+              self.table.setItem(i, 6, status_item)
+          active = sum(1 for a in self._accounts if a.is_active)
+          self.stats_label.setText(f"Аккаунтов: {len(self._accounts)} | Активных: {active}")
+          self.accounts_changed.emit(self._accounts)
+
+      def _add_account(self):
+          dlg = AccountDialog(self)
+          if dlg.exec() == QDialog.DialogCode.Accepted:
+              acc = dlg.get_account()
+              if acc:
+                  self._accounts.append(acc)
+                  save_accounts(self._accounts)
+                  self._refresh_table()
+
+      def _edit_selected(self):
+          row = self.table.currentRow()
+          if row < 0:
+              return
+          dlg = AccountDialog(self, self._accounts[row])
+          if dlg.exec() == QDialog.DialogCode.Accepted:
+              acc = dlg.get_account()
+              if acc:
+                  self._accounts[row] = acc
+                  save_accounts(self._accounts)
+                  self._refresh_table()
+
+      def _test_selected(self):
+          row = self.table.currentRow()
+          if row < 0:
+              QMessageBox.information(self, "Тест", "Выберите аккаунт из таблицы")
+              return
+          acc = self._accounts[row]
+          QMessageBox.information(self, "Тест", f"Проверка {acc.email}...")
+          import threading
+          def do():
+              import asyncio
+              loop = asyncio.new_event_loop()
+              success, log = loop.run_until_complete(test_smtp_connection(acc))
+              loop.close()
+              status = "OK" if success else "ОШИБКА"
+              QMessageBox.information(self, f"Тест — {status}", log)
+          threading.Thread(target=do, daemon=True).start()
+
+      def _toggle_selected(self):
+          row = self.table.currentRow()
+          if row < 0:
+              return
+          self._accounts[row].is_active = not self._accounts[row].is_active
+          save_accounts(self._accounts)
+          self._refresh_table()
+
+      def _delete_selected(self):
+          row = self.table.currentRow()
+          if row < 0:
+              return
+          reply = QMessageBox.question(
+              self, "Удалить?",
+              f"Удалить аккаунт {self._accounts[row].email}?",
+              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+          )
+          if reply == QMessageBox.StandardButton.Yes:
+              self._accounts.pop(row)
+              save_accounts(self._accounts)
+              self._refresh_table()
+  

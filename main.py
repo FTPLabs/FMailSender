@@ -1,7 +1,4 @@
-"""
-  Точка входа Email Sender Pro.
-  Проверка лицензии, запуск GUI.
-  """
+"""Entry point for Email Sender Pro."""
   import sys
   import os
 
@@ -47,19 +44,19 @@
 
       container = QMainWindow()
       container.setWindowTitle("Email Sender Pro — Активация")
-      container.setMinimumSize(620, 540)
-      container.resize(700, 600)
+      container.setMinimumSize(620, 580)
+      container.resize(720, 640)
       container.setStyleSheet(f"background-color: {Colors.BG_BASE};")
 
       activation = ActivationScreen(hint_message=message)
 
-      def on_activation_success(license_info):
+      def on_success(license_info):
           container.close()
           from gui.app import MainWindow
           window = MainWindow(license_info)
           window.show()
 
-      activation.activation_success.connect(on_activation_success)
+      activation.activation_success.connect(on_success)
       container.setCentralWidget(activation)
       container.show()
 
