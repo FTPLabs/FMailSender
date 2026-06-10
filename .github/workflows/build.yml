@@ -56,6 +56,9 @@ jobs:
       - name: Run PyInstaller build
         run: python build.py
         shell: cmd
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: 1
 
       - name: List build output
         run: dir /s /b dist\*.exe
