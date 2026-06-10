@@ -1,0 +1,307 @@
+"""
+Экран 1: Dashboard — KPI-карточки, график активности 24ч, статус SMTP.
+"""
+import time
+import random
+from datetime import datetime, timedelta
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QSizePolicy, QGridLayout
+)
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QPolygon, QPainterPath
+from PyQt6.QtCore import QPoint, QRectF
+
+from gui.theme import Colors, Typography, Spacing
+
+
+class KpiCard(QFrame):
+    """Карточка KPI с анимацией чисел."""
+
+    def __init__(self, title: str, value: int = 0, color: str = Colors.TEXT_PRIMARY, parent=None):
+        super().__init__(parent)
+        self.setObjectName("kpi_card")
+        self._current_value = value
+        self._target_value = value
+        self._color = color
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(Spacing.SM)
+        layout.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
+
+        self.value_label = QLabel(str(value))
+        self.value_label.setObjectName("label_kpi_value")
+        self.value_label.setStyleSheet(f"color: {color};")
+        layout.addWidget(self.value_label)
+
+        self.title_label = QLabel(title.upper())
+        self.title_label.setObjectName("label_kpi_title")
+        layout.addWidget(self.title_label)
+
+        # Анимация цифр
+        self._anim_timer = QTimer()
+        self._anim_timer.setInterval(30)
+        self._anim_timer.timeout.connect(self._animate_step)
+
+    def set_value(self, value: int, animate: bool = True) -> None:
+        self._target_value = value
+        if animate and abs(value - self._current_value) > 0:
+            self._anim_timer.start()
+        else:
+            self._current_value = value
+            self.value_label.setText(self._format(value))
+
+    def _format(self, v: int) -> str:
+        if v >= 1_000_000:
+            return f"{v/1_000_000:.1f}M"
+        if v >= 1_000:
+            return f"{v/1_000:.1f}K"
+        return str(v)
+
+    def _animate_step(self):
+        diff = self._target_value - self._current_value
+        if abs(diff) < 1:
+            self._current_value = self._target_value
+            self._anim_timer.stop()
+        else:
+            self._current_value += diff * 0.15
+        self.value_label.setText(self._format(int(self._current_value)))
+
+
+class ActivityChart(QWidget):
+    """Линейный график активности за последние 24 часа — кастомный QPainter."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(140)
+        self._data: list[int] = [0] * 24  # по часам
+        self.setObjectName("activity_chart")
+
+    def set_data(self, data: list[int]) -> None:
+        """Устанавливает данные (24 значения — по одному на час)."""
+        self._data = data[:24] if len(data) >= 24 else data + [0] * (24 - len(data))
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+        pad_left = 40
+        pad_right = 10
+        pad_top = 10
+        pad_bottom = 30
+
+        chart_w = w - pad_left - pad_right
+        chart_h = h - pad_top - pad_bottom
+
+        max_val = max(self._data) if self._data and max(self._data) > 0 else 1
+
+        # Фон
+        painter.fillRect(self.rect(), QColor(Colors.BG_SURFACE1))
+
+        # Сетка
+        grid_pen = QPen(QColor(Colors.BORDER))
+        grid_pen.setWidth(1)
+        painter.setPen(grid_pen)
+
+        for i in range(4):
+            y = pad_top + chart_h * i // 3
+            painter.drawLine(pad_left, y, pad_left + chart_w, y)
+
+            # Y-метки
+            val = int(max_val * (3 - i) / 3)
+            painter.setPen(QColor(Colors.TEXT_MUTED))
+            painter.drawText(2, y + 4, f"{val}")
+            painter.setPen(grid_pen)
+
+        # X-метки (часы)
+        hour_now = datetime.now().hour
+        for i in range(0, 24, 6):
+            x = pad_left + chart_w * i // 23
+            hour = (hour_now - 23 + i) % 24
+            painter.setPen(QColor(Colors.TEXT_MUTED))
+            painter.drawText(x - 10, h - 4, f"{hour:02d}:00")
+
+        # Строим точки графика
+        if len(self._data) < 2:
+            return
+
+        points = []
+        for i, val in enumerate(self._data):
+            x = pad_left + chart_w * i // (len(self._data) - 1)
+            y = pad_top + chart_h - int(chart_h * val / max_val)
+            points.append(QPoint(x, y))
+
+        # Градиентная заливка под линией
+        fill_path = QPainterPath()
+        fill_path.moveTo(points[0].x(), pad_top + chart_h)
+        for p in points:
+            fill_path.lineTo(p.x(), p.y())
+        fill_path.lineTo(points[-1].x(), pad_top + chart_h)
+        fill_path.closeSubpath()
+
+        from PyQt6.QtGui import QLinearGradient
+        grad = QLinearGradient(0, pad_top, 0, pad_top + chart_h)
+        grad.setColorAt(0.0, QColor(99, 102, 241, 60))
+        grad.setColorAt(1.0, QColor(99, 102, 241, 0))
+        painter.fillPath(fill_path, QBrush(grad))
+
+        # Линия графика
+        line_pen = QPen(QColor(Colors.ACCENT))
+        line_pen.setWidth(2)
+        line_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        line_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(line_pen)
+
+        for i in range(len(points) - 1):
+            painter.drawLine(points[i], points[i+1])
+
+        # Точки на линии
+        painter.setBrush(QBrush(QColor(Colors.ACCENT)))
+        painter.setPen(QPen(QColor(Colors.BG_SURFACE1), 2))
+        for i, p in enumerate(points):
+            if self._data[i] > 0:
+                painter.drawEllipse(p.x() - 3, p.y() - 3, 6, 6)
+
+        painter.end()
+
+
+class DashboardScreen(QWidget):
+    """Главный экран — KPI + график активности."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._stats = {
+            "sent_today": 0,
+            "success": 0,
+            "errors": 0,
+            "queued": 0,
+        }
+        self._activity_data: list[int] = [0] * 24
+        self._setup_ui()
+
+        # Авто-обновление демо-данных
+        self._refresh_timer = QTimer()
+        self._refresh_timer.setInterval(5000)
+        self._refresh_timer.timeout.connect(self._refresh_demo)
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+        layout.setSpacing(Spacing.LG)
+
+        # ── Заголовок ────────────────────────────
+        header_row = QHBoxLayout()
+        title = QLabel("Обзор")
+        title.setObjectName("section_header")
+        header_row.addWidget(title)
+        header_row.addStretch()
+
+        self.date_label = QLabel(datetime.now().strftime("%d %B %Y, %H:%M"))
+        self.date_label.setObjectName("label_muted")
+        header_row.addWidget(self.date_label)
+
+        layout.addLayout(header_row)
+
+        # Обновляем время
+        clock = QTimer(self)
+        clock.setInterval(60000)
+        clock.timeout.connect(
+            lambda: self.date_label.setText(datetime.now().strftime("%d %B %Y, %H:%M"))
+        )
+        clock.start()
+
+        # ── KPI-карточки ─────────────────────────
+        kpi_grid = QHBoxLayout()
+        kpi_grid.setSpacing(Spacing.MD)
+
+        self.kpi_sent = KpiCard("Отправлено сегодня", 0, Colors.TEXT_PRIMARY)
+        self.kpi_success = KpiCard("Успешно", 0, Colors.SUCCESS)
+        self.kpi_errors = KpiCard("Ошибки", 0, Colors.ERROR)
+        self.kpi_queued = KpiCard("В очереди", 0, Colors.WARNING)
+
+        for card in [self.kpi_sent, self.kpi_success, self.kpi_errors, self.kpi_queued]:
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            card.setFixedHeight(100)
+            kpi_grid.addWidget(card)
+
+        layout.addLayout(kpi_grid)
+
+        # ── График активности ─────────────────────
+        chart_card = QFrame()
+        chart_card.setObjectName("card")
+        chart_layout = QVBoxLayout(chart_card)
+        chart_layout.setSpacing(Spacing.MD)
+
+        chart_header = QHBoxLayout()
+        chart_title = QLabel("Активность за 24 часа")
+        chart_title.setObjectName("label_subtitle")
+        chart_header.addWidget(chart_title)
+        chart_header.addStretch()
+
+        self.chart_stat_label = QLabel("0 писем сегодня")
+        self.chart_stat_label.setObjectName("label_muted")
+        chart_header.addWidget(self.chart_stat_label)
+
+        chart_layout.addLayout(chart_header)
+
+        self.activity_chart = ActivityChart()
+        chart_layout.addWidget(self.activity_chart)
+
+        layout.addWidget(chart_card)
+
+        # ── Последние события ─────────────────────
+        events_card = QFrame()
+        events_card.setObjectName("card")
+        events_layout = QVBoxLayout(events_card)
+        events_layout.setSpacing(Spacing.SM)
+
+        events_title = QLabel("Последние события")
+        events_title.setObjectName("label_subtitle")
+        events_layout.addWidget(events_title)
+
+        self.events_label = QLabel(
+            '<span style="color:#71717A">Нет активных кампаний. '
+            'Запустите рассылку для отображения событий.</span>'
+        )
+        self.events_label.setWordWrap(True)
+        events_layout.addWidget(self.events_label)
+
+        layout.addWidget(events_card)
+        layout.addStretch()
+
+    def update_stats(self, stats: dict) -> None:
+        """Обновляет KPI-карточки."""
+        self._stats = stats
+        self.kpi_sent.set_value(stats.get("sent_today", 0))
+        self.kpi_success.set_value(stats.get("success", 0))
+        self.kpi_errors.set_value(stats.get("errors", 0))
+        self.kpi_queued.set_value(stats.get("queued", 0))
+        total = stats.get("sent_today", 0)
+        self.chart_stat_label.setText(f"{total} писем сегодня")
+
+    def update_activity(self, hourly_data: list[int]) -> None:
+        """Обновляет данные графика."""
+        self._activity_data = hourly_data
+        self.activity_chart.set_data(hourly_data)
+
+    def add_event(self, event_text: str) -> None:
+        """Добавляет событие в лог."""
+        ts = datetime.now().strftime("%H:%M:%S")
+        current = self.events_label.text()
+        if "Нет активных" in current:
+            new_text = f'<span style="color:#A1A1AA">[{ts}]</span> {event_text}'
+        else:
+            new_text = current + f'<br><span style="color:#A1A1AA">[{ts}]</span> {event_text}'
+        self.events_label.setText(new_text)
+
+    def start_demo_mode(self) -> None:
+        """Запускает демо-режим с тестовыми данными."""
+        self._refresh_timer.start()
+        self._refresh_demo()
+
+    def _refresh_demo(self):
+        """Обновляет демо-данные."""
+        pass  # В реальном приложении данные берутся из БД

@@ -1,0 +1,176 @@
+name: Build EmailSenderPro Windows .exe
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 1.0.0)"
+        required: false
+        default: "1.0.0"
+      onefile:
+        description: "Build single .exe (true/false)"
+        required: false
+        default: "false"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # Qt WebEngine требует системные зависимости
+      - name: Install system dependencies
+        run: |
+          choco install -y innosetup
+        shell: pwsh
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip wheel setuptools
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r email_sender_pro/requirements.txt
+          pip install pyinstaller>=6.0
+        working-directory: .
+
+      # PyQt6-WebEngine нужно устанавливать отдельно
+      - name: Install PyQt6 WebEngine
+        run: |
+          pip install PyQt6-Qt6>=6.6.0 PyQt6-WebEngine>=6.6.0
+
+      - name: Determine version
+        id: version
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $ver = "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            $ver = "${{ github.event.inputs.version }}"
+            if ([string]::IsNullOrEmpty($ver)) { $ver = "1.0.0" }
+          }
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+          echo "Building version: $ver"
+        shell: pwsh
+
+      - name: Run build script
+        run: |
+          $onefile = "${{ github.event.inputs.onefile }}"
+          if ($onefile -eq "true") {
+            python build.py --onefile
+          } else {
+            python build.py
+          }
+        working-directory: email_sender_pro
+        shell: pwsh
+
+      - name: Verify build output
+        run: |
+          if (Test-Path "dist\EmailSenderPro\EmailSenderPro.exe") {
+            $size = (Get-Item "dist\EmailSenderPro\EmailSenderPro.exe").Length / 1MB
+            Write-Host "✓ EmailSenderPro.exe found ($($size.ToString("F1")) MB)"
+          } elseif (Test-Path "dist\EmailSenderPro.exe") {
+            $size = (Get-Item "dist\EmailSenderPro.exe").Length / 1MB
+            Write-Host "✓ EmailSenderPro.exe (onefile) found ($($size.ToString("F1")) MB)"
+          } else {
+            Write-Error "✗ Build output not found!"
+            exit 1
+          }
+        working-directory: email_sender_pro
+        shell: pwsh
+
+      # Упаковываем папку в ZIP
+      - name: Package build output
+        run: |
+          $ver = "${{ steps.version.outputs.VERSION }}"
+          if (Test-Path "dist\EmailSenderPro") {
+            Compress-Archive -Path "dist\EmailSenderPro\*" -DestinationPath "dist\EmailSenderPro-$ver-windows.zip"
+            echo "ARTIFACT_PATH=email_sender_pro/dist/EmailSenderPro-$ver-windows.zip" >> $env:GITHUB_OUTPUT
+          } elseif (Test-Path "dist\EmailSenderPro.exe") {
+            Compress-Archive -Path "dist\EmailSenderPro.exe" -DestinationPath "dist\EmailSenderPro-$ver-windows-onefile.zip"
+            echo "ARTIFACT_PATH=email_sender_pro/dist/EmailSenderPro-$ver-windows-onefile.zip" >> $env:GITHUB_OUTPUT
+          }
+        id: package
+        working-directory: email_sender_pro
+        shell: pwsh
+
+      # Инсталлятор через Inno Setup (если dist/EmailSenderPro папка)
+      - name: Build Inno Setup installer
+        if: github.event.inputs.onefile != 'true'
+        run: |
+          if (Test-Path "dist\EmailSenderPro\EmailSenderPro.exe") {
+            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\setup.iss"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "Inno Setup failed (non-fatal)"
+            } else {
+              Write-Host "✓ Installer created"
+            }
+          } else {
+            Write-Warning "Skipping installer: dist folder not found"
+          }
+        working-directory: email_sender_pro
+        shell: pwsh
+        continue-on-error: true
+
+      - name: Upload build artifact (ZIP)
+        uses: actions/upload-artifact@v4
+        with:
+          name: EmailSenderPro-${{ steps.version.outputs.VERSION }}-windows
+          path: |
+            email_sender_pro/dist/*.zip
+          retention-days: 30
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: EmailSenderPro-${{ steps.version.outputs.VERSION }}-installer
+          path: |
+            email_sender_pro/dist/installer/*.exe
+          retention-days: 30
+
+      # Создаём GitHub Release при теге
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Email Sender Pro ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          files: |
+            email_sender_pro/dist/*.zip
+            email_sender_pro/dist/installer/*.exe
+          body: |
+            ## Email Sender Pro ${{ steps.version.outputs.VERSION }}
+
+            ### Установка
+            1. Скачайте `EmailSenderPro-${{ steps.version.outputs.VERSION }}-windows.zip`
+            2. Распакуйте архив
+            3. Запустите `EmailSenderPro.exe`
+            4. Введите лицензионный ключ на экране активации
+
+            ### Или используйте установщик
+            Скачайте `EmailSenderPro-${{ steps.version.outputs.VERSION }}-Setup.exe` для полной установки.
+
+            ### Требования
+            - Windows 10 / 11 (x64)
+            - 200 MB свободного места
+
+            ### Что нового
+            - Полный GUI: 7 экранов
+            - SMTP-движок с ротацией аккаунтов
+            - Спам-анализатор
+            - Warm-up планировщик
+            - Аналитика с экспортом PDF/CSV
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

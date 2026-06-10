@@ -1,0 +1,134 @@
+{
+  "version": "1.0",
+  "categories": {
+    "money": {
+      "weight": 2,
+      "words": [
+        "free money", "cash bonus", "earn money fast", "make money now",
+        "money back guarantee", "risk free", "no risk", "double your money",
+        "million dollars", "unlimited income", "financial freedom",
+        "get rich quick", "работай на дому", "заработок без вложений",
+        "деньги сразу", "бесплатные деньги", "пассивный доход", "быстрые деньги",
+        "extra income", "additional income", "earn extra cash"
+      ]
+    },
+    "urgency": {
+      "weight": 1.5,
+      "words": [
+        "act now", "limited time", "expires today", "don't delete",
+        "urgent", "important information", "one time offer", "never before",
+        "today only", "call now", "apply now", "get it now",
+        "срочно", "только сегодня", "не упустите", "осталось мало",
+        "ограниченное время", "успейте", "последний шанс", "истекает сегодня"
+      ]
+    },
+    "casino_gambling": {
+      "weight": 3,
+      "words": [
+        "casino", "poker", "slots", "jackpot", "gambling", "bet now",
+        "win big", "lottery winner", "sweepstakes", "prize winner",
+        "казино", "покер", "ставки", "джекпот", "выиграй", "лотерея",
+        "бесплатные ставки", "выигрыш гарантирован"
+      ]
+    },
+    "adult": {
+      "weight": 5,
+      "words": [
+        "adult content", "xxx", "hot singles", "meet singles",
+        "dating offer", "hookup"
+      ]
+    },
+    "pharma": {
+      "weight": 4,
+      "words": [
+        "cheap meds", "cheap pills", "no prescription", "online pharmacy",
+        "buy drugs", "buy pills", "buy meds", "cheap drugs",
+        "cheap pharmacy", "medications without prescription"
+      ]
+    },
+    "mortgage_loans": {
+      "weight": 2.5,
+      "words": [
+        "mortgage", "refinance", "home loan", "bad credit ok",
+        "credit card offers", "pre-approved", "pre approved",
+        "lowest rate", "consolidate debt", "кредит без отказа",
+        "займ без проверки", "мгновенный кредит", "деньги в долг"
+      ]
+    },
+    "business_opportunity": {
+      "weight": 2,
+      "words": [
+        "business opportunity", "home based business", "work from home",
+        "be your own boss", "mlm", "network marketing", "affiliate",
+        "referral program", "join our team", "join millions",
+        "домашний бизнес", "многоуровневый маркетинг", "сетевой маркетинг",
+        "партнёрская программа", "реферальная программа"
+      ]
+    },
+    "free_offers": {
+      "weight": 1,
+      "words": [
+        "free access", "free consultation", "free gift", "free info",
+        "free membership", "free money", "free offer", "free preview",
+        "free quote", "free sample", "free trial", "free!", "f-r-e-e",
+        "бесплатно", "даром", "бесплатный доступ", "бесплатный пробный",
+        "бесплатная консультация", "бесплатный подарок"
+      ]
+    },
+    "spam_words": {
+      "weight": 1.5,
+      "words": [
+        "bulk email", "bulk mail", "mass email", "opt in", "opt-in",
+        "opt out", "unsolicited", "increase sales", "increase traffic",
+        "marketing solution", "email marketing", "direct email",
+        "мгновенные продажи", "увеличить продажи", "спам", "массовая рассылка"
+      ]
+    },
+    "overused_phrases": {
+      "weight": 0.5,
+      "words": [
+        "amazing", "bargain", "best price", "cheap", "click here",
+        "compare rates", "deal", "dear friend", "discount",
+        "exclusive deal", "extra income", "fantastic deal",
+        "guaranteed", "incredible deal", "lowest price",
+        "miracle", "opportunity", "outstanding", "save big",
+        "special promotion", "this isn't spam", "winner",
+        "невероятное предложение", "уникальная возможность",
+        "специальное предложение", "лучшая цена", "скидки",
+        "экономия", "дешевле не найдёте"
+      ]
+    }
+  },
+  "subject_patterns": [
+    "re: \\(no subject\\)",
+    "fw: fw: fw:",
+    "your account",
+    "verify your",
+    "confirm your",
+    "winner",
+    "congratulations",
+    "you've been selected",
+    "important notice",
+    "attention required",
+    "action required",
+    "ваш аккаунт",
+    "подтвердите",
+    "поздравляем",
+    "вы выиграли",
+    "срочно",
+    "важное уведомление"
+  ],
+  "safe_words": [
+    "unsubscribe", "privacy policy", "terms of service",
+    "отписаться", "политика конфиденциальности", "условия использования",
+    "view in browser", "click to view", "newsletter",
+    "sent to", "you are receiving"
+  ],
+  "headers_to_include": [
+    "List-Unsubscribe",
+    "List-Unsubscribe-Post",
+    "List-Id",
+    "Precedence: bulk",
+    "X-Mailer"
+  ]
+}
