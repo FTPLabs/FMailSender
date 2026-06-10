@@ -1,6 +1,6 @@
 """
-Скрипт сборки EmailSenderPro в .exe через PyInstaller.
-Использование: python build.py [--onefile] [--clean]
+EmailSenderPro build script — compiles to .exe via PyInstaller.
+Usage: python build.py [--onefile] [--clean]
 """
 import os
 import sys
@@ -20,7 +20,7 @@ MAIN_PY = ROOT / "main.py"
 
 
 def run(cmd: list, cwd: Path = None) -> int:
-    print(f"\n→ {' '.join(str(c) for c in cmd)}")
+    print(f"\n-> {' '.join(str(c) for c in cmd)}")
     result = subprocess.run(cmd, cwd=cwd or ROOT)
     return result.returncode
 
@@ -29,7 +29,7 @@ def clean():
     for d in [DIST, BUILD]:
         if d.exists():
             shutil.rmtree(d)
-            print(f"✓ Удалена директория: {d}")
+            print(f"Removed: {d}")
 
 
 def generate_version_info():
@@ -61,44 +61,39 @@ def generate_version_info():
     path = ROOT / "version_info.txt"
     with open(path, "w") as f:
         f.write(content)
-    print("✓ version_info.txt создан")
+    print("version_info.txt created")
     return path
 
 
 def check_requirements():
     try:
         import PyInstaller
-        print(f"✓ PyInstaller {PyInstaller.__version__}")
+        print(f"PyInstaller {PyInstaller.__version__} OK")
     except ImportError:
-        print("Устанавливаю PyInstaller...")
+        print("Installing PyInstaller...")
         run([sys.executable, "-m", "pip", "install", "pyinstaller>=6.0"])
 
 
 def build(onefile: bool = False):
-    print(f"\n{'='*60}")
+    print("=" * 60)
     print(f"  Email Sender Pro v{APP_VERSION}")
-    print(f"  Режим: {'Single EXE' if onefile else 'Folder'}")
-    print(f"{'='*60}\n")
+    print(f"  Mode: {'Single EXE' if onefile else 'Folder'}")
+    print("=" * 60)
 
     check_requirements()
-
-    # Версионная информация
     ver_file = generate_version_info()
 
-    # Аргументы PyInstaller
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--name", APP_NAME,
-        "--windowed",                # Без консоли
+        "--windowed",
         "--noconfirm",
         "--clean",
         "--distpath", str(DIST),
         "--workpath", str(BUILD),
-        # Данные приложения
         "--add-data", f"{ROOT / 'assets'}{os.pathsep}assets",
         "--add-data", f"{ROOT / 'i18n'}{os.pathsep}i18n",
         "--add-data", f"{ROOT / 'data'}{os.pathsep}data",
-        # Hidden imports
         "--hidden-import", "PyQt6.QtWebEngineWidgets",
         "--hidden-import", "PyQt6.QtWebEngineCore",
         "--hidden-import", "PyQt6.QtSvgWidgets",
@@ -122,7 +117,6 @@ def build(onefile: bool = False):
         "--hidden-import", "chardet",
         "--hidden-import", "certifi",
         "--hidden-import", "psutil",
-        # Исключения (уменьшает размер)
         "--exclude-module", "tkinter",
         "--exclude-module", "matplotlib",
         "--exclude-module", "numpy",
@@ -130,35 +124,26 @@ def build(onefile: bool = False):
         "--exclude-module", "scipy",
         "--exclude-module", "PIL",
         "--exclude-module", "cv2",
-        # Версия
         "--version-file", str(ver_file),
     ]
 
-    # Иконка (только если файл существует)
     if ICON_PATH.exists():
         cmd += ["--icon", str(ICON_PATH)]
     else:
-        print(f"⚠ Иконка не найдена: {ICON_PATH} — собираем без иконки")
+        print(f"WARNING: icon not found at {ICON_PATH} — building without icon")
 
-    # Single EXE или папка
     if onefile:
         cmd.append("--onefile")
 
-    # UPX (если доступен — сжимает exe)
-    cmd.append("--upx-dir")
-    cmd.append(".")  # PyInstaller сам найдёт или пропустит
-
-    # Главный файл
     cmd.append(str(MAIN_PY))
 
-    print("\nЗапуск PyInstaller...")
+    print("\nRunning PyInstaller...")
     code = run(cmd)
 
     if code != 0:
-        print(f"\n✗ Сборка завершилась с ошибкой (код {code})")
+        print(f"\nBuild FAILED with exit code {code}")
         sys.exit(code)
 
-    # Проверяем результат
     if onefile:
         exe = DIST / f"{APP_NAME}.exe"
     else:
@@ -166,22 +151,22 @@ def build(onefile: bool = False):
 
     if exe.exists():
         size_mb = exe.stat().st_size / 1024 / 1024
-        print(f"\n{'='*60}")
-        print(f"✓ Сборка успешна!")
-        print(f"✓ Файл: {exe}")
-        print(f"✓ Размер: {size_mb:.1f} MB")
-        print(f"{'='*60}\n")
+        print("=" * 60)
+        print(f"Build SUCCESS!")
+        print(f"Output: {exe}")
+        print(f"Size:   {size_mb:.1f} MB")
+        print("=" * 60)
     else:
-        print(f"\n✗ EXE не найден: {exe}")
+        print(f"\nEXE not found at: {exe}")
         sys.exit(1)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Email Sender Pro Builder")
     parser.add_argument("--onefile", action="store_true",
-                        help="Собрать в один .exe файл")
+                        help="Build a single .exe file")
     parser.add_argument("--clean", action="store_true",
-                        help="Очистить папки сборки перед компиляцией")
+                        help="Clean build directories before build")
     args = parser.parse_args()
 
     if args.clean:
