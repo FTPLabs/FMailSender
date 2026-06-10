@@ -20,7 +20,7 @@ MAIN_PY = ROOT / "main.py"
 
 
 def run(cmd: list, cwd: Path = None) -> int:
-    print(f"\n-> {' '.join(str(c) for c in cmd)}")
+    print(f"\n-> {chr(32).join(str(c) for c in cmd)}")
     result = subprocess.run(cmd, cwd=cwd or ROOT)
     return result.returncode
 
@@ -66,17 +66,16 @@ def generate_version_info():
 
 
 def ensure_data_dirs():
-    """Create required data directories if they don't exist."""
-    dirs = {
-        ROOT / "assets" / "icons": None,
-        ROOT / "assets" / "fonts": None,
-        ROOT / "i18n": None,
-        ROOT / "data": None,
-    }
+    """Create required data directories if they do not exist."""
+    dirs = [
+        ROOT / "assets" / "icons",
+        ROOT / "assets" / "fonts",
+        ROOT / "i18n",
+        ROOT / "data",
+    ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
 
-    # Minimal spam_words.json if missing
     spam_json = ROOT / "data" / "spam_words.json"
     if not spam_json.exists():
         spam_json.write_text('["free", "win", "prize", "click here", "buy now"]')
@@ -104,7 +103,6 @@ def build(onefile: bool = False):
     ensure_data_dirs()
     ver_file = generate_version_info()
 
-    # Build --add-data flags only for existing directories
     data_dirs = [
         (ROOT / "assets", "assets"),
         (ROOT / "i18n",   "i18n"),
@@ -128,8 +126,6 @@ def build(onefile: bool = False):
             print(f"WARNING: skipping missing dir {src_dir}")
 
     cmd += [
-        "--hidden-import", "PyQt6.QtWebEngineWidgets",
-        "--hidden-import", "PyQt6.QtWebEngineCore",
         "--hidden-import", "PyQt6.QtSvgWidgets",
         "--hidden-import", "PyQt6.QtPrintSupport",
         "--hidden-import", "PyQt6.sip",
@@ -186,7 +182,7 @@ def build(onefile: bool = False):
     if exe.exists():
         size_mb = exe.stat().st_size / 1024 / 1024
         print("=" * 60)
-        print(f"Build SUCCESS!")
+        print("Build SUCCESS!")
         print(f"Output: {exe}")
         print(f"Size:   {size_mb:.1f} MB")
         print("=" * 60)
@@ -197,10 +193,8 @@ def build(onefile: bool = False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Email Sender Pro Builder")
-    parser.add_argument("--onefile", action="store_true",
-                        help="Build a single .exe file")
-    parser.add_argument("--clean", action="store_true",
-                        help="Clean build directories before build")
+    parser.add_argument("--onefile", action="store_true", help="Build single .exe")
+    parser.add_argument("--clean", action="store_true", help="Clean before build")
     args = parser.parse_args()
 
     if args.clean:
