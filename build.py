@@ -65,6 +65,26 @@ def generate_version_info():
     return path
 
 
+def ensure_data_dirs():
+    """Create required data directories if they don't exist."""
+    dirs = {
+        ROOT / "assets" / "icons": None,
+        ROOT / "assets" / "fonts": None,
+        ROOT / "i18n": None,
+        ROOT / "data": None,
+    }
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+
+    # Minimal spam_words.json if missing
+    spam_json = ROOT / "data" / "spam_words.json"
+    if not spam_json.exists():
+        spam_json.write_text('["free", "win", "prize", "click here", "buy now"]')
+        print("Created placeholder data/spam_words.json")
+
+    print("Data directories ready")
+
+
 def check_requirements():
     try:
         import PyInstaller
@@ -81,7 +101,15 @@ def build(onefile: bool = False):
     print("=" * 60)
 
     check_requirements()
+    ensure_data_dirs()
     ver_file = generate_version_info()
+
+    # Build --add-data flags only for existing directories
+    data_dirs = [
+        (ROOT / "assets", "assets"),
+        (ROOT / "i18n",   "i18n"),
+        (ROOT / "data",   "data"),
+    ]
 
     cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -91,9 +119,15 @@ def build(onefile: bool = False):
         "--clean",
         "--distpath", str(DIST),
         "--workpath", str(BUILD),
-        "--add-data", f"{ROOT / 'assets'}{os.pathsep}assets",
-        "--add-data", f"{ROOT / 'i18n'}{os.pathsep}i18n",
-        "--add-data", f"{ROOT / 'data'}{os.pathsep}data",
+    ]
+
+    for src_dir, dest_name in data_dirs:
+        if src_dir.exists():
+            cmd += ["--add-data", f"{src_dir}{os.pathsep}{dest_name}"]
+        else:
+            print(f"WARNING: skipping missing dir {src_dir}")
+
+    cmd += [
         "--hidden-import", "PyQt6.QtWebEngineWidgets",
         "--hidden-import", "PyQt6.QtWebEngineCore",
         "--hidden-import", "PyQt6.QtSvgWidgets",
