@@ -20,7 +20,7 @@ MAIN_PY = ROOT / "main.py"
 
 
 def run(cmd: list, cwd: Path = None) -> int:
-    print(f"\n-> {chr(32).join(str(c) for c in cmd)}")
+    print("\n-> " + " ".join(str(c) for c in cmd))
     result = subprocess.run(cmd, cwd=cwd or ROOT)
     return result.returncode
 
@@ -66,7 +66,6 @@ def generate_version_info():
 
 
 def ensure_data_dirs():
-    """Create required data directories if they do not exist."""
     dirs = [
         ROOT / "assets" / "icons",
         ROOT / "assets" / "fonts",
@@ -89,7 +88,6 @@ def check_requirements():
         import PyInstaller
         print(f"PyInstaller {PyInstaller.__version__} OK")
     except ImportError:
-        print("Installing PyInstaller...")
         run([sys.executable, "-m", "pip", "install", "pyinstaller>=6.0"])
 
 
@@ -125,12 +123,17 @@ def build(onefile: bool = False):
         else:
             print(f"WARNING: skipping missing dir {src_dir}")
 
+    # Collect all submodules for our own packages
+    cmd += ["--collect-submodules", "core"]
+    cmd += ["--collect-submodules", "gui"]
+
     cmd += [
         "--hidden-import", "PyQt6.QtSvgWidgets",
         "--hidden-import", "PyQt6.QtPrintSupport",
         "--hidden-import", "PyQt6.sip",
         "--hidden-import", "aiosmtplib",
         "--hidden-import", "cryptography",
+        "--hidden-import", "cryptography.fernet",
         "--hidden-import", "cryptography.hazmat.primitives",
         "--hidden-import", "cryptography.hazmat.backends",
         "--hidden-import", "cryptography.hazmat.backends.openssl",
@@ -147,6 +150,8 @@ def build(onefile: bool = False):
         "--hidden-import", "chardet",
         "--hidden-import", "certifi",
         "--hidden-import", "psutil",
+        "--hidden-import", "requests",
+        "--hidden-import", "wmi",
         "--exclude-module", "tkinter",
         "--exclude-module", "matplotlib",
         "--exclude-module", "numpy",
@@ -160,7 +165,7 @@ def build(onefile: bool = False):
     if ICON_PATH.exists():
         cmd += ["--icon", str(ICON_PATH)]
     else:
-        print(f"WARNING: icon not found at {ICON_PATH} — building without icon")
+        print(f"WARNING: icon not found at {ICON_PATH}")
 
     if onefile:
         cmd.append("--onefile")
@@ -171,13 +176,10 @@ def build(onefile: bool = False):
     code = run(cmd)
 
     if code != 0:
-        print(f"\nBuild FAILED with exit code {code}")
+        print(f"\nBuild FAILED (exit {code})")
         sys.exit(code)
 
-    if onefile:
-        exe = DIST / f"{APP_NAME}.exe"
-    else:
-        exe = DIST / APP_NAME / f"{APP_NAME}.exe"
+    exe = DIST / f"{APP_NAME}.exe" if onefile else DIST / APP_NAME / f"{APP_NAME}.exe"
 
     if exe.exists():
         size_mb = exe.stat().st_size / 1024 / 1024
@@ -193,11 +195,9 @@ def build(onefile: bool = False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Email Sender Pro Builder")
-    parser.add_argument("--onefile", action="store_true", help="Build single .exe")
-    parser.add_argument("--clean", action="store_true", help="Clean before build")
+    parser.add_argument("--onefile", action="store_true")
+    parser.add_argument("--clean", action="store_true")
     args = parser.parse_args()
-
     if args.clean:
         clean()
-
     build(onefile=args.onefile)
