@@ -239,104 +239,104 @@ class RecipientsScreen(QWidget):
 
     # ── Drag & Drop ─────────────────────────────────────────────────────────
 
-      def dragEnterEvent(self, event):
-          if event.mimeData().hasUrls():
-              for url in event.mimeData().urls():
-                  ext = url.toLocalFile().lower().rsplit('.', 1)[-1]
-                  if ext in ('csv', 'txt', 'tsv', 'dat', 'xlsx'):
-                      event.acceptProposedAction()
-                      return
-          event.ignore()
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                ext = url.toLocalFile().lower().rsplit('.', 1)[-1]
+                if ext in ('csv', 'txt', 'tsv', 'dat', 'xlsx'):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
 
-      def dragMoveEvent(self, event):
-          if event.mimeData().hasUrls():
-              event.acceptProposedAction()
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
 
-      def dropEvent(self, event):
-          for url in event.mimeData().urls():
-              path = url.toLocalFile()
-              if not path:
-                  continue
-              ext = path.lower().rsplit('.', 1)[-1]
-              try:
-                  if ext in ('csv', 'txt', 'tsv', 'dat'):
-                      for enc in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
+    def dropEvent(self, event):
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if not path:
+                continue
+            ext = path.lower().rsplit('.', 1)[-1]
+            try:
+                if ext in ('csv', 'txt', 'tsv', 'dat'):
+                    for enc in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
                           try:
                               sample = open(path, encoding=enc, errors="replace").read(2048)
                               break
                           except Exception:
                               continue
-                      if self._looks_like_credential_list(sample):
+                    if self._looks_like_credential_list(sample):
                           self._import_credential_list(path)
-                      else:
+                    else:
                           self._import_csv(path)
-                  elif ext == 'xlsx':
-                      self._import_xlsx(path)
-              except Exception as e:
-                  QMessageBox.critical(self, "Ошибка импорта", str(e))
-          event.acceptProposedAction()
+                elif ext == 'xlsx':
+                    self._import_xlsx(path)
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка импорта", str(e))
+        event.acceptProposedAction()
 
-      def _clear_all(self):
-          if not self._recipients:
-              return
-          reply = QMessageBox.question(
-              self, "Очистить список",
-              f"Удалить всех {len(self._recipients)} получателей?",
-              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-          )
-          if reply == QMessageBox.StandardButton.Yes:
-              self._recipients.clear()
-              self._refresh_table()
-              self._emit_list()
+    def _clear_all(self):
+        if not self._recipients:
+            return
+        reply = QMessageBox.question(
+            self, "Очистить список",
+            f"Удалить всех {len(self._recipients)} получателей?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._recipients.clear()
+            self._refresh_table()
+            self._emit_list()
 
-      def _delete_invalid(self):
-          unsubscribed = _load_unsubscribe()
-          before = len(self._recipients)
-          self._recipients = [
-              r for r in self._recipients
-              if validate_email_format(r.email) and r.email.lower() not in unsubscribed
-          ]
-          removed = before - len(self._recipients)
-          self._refresh_table()
-          self._emit_list()
-          QMessageBox.information(self, "Готово", f"Удалено: {removed} невалидных/отписавшихся адресов")
+    def _delete_invalid(self):
+        unsubscribed = _load_unsubscribe()
+        before = len(self._recipients)
+        self._recipients = [
+            r for r in self._recipients
+            if validate_email_format(r.email) and r.email.lower() not in unsubscribed
+        ]
+        removed = before - len(self._recipients)
+        self._refresh_table()
+        self._emit_list()
+        QMessageBox.information(self, "Готово", f"Удалено: {removed} невалидных/отписавшихся адресов")
 
-      def _import_file(self):
-          path, _ = QFileDialog.getOpenFileName(
-              self, "Импорт получателей", "",
-              "Все поддерживаемые (*.csv *.xlsx *.txt *.tsv *.dat);;CSV (*.csv);;Excel (*.xlsx);;TXT/DAT (*.txt *.tsv *.dat);;Все файлы (*)"
-          )
-          if not path:
-              return
+    def _import_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Импорт получателей", "",
+            "Все поддерживаемые (*.csv *.xlsx *.txt *.tsv *.dat);;CSV (*.csv);;Excel (*.xlsx);;TXT/DAT (*.txt *.tsv *.dat);;Все файлы (*)"
+        )
+        if not path:
+            return
 
-          ext = Path(path).suffix.lower()
-          try:
-              if ext in (".csv", ".txt", ".tsv", ".dat", ""):
-                  for enc in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
-                      try:
+        ext = Path(path).suffix.lower()
+        try:
+            if ext in (".csv", ".txt", ".tsv", ".dat", ""):
+                for enc in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
+                    try:
                           sample = open(path, encoding=enc, errors="replace").read(2048)
                           break
-                      except Exception:
+                    except Exception:
                           continue
-                  if self._looks_like_credential_list(sample):
-                      self._import_credential_list(path)
-                  else:
-                      self._import_csv(path)
-              elif ext == ".xlsx":
-                  self._import_xlsx(path)
-          except Exception as e:
-              QMessageBox.critical(self, "Ошибка импорта", str(e))
+                if self._looks_like_credential_list(sample):
+                    self._import_credential_list(path)
+                else:
+                    self._import_csv(path)
+            elif ext == ".xlsx":
+                self._import_xlsx(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка импорта", str(e))
 
-      def _looks_like_credential_list(self, sample: str) -> bool:
-          """Эвристика: большинство строк — email:пароль без заголовка CSV."""
-          lines = [l.strip() for l in sample.splitlines() if l.strip() and not l.startswith('#')][:20]
-          if not lines:
-              return False
-          cred_count = 0
-          for line in lines:
-              for sep in (':', ';', '|'):
-                  parts = line.split(sep, 1)
-                  if len(parts) == 2 and re.match(r'^[^@]+@[^@]+\.[^@]+
+    def _looks_like_credential_list(self, sample: str) -> bool:
+        """Эвристика: большинство строк — email:пароль без заголовка CSV."""
+        lines = [l.strip() for l in sample.splitlines() if l.strip() and not l.startswith('#')][:20]
+        if not lines:
+            return False
+        cred_count = 0
+        for line in lines:
+            for sep in (':', ';', '|'):
+                parts = line.split(sep, 1)
+                if len(parts) == 2 and re.match(r'^[^@]+@[^@]+\.[^@]+
 
     def _import_csv(self, path: str):
         # Автодетект разделителя
@@ -627,34 +627,34 @@ def _stat_label(text: str, color: str = Colors.TEXT_SECONDARY) -> QLabel:
     lbl.setContentsMargins(8, 4, 8, 4)
     return lbl
 , parts[0].strip()):
-                      cred_count += 1
-                      break
-          return cred_count > len(lines) * 0.5
+                    cred_count += 1
+                    break
+        return cred_count > len(lines) * 0.5
 
-      def _import_credential_list(self, path: str):
-          """Импортирует email из файлов типа email:пароль — пароли игнорируются."""
-          text = ""
-          for enc in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
-              try:
-                  text = open(path, encoding=enc, errors="replace").read()
-                  break
-              except Exception:
-                  continue
-          recipients = []
-          seen: set = set()
-          skipped = 0
-          for line in text.splitlines():
-              line = line.strip()
-              if not line or line.startswith('#'):
-                  continue
-              email = None
-              for sep in (':', ';', '|', ','):
-                  if sep in line:
-                      email = line.split(sep, 1)[0].strip().lower()
-                      break
-              if not email:
-                  email = line.lower()
-              if not re.match(r'^[^@]+@[^@]+\.[^@]+
+    def _import_credential_list(self, path: str):
+        """Импортирует email из файлов типа email:пароль — пароли игнорируются."""
+        text = ""
+        for enc in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
+            try:
+                text = open(path, encoding=enc, errors="replace").read()
+                break
+            except Exception:
+                continue
+        recipients = []
+        seen: set = set()
+        skipped = 0
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            email = None
+            for sep in (':', ';', '|', ','):
+                if sep in line:
+                    email = line.split(sep, 1)[0].strip().lower()
+                    break
+            if not email:
+                email = line.lower()
+            if not re.match(r'^[^@]+@[^@]+\.[^@]+
 
     def _import_csv(self, path: str):
         # Автодетект разделителя
@@ -945,20 +945,20 @@ def _stat_label(text: str, color: str = Colors.TEXT_SECONDARY) -> QLabel:
     lbl.setContentsMargins(8, 4, 8, 4)
     return lbl
 , email):
-                  skipped += 1
-                  continue
-              if email in seen:
-                  continue
-              seen.add(email)
-              recipients.append(Recipient(email=email))
-          if not recipients:
-              QMessageBox.warning(self, "Импорт", "Не найдено валидных email-адресов")
-              return
-          added = self._merge_recipients(recipients)
-          QMessageBox.information(
-              self, "Импорт завершён",
-              f"Импортировано: {added} адресов\nПропущено/дублей: {len(recipients) - added + skipped}"
-          )
+                skipped += 1
+                continue
+            if email in seen:
+                continue
+            seen.add(email)
+            recipients.append(Recipient(email=email))
+        if not recipients:
+            QMessageBox.warning(self, "Импорт", "Не найдено валидных email-адресов")
+            return
+        added = self._merge_recipients(recipients)
+        QMessageBox.information(
+            self, "Импорт завершён",
+            f"Импортировано: {added} адресов\nПропущено/дублей: {len(recipients) - added + skipped}"
+        )
 
     def _import_csv(self, path: str):
         # Автодетект разделителя
