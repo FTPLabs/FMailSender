@@ -378,7 +378,12 @@ class ComposeScreen(QWidget):
         preview_header.addWidget(refresh_btn)
         preview_layout.addLayout(preview_header)
 
-        self.preview = QWebEngineView()
+        if _HAS_WEBENGINE:
+            self.preview = QWebEngineView()
+        else:
+            from PyQt6.QtWidgets import QTextBrowser
+            self.preview = QTextBrowser()
+            self.preview.setOpenExternalLinks(True)
         self.preview.setMinimumWidth(360)
         preview_layout.addWidget(self.preview)
 
@@ -432,7 +437,7 @@ a {{ color: #6366F1; }}
 </html>"""
 
         if self.preview is not None:
-              self.preview.setHtml(html)
+            self.preview.setHtml(html)
 
     def _add_attachment(self):
         paths, _ = QFileDialog.getOpenFileNames(
