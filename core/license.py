@@ -263,7 +263,10 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
             "last_online": time.time(),
             "is_demo": True,
         }
-        _save_license_data(demo_data)
+        try:
+            _save_license_data(demo_data)
+        except Exception as e:
+            logger.warning(f"Could not persist demo license: {e}")
         if progress_callback:
             progress_callback(4, "Демо-лицензия активирована!")
         return True, "Демо-лицензия активирована! (Ключ: ESP-DEMO0-DEMO0-DEMO0-DEMO0)"
