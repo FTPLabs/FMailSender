@@ -8,7 +8,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Fix Windows cp1252 console encoding
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -18,7 +17,6 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 ROOT = Path(__file__).parent
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
-SPEC = ROOT / "FMailSenderPro.spec"
 
 ICON_PATH = ROOT / "assets" / "images" / "fmail_logo.ico"
 ICON_ARG = f"--icon={ICON_PATH}" if ICON_PATH.exists() else ""
@@ -37,14 +35,23 @@ PYINSTALLER_CMD = [
     "--hidden-import", "PyQt6.QtWidgets",
     "--hidden-import", "PyQt6.QtCore",
     "--hidden-import", "PyQt6.QtGui",
+    "--hidden-import", "PyQt6.QtSvg",
     "--hidden-import", "PyQt6.QtSvgWidgets",
+    "--hidden-import", "PyQt6.QtNetwork",
     "--hidden-import", "aiosmtplib",
     "--hidden-import", "cryptography",
+    "--hidden-import", "cryptography.fernet",
+    "--hidden-import", "cryptography.hazmat.primitives",
     "--hidden-import", "jwt",
     "--hidden-import", "requests",
+    "--hidden-import", "dns",
     "--hidden-import", "dns.resolver",
     "--hidden-import", "dns.exception",
+    "--hidden-import", "email.mime.multipart",
+    "--hidden-import", "email.mime.text",
+    "--hidden-import", "email.mime.base",
     "--collect-all", "PyQt6",
+    "--collect-all", "cryptography",
     "--add-data", f"{ROOT / 'assets'}:assets",
     "--add-data", f"{ROOT / 'data'}:data",
     "--add-data", f"{ROOT / 'templates'}:templates",
@@ -54,12 +61,11 @@ PYINSTALLER_CMD = [
 if ICON_ARG:
     PYINSTALLER_CMD.append(ICON_ARG)
 
-# Версионная информация для Windows
-VERSION_INFO = """
+VERSION_INFO_CONTENT = """
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 2, 0, 0),
-    prodvers=(2, 2, 0, 0),
+    filevers=(2, 3, 0, 0),
+    prodvers=(2, 3, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -68,57 +74,68 @@ VSVersionInfo(
     date=(0, 0)
   ),
   kids=[
-    StringFileInfo([
-      StringTable(
+    StringFileInfo(
+      [StringTable(
         u'040904B0',
         [StringStruct(u'CompanyName', u'FTPLabs'),
          StringStruct(u'FileDescription', u'FMail Sender Pro'),
-         StringStruct(u'FileVersion', u'2.2.0.0'),
+         StringStruct(u'FileVersion', u'2.3.0.0'),
          StringStruct(u'InternalName', u'FMailSenderPro'),
          StringStruct(u'LegalCopyright', u'Copyright (C) 2026 FTPLabs'),
          StringStruct(u'OriginalFilename', u'FMailSenderPro.exe'),
          StringStruct(u'ProductName', u'FMail Sender Pro'),
-         StringStruct(u'ProductVersion', u'2.2.0.0')])
-    ]),
+         StringStruct(u'ProductVersion', u'2.3.0.0')]
+      )]
+    ),
     VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
   ]
 )
 """
 
-VERSION_FILE = BUILD / "version_info.txt"
+VERSION_FILE = ROOT / "version_info.txt"
 
 
 def main():
     print("=" * 60)
-    print("FMail Sender Pro — Build System")
+    print("  FMail Sender Pro — Build Script")
     print("=" * 60)
 
-    for d in [DIST, BUILD]:
-        d.mkdir(parents=True, exist_ok=True)
+    # Clean previous build
+    if DIST.exists():
+        shutil.rmtree(DIST)
+    if BUILD.exists():
+        shutil.rmtree(BUILD)
+    print("[1/4] Cleaned previous build artifacts")
 
-    BUILD.mkdir(parents=True, exist_ok=True)
-    VERSION_FILE.write_text(VERSION_INFO, encoding="utf-8")
+    # Write version info
+    VERSION_FILE.write_text(VERSION_INFO_CONTENT, encoding="utf-8")
+    cmd = PYINSTALLER_CMD + [f"--version-file={VERSION_FILE}"]
+    print("[2/4] Running PyInstaller...")
 
-    cmd = list(PYINSTALLER_CMD)
-    cmd += ["--version-file", str(VERSION_FILE)]
-    cmd.append(str(ROOT / "main.py"))
-
-    print(f"\n📦 Запуск PyInstaller...")
-    result = subprocess.run(cmd, cwd=str(ROOT), capture_output=False)
-
+    result = subprocess.run(cmd, cwd=ROOT)
     if result.returncode != 0:
-        print("\n❌ Сборка завершилась с ошибкой")
-        sys.exit(result.returncode)
+        print("❌ PyInstaller failed!")
+        sys.exit(1)
 
     exe = DIST / "FMailSenderPro.exe"
     if exe.exists():
         size_mb = exe.stat().st_size / 1024 / 1024
-        print(f"\n✅ Сборка завершена!")
-        print(f"   Файл: {exe}")
-        print(f"   Размер: {size_mb:.1f} MB")
+        print(f"[3/4] Build successful: {exe}")
+        print(f"      Size: {size_mb:.1f} MB")
     else:
-        print("\n❌ EXE файл не найден")
+        print("❌ .exe not found after build!")
         sys.exit(1)
+
+    # Clean temp files
+    if VERSION_FILE.exists():
+        VERSION_FILE.unlink()
+    spec = ROOT / "FMailSenderPro.spec"
+    if spec.exists():
+        spec.unlink()
+    print("[4/4] Cleaned temporary files")
+
+    print("\n✅ Build complete!")
+    print(f"   Output: {exe}")
 
 
 if __name__ == "__main__":
