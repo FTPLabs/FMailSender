@@ -75,12 +75,13 @@ jobs:
             if ($LASTEXITCODE -ne 0) { Write-Error "SyntaxError in: $f"; exit 1 }
           }
           Write-Host "Syntax OK: $($files.Count) files checked"
+
+      - name: Build exe with PyInstaller
         shell: pwsh
         run: python build.py
         env:
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: 1
-
       - name: Verify exe exists
         shell: pwsh
         run: |
