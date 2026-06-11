@@ -128,6 +128,7 @@ def build(onefile: bool = False):
     cmd += ["--paths", str(ROOT)]
 
     # --collect-all is more thorough than --collect-submodules for local packages
+    cmd += ["--collect-all", "PyQt6"]
     cmd += ["--collect-all", "core"]
     cmd += ["--collect-all", "gui"]
 
@@ -140,6 +141,9 @@ def build(onefile: bool = False):
         "--hidden-import", "core.spam_checker",
         "--hidden-import", "core.updater",
         "--hidden-import", "core.warmup",
+        "--hidden-import", "PyQt6.QtWebEngineWidgets",
+        "--hidden-import", "PyQt6.QtWebEngineCore",
+        "--hidden-import", "PyQt6.QtWebChannel",
         "--hidden-import", "PyQt6.QtSvgWidgets",
         "--hidden-import", "PyQt6.QtPrintSupport",
         "--hidden-import", "PyQt6.sip",
