@@ -217,35 +217,45 @@
 
 
   def build_email_message(account: SmtpAccount, recipient: Recipient, template: EmailTemplate) -> MIMEMultipart:
-      msg = MIMEMultipart("alternative")
-      msg["From"] = account.display_email
-      msg["To"] = recipient.email
-      msg["Subject"] = template.subject
-      msg["Date"] = formatdate(localtime=True)
-      msg["Message-ID"] = make_msgid(domain=account.host)
-      if template.reply_to:
-          msg["Reply-To"] = template.reply_to
-      if template.unsubscribe_url:
-          msg["List-Unsubscribe"] = f"<{template.unsubscribe_url}>"
-          msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
-      elif template.unsubscribe_email:
-          msg["List-Unsubscribe"] = f"<mailto:{template.unsubscribe_email}>"
-      text_body = template.body_text or _html_to_text(template.body_html)
-      msg.attach(MIMEText(text_body, "plain", "utf-8"))
-      if template.body_html:
-          msg.attach(MIMEText(template.body_html, "html", "utf-8"))
-      for att_path in template.attachments:
-          path = Path(att_path)
-          if not path.exists():
-              logger.warning(f"Attachment not found: {att_path}")
-              continue
-          with open(path, "rb") as f:
-              part = MIMEBase("application", "octet-stream")
-              part.set_payload(f.read())
-          encoders.encode_base64(part)
-          part.add_header("Content-Disposition", f'attachment; filename="{path.name}"')
-          msg.attach(part)
-      return msg
+        # BUG FIX: multipart/alternative cannot carry binary attachments.
+        # Use multipart/mixed (outer) + multipart/alternative (inner) when attachments exist.
+        has_attachments = bool(template.attachments)
+        if has_attachments:
+            msg = MIMEMultipart("mixed")
+            alt = MIMEMultipart("alternative")
+        else:
+            msg = MIMEMultipart("alternative")
+            alt = msg
+        msg["From"] = account.display_email
+        msg["To"] = recipient.email
+        msg["Subject"] = template.subject
+        msg["Date"] = formatdate(localtime=True)
+        msg["Message-ID"] = make_msgid(domain=account.host)
+        if template.reply_to:
+            msg["Reply-To"] = template.reply_to
+        if template.unsubscribe_url:
+            msg["List-Unsubscribe"] = f"<{template.unsubscribe_url}>"
+            msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+        elif template.unsubscribe_email:
+            msg["List-Unsubscribe"] = f"<mailto:{template.unsubscribe_email}>"
+        text_body = template.body_text or _html_to_text(template.body_html)
+        alt.attach(MIMEText(text_body, "plain", "utf-8"))
+        if template.body_html:
+            alt.attach(MIMEText(template.body_html, "html", "utf-8"))
+        if has_attachments:
+            msg.attach(alt)
+            for att_path in template.attachments:
+                path = Path(att_path)
+                if not path.exists():
+                    logger.warning(f"Attachment not found: {att_path}")
+                    continue
+                with open(path, "rb") as f:
+                    part = MIMEBase("application", "octet-stream")
+                    part.set_payload(f.read())
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", f'attachment; filename="{path.name}"')
+                msg.attach(part)
+        return msg
 
 
   class SendingEngine:
@@ -253,6 +263,9 @@
           self.accounts = [a for a in accounts if a.is_active]
           self.config = config
           self.log_queue = log_queue
+          self._semaphore: Optional[asyncio.Semaphore] = None
+          self._account_lock: Optional[asyncio.Lock] = None
+
           self._semaphore: Optional[asyncio.Semaphore] = None
           self._stopped = False
           self._paused = False
@@ -270,13 +283,16 @@
       def resume(self) -> None:
           self._paused = False
 
-      def _get_next_account(self) -> Optional[SmtpAccount]:
-          active = [a for a in self.accounts if a.can_send]
-          if not active:
-              return None
-          account = active[self._account_index % len(active)]
-          self._account_index += 1
-          return account
+      async def _get_next_account(self) -> Optional[SmtpAccount]:
+            # BUG FIX: Lock prevents multiple coroutines from selecting
+            # the same account before any counter has been incremented.
+            async with self._account_lock:
+                active = [a for a in self.accounts if a.can_send]
+                if not active:
+                    return None
+                account = active[self._account_index % len(active)]
+                self._account_index += 1
+                return account
 
       def _log(self, message: str) -> None:
           if self.log_queue:
@@ -299,8 +315,12 @@
               async with smtp:
                   await smtp.login(account.email, account.password)
                   await smtp.send_message(msg)
-              account.sent_today += 1
-              account.sent_this_hour += 1
+              async with self._account_lock:
+  
+                  account.sent_today += 1
+  
+                  account.sent_this_hour += 1
+  
               account.last_sent = time.time()
               return SendResult(
                   recipient_email=recipient.email,
@@ -322,6 +342,7 @@
 
       async def run_campaign(self, recipients: List[Recipient], template: EmailTemplate) -> List[SendResult]:
           self._semaphore = asyncio.Semaphore(self.config.max_threads)
+          self._account_lock = asyncio.Lock()
           self._stopped = False
           self.stats["start_time"] = time.time()
           total = len(recipients)
@@ -332,7 +353,7 @@
                       return SendResult(recipient_email=recipient.email, success=False, error="stopped")
                   while self._paused and not self._stopped:
                       await asyncio.sleep(0.5)
-                  account = self._get_next_account()
+                  account = await self._get_next_account()
                   if not account:
                       return SendResult(recipient_email=recipient.email, success=False,
                                         error="Нет доступных аккаунтов")
