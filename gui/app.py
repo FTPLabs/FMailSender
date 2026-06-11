@@ -181,7 +181,7 @@ class MainWindow(QMainWindow):
         recip_screen.list_ready.connect(sending_screen.set_recipients)
         compose_screen.template_ready.connect(sending_screen.set_template)
         sending_screen.campaign_finished.connect(analytics_screen.on_results)
-        sending_screen.campaign_finished.connect(dashboard_screen.update_stats)
+        sending_screen.campaign_finished.connect(dashboard_screen.update_campaign_results)
 
         main_layout.addWidget(self._stack)
         root.addWidget(main_area)
