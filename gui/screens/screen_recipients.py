@@ -237,7 +237,71 @@ class RecipientsScreen(QWidget):
 
         layout.addLayout(bottom_row)
 
-    def _import_file(self):
+    # ── Drag & Drop ─────────────────────────────────────────────────────────
+
+      def dragEnterEvent(self, event):
+          if event.mimeData().hasUrls():
+              for url in event.mimeData().urls():
+                  ext = url.toLocalFile().lower().rsplit('.', 1)[-1]
+                  if ext in ('csv', 'txt', 'tsv', 'dat', 'xlsx'):
+                      event.acceptProposedAction()
+                      return
+          event.ignore()
+
+      def dragMoveEvent(self, event):
+          if event.mimeData().hasUrls():
+              event.acceptProposedAction()
+
+      def dropEvent(self, event):
+          for url in event.mimeData().urls():
+              path = url.toLocalFile()
+              if not path:
+                  continue
+              ext = path.lower().rsplit('.', 1)[-1]
+              try:
+                  if ext in ('csv', 'txt', 'tsv', 'dat'):
+                      for enc in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
+                          try:
+                              sample = open(path, encoding=enc, errors="replace").read(2048)
+                              break
+                          except Exception:
+                              continue
+                      if self._looks_like_credential_list(sample):
+                          self._import_credential_list(path)
+                      else:
+                          self._import_csv(path)
+                  elif ext == 'xlsx':
+                      self._import_xlsx(path)
+              except Exception as e:
+                  QMessageBox.critical(self, "Ошибка импорта", str(e))
+          event.acceptProposedAction()
+
+      def _clear_all(self):
+          if not self._recipients:
+              return
+          reply = QMessageBox.question(
+              self, "Очистить список",
+              f"Удалить всех {len(self._recipients)} получателей?",
+              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+          )
+          if reply == QMessageBox.StandardButton.Yes:
+              self._recipients.clear()
+              self._refresh_table()
+              self._emit_list()
+
+      def _delete_invalid(self):
+          unsubscribed = _load_unsubscribe()
+          before = len(self._recipients)
+          self._recipients = [
+              r for r in self._recipients
+              if validate_email_format(r.email) and r.email.lower() not in unsubscribed
+          ]
+          removed = before - len(self._recipients)
+          self._refresh_table()
+          self._emit_list()
+          QMessageBox.information(self, "Готово", f"Удалено: {removed} невалидных/отписавшихся адресов")
+
+      def _import_file(self):
           path, _ = QFileDialog.getOpenFileName(
               self, "Импорт получателей", "",
               "Все поддерживаемые (*.csv *.xlsx *.txt *.tsv *.dat);;CSV (*.csv);;Excel (*.xlsx);;TXT/DAT (*.txt *.tsv *.dat);;Все файлы (*)"

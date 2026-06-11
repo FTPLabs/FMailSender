@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
   QMessageBox, QDialogButtonBox, QTextEdit, QFrame,
   QFileDialog, QProgressBar
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QSettings, QTimer
 from PyQt6.QtGui import QColor
 
 from core.license import get_storage_key
@@ -499,13 +499,18 @@ class AccountDialog(QDialog):
         self.text_area.setMaximumHeight(120)
         layout.addWidget(self.text_area)
 
-        parse_btn = QPushButton("▶ Распознать аккаунты")
-        parse_btn.setObjectName("btn_primary")
-        parse_btn.clicked.connect(self._parse)
-        layout.addWidget(parse_btn)
+        # Авто-парсинг при вставке текста (с дебаунсом 600мс)
+        self._parse_timer = QTimer(); self._parse_timer.setSingleShot(True); self._parse_timer.setInterval(600)
+        self._parse_timer.timeout.connect(self._parse)
+        self.text_area.textChanged.connect(self._parse_timer.start)
+
+        # Чекбокс "Проверить подключение после импорта"
+        self._verify_check = QCheckBox("Проверить подключение для всех импортированных аккаунтов")
+        self._verify_check.setChecked(True)
+        layout.addWidget(self._verify_check)
 
         # Таблица предпросмотра
-        self.preview_label = QLabel("Предпросмотр:")
+        self.preview_label = QLabel("Предпросмотр: начните вводить или откройте файл")
         layout.addWidget(self.preview_label)
 
         self.table = QTableWidget()
@@ -540,6 +545,8 @@ class AccountDialog(QDialog):
                     except UnicodeDecodeError:
                         continue
                 self.text_area.setPlainText(text)
+                self._parse_timer.stop()
+                self._parse()  # Немедленный парсинг после загрузки файла
             except Exception as e:
                 QMessageBox.warning(self, "Ошибка", f"Не удалось прочитать файл: {e}")
 
@@ -601,6 +608,9 @@ class AccountDialog(QDialog):
 
     def get_accounts(self) -> list[SmtpAccount]:
         return self._parsed
+
+    def should_verify(self) -> bool:
+        return self._verify_check.isChecked()
 
 
   
