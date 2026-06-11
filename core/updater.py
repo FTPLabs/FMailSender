@@ -21,7 +21,7 @@
   logger = logging.getLogger("updater")
 
   GITHUB_API_LATEST = "https://api.github.com/repos/FTPLabs/EmailSenderPro/releases/latest"
-  from core._version import APP_VERSION
+  APP_VERSION = "1.0.0"
 
 
   @dataclass
