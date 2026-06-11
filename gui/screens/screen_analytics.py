@@ -201,6 +201,10 @@ class AnalyticsScreen(QWidget):
         table.setAlternatingRowColors(True)
         return table
 
+    def on_results(self, results: list) -> None:
+        """Слот для сигнала campaign_finished из SendingScreen."""
+        self.update_results(results)
+
     def update_results(self, results: List[SendResult]) -> None:
         """Обновляет данные после завершения кампании."""
         self._current_results = results
