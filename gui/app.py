@@ -175,11 +175,13 @@ class MainWindow(QMainWindow):
         compose_screen: ComposeScreen = self._screens["compose"]
         recip_screen = self._screens["recipients"]
         analytics_screen = self._screens["analytics"]
+        dashboard_screen = self._screens["dashboard"]
 
         acct_screen.accounts_changed.connect(sending_screen.set_accounts)
         recip_screen.list_ready.connect(sending_screen.set_recipients)
         compose_screen.template_ready.connect(sending_screen.set_template)
         sending_screen.campaign_finished.connect(analytics_screen.on_results)
+        sending_screen.campaign_finished.connect(dashboard_screen.update_stats)
 
         main_layout.addWidget(self._stack)
         root.addWidget(main_area)
