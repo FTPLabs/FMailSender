@@ -5,7 +5,7 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-APP_VERSION = "1.0.0"
+from core._version import APP_VERSION
 
 
 def _run_update_check(app, parent_window):
