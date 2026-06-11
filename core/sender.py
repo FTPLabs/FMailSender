@@ -8,9 +8,8 @@ import queue
 import random
 import re
 import time
-import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from datetime import date as date_t
 from email import encoders
 from email.mime.base import MIMEBase
@@ -217,45 +216,45 @@ async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
 
 
 def build_email_message(account: SmtpAccount, recipient: Recipient, template: EmailTemplate) -> MIMEMultipart:
-      # BUG FIX: multipart/alternative cannot carry binary attachments.
-      # Use multipart/mixed (outer) + multipart/alternative (inner) when attachments exist.
-      has_attachments = bool(template.attachments)
-      if has_attachments:
-          msg = MIMEMultipart("mixed")
-          alt = MIMEMultipart("alternative")
-      else:
-          msg = MIMEMultipart("alternative")
-          alt = msg
-      msg["From"] = account.display_email
-      msg["To"] = recipient.email
-      msg["Subject"] = template.subject
-      msg["Date"] = formatdate(localtime=True)
-      msg["Message-ID"] = make_msgid(domain=account.host)
-      if template.reply_to:
-          msg["Reply-To"] = template.reply_to
-      if template.unsubscribe_url:
-          msg["List-Unsubscribe"] = f"<{template.unsubscribe_url}>"
-          msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
-      elif template.unsubscribe_email:
-          msg["List-Unsubscribe"] = f"<mailto:{template.unsubscribe_email}>"
-      text_body = template.body_text or _html_to_text(template.body_html)
-      alt.attach(MIMEText(text_body, "plain", "utf-8"))
-      if template.body_html:
-          alt.attach(MIMEText(template.body_html, "html", "utf-8"))
-      if has_attachments:
-          msg.attach(alt)
-          for att_path in template.attachments:
-              path = Path(att_path)
-              if not path.exists():
+
+    # Use multipart/mixed (outer) + multipart/alternative (inner) when attachments exist.
+    has_attachments = bool(template.attachments)
+    if has_attachments:
+        msg = MIMEMultipart("mixed")
+        alt = MIMEMultipart("alternative")
+    else:
+        msg = MIMEMultipart("alternative")
+        alt = msg
+    msg["From"] = account.display_email
+    msg["To"] = recipient.email
+    msg["Subject"] = template.subject
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=account.host)
+    if template.reply_to:
+        msg["Reply-To"] = template.reply_to
+    if template.unsubscribe_url:
+        msg["List-Unsubscribe"] = f"<{template.unsubscribe_url}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    elif template.unsubscribe_email:
+        msg["List-Unsubscribe"] = f"<mailto:{template.unsubscribe_email}>"
+    text_body = template.body_text or _html_to_text(template.body_html)
+    alt.attach(MIMEText(text_body, "plain", "utf-8"))
+    if template.body_html:
+        alt.attach(MIMEText(template.body_html, "html", "utf-8"))
+    if has_attachments:
+        msg.attach(alt)
+        for att_path in template.attachments:
+            path = Path(att_path)
+            if not path.exists():
                   logger.warning(f"Attachment not found: {att_path}")
                   continue
-              with open(path, "rb") as f:
+            with open(path, "rb") as fh:
                   part = MIMEBase("application", "octet-stream")
-                  part.set_payload(f.read())
-              encoders.encode_base64(part)
-              part.add_header("Content-Disposition", f'attachment; filename="{path.name}"')
-              msg.attach(part)
-      return msg
+                  part.set_payload(fh.read())
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", f'attachment; filename="{path.name}"')
+            msg.attach(part)
+    return msg
 
 
 class SendingEngine:
@@ -266,7 +265,6 @@ class SendingEngine:
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._account_lock: Optional[asyncio.Lock] = None
 
-        self._semaphore: Optional[asyncio.Semaphore] = None
         self._stopped = False
         self._paused = False
         self._account_index = 0
@@ -284,15 +282,14 @@ class SendingEngine:
         self._paused = False
 
     async def _get_next_account(self) -> Optional[SmtpAccount]:
-          # BUG FIX: Lock prevents multiple coroutines from selecting
-          # the same account before any counter has been incremented.
-          async with self._account_lock:
-              active = [a for a in self.accounts if a.can_send]
-              if not active:
-                  return None
-              account = active[self._account_index % len(active)]
-              self._account_index += 1
-              return account
+        """Pick the next available account in round-robin order (thread-safe)."""
+        async with self._account_lock:
+            active = [a for a in self.accounts if a.can_send]
+            if not active:
+                return None
+            account = active[self._account_index % len(active)]
+            self._account_index += 1
+            return account
 
     def _log(self, message: str) -> None:
         if self.log_queue:
@@ -316,12 +313,9 @@ class SendingEngine:
                 await smtp.login(account.email, account.password)
                 await smtp.send_message(msg)
             async with self._account_lock:
-
                 account.sent_today += 1
-
                 account.sent_this_hour += 1
-
-            account.last_sent = time.time()
+                account.last_sent = time.time()
             return SendResult(
                 recipient_email=recipient.email,
                 success=True,
@@ -344,7 +338,7 @@ class SendingEngine:
         self._semaphore = asyncio.Semaphore(self.config.max_threads)
         self._account_lock = asyncio.Lock()
         self._stopped = False
-        self.stats["start_time"] = time.time()
+        self.stats = {"sent": 0, "success": 0, "errors": 0, "start_time": time.time()}
         total = len(recipients)
 
         async def send_with_semaphore(recipient: Recipient) -> SendResult:
