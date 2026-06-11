@@ -63,6 +63,7 @@ class SendingScreen(QWidget):
       self._speed_timer = QTimer()
       self._speed_timer.setInterval(5000)
       self._speed_timer.timeout.connect(self._update_speed)
+      self._speed_timer.start()
 
   def _setup_ui(self):
       layout = QVBoxLayout(self)

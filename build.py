@@ -14,7 +14,8 @@ DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 
 APP_NAME = "EmailSenderPro"
-APP_VERSION = "1.0.0"
+sys.path.insert(0, str(Path(__file__).parent))
+from core._version import APP_VERSION  # noqa: E402
 ICON_PATH = ROOT / "assets" / "icons" / "app.ico"
 MAIN_PY = ROOT / "main.py"
 
@@ -49,7 +50,7 @@ def generate_version_info():
         "        StringStruct(u'FileDescription', u'Email Sender Pro'),\n"
         "        StringStruct(u'FileVersion', u'1.0.0'),\n"
         "        StringStruct(u'InternalName', u'EmailSenderPro'),\n"
-        "        StringStruct(u'LegalCopyright', u'Copyright 2024'),\n"
+        "        StringStruct(u'LegalCopyright', u'Copyright 2025 FTPLabs'),\n"
         "        StringStruct(u'OriginalFilename', u'EmailSenderPro.exe'),\n"
         "        StringStruct(u'ProductName', u'Email Sender Pro'),\n"
         "        StringStruct(u'ProductVersion', u'1.0.0')])"

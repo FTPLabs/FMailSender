@@ -22,6 +22,8 @@ from cryptography.fernet import Fernet
 import jwt
 import requests
 
+from core._version import APP_VERSION
+
 logger = logging.getLogger("license")
 
 # ──────────────────────────────────────────────
@@ -29,7 +31,7 @@ logger = logging.getLogger("license")
 # ──────────────────────────────────────────────
 _env_salt = os.environ.get("ESP_HWID_SALT", "")
 if not _env_salt:
-    logger.debug("ESP_HWID_SALT env var not set — using built-in fallback. Set in production.")
+    logger.warning("ESP_HWID_SALT not set — using built-in fallback. MUST set ESP_HWID_SALT env var in production.")
     _env_salt = "ESP-HWID-SALT-8f4e2a1c-9b3d-4f7e-8a2b-1c5d9e3f7a0b"
 HWID_SALT: str = _env_salt
 
@@ -288,7 +290,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
         "hwid": hwid,
         "key": key_upper,
         "timestamp": int(time.time()),
-        "version": "1.0.0",
+        "version": APP_VERSION,
     }
 
     if progress_callback:

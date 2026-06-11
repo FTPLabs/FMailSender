@@ -281,7 +281,7 @@ def check_dns_auth(domain: str, dkim_selector: str = "default") -> DnsAuthStatus
 
     # ── SPF ──────────────────────────────────────
     try:
-        answers = dns.resolver.resolve(domain, "TXT")
+        answers = dns.resolver.resolve(domain, "TXT", lifetime=5)
         for rdata in answers:
             txt = str(rdata).strip('"')
             if txt.startswith("v=spf1"):
@@ -301,7 +301,7 @@ def check_dns_auth(domain: str, dkim_selector: str = "default") -> DnsAuthStatus
     # ── DKIM ─────────────────────────────────────
     dkim_host = f"{dkim_selector}._domainkey.{domain}"
     try:
-        answers = dns.resolver.resolve(dkim_host, "TXT")
+        answers = dns.resolver.resolve(dkim_host, "TXT", lifetime=5)
         for rdata in answers:
             txt = str(rdata).strip('"')
             if "v=DKIM1" in txt or "p=" in txt:
@@ -321,7 +321,7 @@ def check_dns_auth(domain: str, dkim_selector: str = "default") -> DnsAuthStatus
     # ── DMARC ────────────────────────────────────
     dmarc_host = f"_dmarc.{domain}"
     try:
-        answers = dns.resolver.resolve(dmarc_host, "TXT")
+        answers = dns.resolver.resolve(dmarc_host, "TXT", lifetime=5)
         for rdata in answers:
             txt = str(rdata).strip('"')
             if txt.startswith("v=DMARC1"):
@@ -368,7 +368,7 @@ def validate_email_mx(email_addr: str) -> Tuple[bool, str]:
 
     domain = email_addr.split("@")[1]
     try:
-        mx_records = dns.resolver.resolve(domain, "MX")
+        mx_records = dns.resolver.resolve(domain, "MX",  lifetime=5)
         if mx_records:
             return True, f"MX: {str(mx_records[0].exchange).rstrip('.')}"
     except (dns.resolver.NXDOMAIN, dns.exception.Timeout, dns.resolver.NoAnswer):
@@ -376,7 +376,7 @@ def validate_email_mx(email_addr: str) -> Tuple[bool, str]:
     except dns.resolver.NoAnswer:
         # Нет MX, но может быть A-запись
         try:
-            dns.resolver.resolve(domain, "A")
+            dns.resolver.resolve(domain, "A",   lifetime=5)
             return True, "Нет MX-записи, но домен существует"
         except Exception:
             return False, "Нет MX-записи для домена"
