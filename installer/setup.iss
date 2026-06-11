@@ -62,50 +62,18 @@ Root: HKCU; Subkey: "Software\FTPLabs\EmailSenderPro"; ValueType: string; ValueN
 Root: HKCU; Subkey: "Software\FTPLabs\EmailSenderPro"; ValueType: string; ValueName: "Version"; ValueData: "{#MyAppVersion}"
 
 [Code]
-// Aether Dark palette — Inno Setup uses BGR hex (reverse of #RRGGBB)
-// #070711 -> $110707 | #131426 -> $261413 | #8B5CF6 -> $F65C8B | #F0F0FA -> $FAF0F0
-
-procedure ApplyAetherDark();
-var
-  i: Integer;
-begin
-  // Main wizard window
-  WizardForm.Color      := $110707;
-  WizardForm.Font.Color := $FAF0F0;
-
-  // Page name label (header title) — exists in both classic and modern
-  if WizardForm.PageNameLabel <> nil then begin
-    WizardForm.PageNameLabel.Font.Color := $FAF0F0;
-    WizardForm.PageNameLabel.Font.Style := [fsBold];
-  end;
-
-  // Style buttons, checkboxes, listboxes by class name
-  for i := 0 to WizardForm.ComponentCount - 1 do begin
-    if WizardForm.Components[i].ClassNameIs('TNewButton') then begin
-      TNewButton(WizardForm.Components[i]).Color      := $F65C8B;
-      TNewButton(WizardForm.Components[i]).Font.Color := $FAF0F0;
-    end;
-    if WizardForm.Components[i].ClassNameIs('TNewCheckBox') then
-      TNewCheckBox(WizardForm.Components[i]).Font.Color := $C09090;
-    if WizardForm.Components[i].ClassNameIs('TNewListBox') then begin
-      TNewListBox(WizardForm.Components[i]).Color      := $261413;
-      TNewListBox(WizardForm.Components[i]).Font.Color := $FAF0F0;
-    end;
-    if WizardForm.Components[i].ClassNameIs('TNewEdit') then begin
-      TNewEdit(WizardForm.Components[i]).Color      := $261413;
-      TNewEdit(WizardForm.Components[i]).Font.Color := $FAF0F0;
-    end;
-  end;
-end;
+// ── Aether Dark palette (Inno Setup BGR hex) ──
+// #070711 -> $110707 | #131426 -> $261413
+// #8B5CF6 -> $F65C8B | #F0F0FA -> $FAF0F0 | #9090C0 -> $C09090
 
 procedure InitializeWizard();
 begin
-  ApplyAetherDark();
-end;
-
-procedure CurPageChanged(CurPageID: Integer);
-begin
-  ApplyAetherDark();
+  // Background and base text colour
+  WizardForm.Color      := $110707;
+  WizardForm.Font.Color := $FAF0F0;
+  // Page title label
+  WizardForm.PageNameLabel.Font.Color := $FAF0F0;
+  WizardForm.PageNameLabel.Font.Style := [fsBold];
 end;
 
 function InitializeSetup(): Boolean;
