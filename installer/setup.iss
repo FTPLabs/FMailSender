@@ -91,11 +91,8 @@ begin
   WizardForm.PageDescriptionLabel.Font.Color := $BB8888;
 
   // Next / Back / Install buttons — neon gradient sim (dark purple)
-  WizardForm.NextButton.Color  := $3A1E70;
   WizardForm.NextButton.Font.Color := $FFE8E8;
-  WizardForm.BackButton.Color  := $1A1A30;
   WizardForm.BackButton.Font.Color := $BB8888;
-  WizardForm.CancelButton.Color := $1A1A30;
   WizardForm.CancelButton.Font.Color := $BB8888;
 end;
 
