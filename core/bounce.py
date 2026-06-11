@@ -112,12 +112,21 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
         content_type = part.get_content_type()
 
         if content_type == "message/delivery-status":
-            try:
-                status_text = part.get_payload(decode=True)
-                if isinstance(status_text, bytes):
-                    status_text = status_text.decode("utf-8", errors="replace")
-            except Exception:
-                pass
+              try:
+                  # BUG FIX: message/delivery-status is a list of sub-messages, not bytes.
+                  # get_payload(decode=True) returns None for message/* types.
+                  payload = part.get_payload()
+                  if isinstance(payload, list):
+                      status_text = "\n".join(
+                          sub.as_string() if hasattr(sub, "as_string") else str(sub)
+                          for sub in payload
+                      )
+                  elif isinstance(payload, bytes):
+                      status_text = payload.decode("utf-8", errors="replace")
+                  elif isinstance(payload, str):
+                      status_text = payload
+              except Exception:
+                  pass
 
         elif content_type == "text/plain":
             try:
@@ -277,6 +286,8 @@ class BounceMonitor:
                     try:
                         _, data = conn.fetch(msg_id, "(RFC822)")
                         raw = data[0][1]
+                        # BUG FIX: mark message as read to prevent duplicate processing on next run
+                        conn.store(msg_id, '+FLAGS', '\\Seen')
                         bounce = _parse_dsn_message(raw)
                         if bounce:
                             new_bounces.append(bounce)
