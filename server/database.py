@@ -29,14 +29,13 @@ CREATE TABLE IF NOT EXISTS licenses (
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     is_active INTEGER DEFAULT 1,
-    is_demo INTEGER DEFAULT 0,
     note TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     telegram_id INTEGER NOT NULL,
-    invoice_id TEXT NOT NULL,
+    invoice_id TEXT UNIQUE NOT NULL,
     plan TEXT NOT NULL,
     hwid TEXT DEFAULT '',
     amount REAL NOT NULL,
@@ -121,12 +120,21 @@ async def get_user_hwid(telegram_id: int) -> str:
             return row[0] if row else ""
 
 
-async def create_payment(
-    telegram_id: int, invoice_id: str, plan: str, hwid: str, amount: float, currency: str = "USDT"
+# ── Payments ─────────────────────────────────────────────────────────────────
+
+async def save_payment(
+    telegram_id: int,
+    invoice_id: str,
+    plan: str,
+    hwid: str,
+    amount: float,
+    currency: str = "USDT",
 ) -> int:
+    """Insert a new pending payment. Returns rowid."""
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
-            """INSERT INTO payments (telegram_id, invoice_id, plan, hwid, amount, currency, created_at)
+            """INSERT OR IGNORE INTO payments
+               (telegram_id, invoice_id, plan, hwid, amount, currency, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (telegram_id, invoice_id, plan, hwid, amount, currency, _now()),
         )
@@ -134,7 +142,12 @@ async def create_payment(
         return cur.lastrowid
 
 
-async def get_payment_by_invoice(invoice_id: str) -> Optional[dict]:
+# Keep old name as alias for backwards compatibility
+create_payment = save_payment
+
+
+async def get_payment(invoice_id: str) -> Optional[dict]:
+    """Get payment record by invoice_id."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -142,6 +155,19 @@ async def get_payment_by_invoice(invoice_id: str) -> Optional[dict]:
         ) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
+
+
+# Keep old name as alias
+get_payment_by_invoice = get_payment
+
+
+async def get_payment_license(invoice_id: str) -> Optional[str]:
+    """Return license_key if payment already has one (duplicate check)."""
+    payment = await get_payment(invoice_id)
+    if not payment:
+        return None
+    key = payment.get("license_key", "")
+    return key if key else None
 
 
 async def mark_payment_paid(invoice_id: str, license_key: str) -> None:
@@ -153,6 +179,8 @@ async def mark_payment_paid(invoice_id: str, license_key: str) -> None:
         await db.commit()
 
 
+# ── Licenses ──────────────────────────────────────────────────────────────────
+
 async def create_license(
     plan: str,
     telegram_id: int = 0,
@@ -160,18 +188,18 @@ async def create_license(
     note: str = "",
     override_days: Optional[int] = None,
 ) -> dict:
-    plan_data = PLANS.get(plan, list(PLANS.values())[1])  # default: first non-trial plan
+    plan_data = PLANS.get(plan, PLANS.get("week", list(PLANS.values())[1]))
     hours = plan_data.get("hours", 0)
     if override_days is not None:
         days = override_days
         expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat()
     elif hours and not plan_data.get("days"):
-        # Trial plan: expires in hours
         days = 0
         expires_at = (datetime.utcnow() + timedelta(hours=hours)).isoformat()
     else:
         days = plan_data["days"]
         expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat()
+
     key = _generate_key()
     now = _now()
 
@@ -218,7 +246,7 @@ async def bind_hwid_to_license(key: str, hwid: str) -> bool:
     if not lic:
         return False
     existing_hwid = lic.get("hwid", "")
-    if existing_hwid and existing_hwid != hwid:
+    if existing_hwid and existing_hwid.upper() != hwid.upper():
         return False
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -291,7 +319,8 @@ async def get_setting(key: str, default: str = "") -> str:
 async def set_setting(key: str, value: str) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, value),
         )
         await db.commit()
