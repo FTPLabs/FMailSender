@@ -38,7 +38,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bot")
 
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+from aiogram.client.default import DefaultBotProperties
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
 
 
