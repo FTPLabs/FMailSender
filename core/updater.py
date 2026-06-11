@@ -1,6 +1,8 @@
 """
 Auto-updater: checks GitHub Releases for a newer version, downloads the ZIP,
 and replaces the running .exe via a self-elevating BAT script on Windows.
+FIX: ZIP integrity check moved BEFORE extractall (was after — corrupt ZIP could overwrite files).
+FIX: BAT counter/loop logic fixed — goto was before increment, causing infinite loop.
 """
 import os
 import re
@@ -60,7 +62,7 @@ def check_for_updates(current_version: str = APP_VERSION, timeout: int = 8) -> O
         resp = requests.get(
             GITHUB_API_LATEST, timeout=timeout,
             headers={"Accept": "application/vnd.github.v3+json",
-                     "User-Agent": f"EmailSenderPro/{current_version}"},
+                     "User-Agent": f"FMailSender/{current_version}"},
         )
         if resp.status_code == 404:
             return None
@@ -74,7 +76,7 @@ def check_for_updates(current_version: str = APP_VERSION, timeout: int = 8) -> O
     if not is_newer(remote_ver, current_version):
         return None
     assets = data.get("assets", [])
-    zip_asset = next((a for a in assets if a.get("name","").endswith(".zip") and "windows" in a.get("name","").lower()), None)
+    zip_asset = next((a for a in assets if a.get("name", "").endswith(".zip") and "windows" in a.get("name", "").lower()), None)
     if not zip_asset and assets:
         zip_asset = assets[0]
     if not zip_asset:
@@ -91,7 +93,7 @@ def check_for_updates(current_version: str = APP_VERSION, timeout: int = 8) -> O
 
 class Downloader(threading.Thread):
     def __init__(self, url, dest_dir, progress_callback=None, finished_callback=None):
-        super().__init__(daemon=True, name="esp-downloader")
+        super().__init__(daemon=True, name="fmail-downloader")
         self.url = url
         self.dest_dir = dest_dir
         self._progress_cb = progress_callback
@@ -108,7 +110,7 @@ class Downloader(threading.Thread):
             filename = self.url.split("/")[-1].split("?")[0] or "update.zip"
             dest_path = self.dest_dir / filename
             resp = requests.get(self.url, stream=True, timeout=60,
-                                headers={"User-Agent": f"EmailSenderPro/{APP_VERSION}"})
+                                headers={"User-Agent": f"FMailSender/{APP_VERSION}"})
             resp.raise_for_status()
             total = int(resp.headers.get("Content-Length", 0))
             downloaded = 0
@@ -131,8 +133,8 @@ class Downloader(threading.Thread):
 
 
 def verify_zip_integrity(zip_path: Path) -> bool:
-    """Проверяет структурную целостность скачанного ZIP перед применением."""
-    import zipfile, hashlib
+    """Проверяет структурную целостность ZIP перед применением."""
+    import zipfile
     try:
         with zipfile.ZipFile(zip_path, "r") as z:
             bad = z.testzip()
@@ -150,42 +152,52 @@ def apply_update_windows(zip_path: Path) -> bool:
         return False
     exe_path = Path(sys.executable)
     app_dir = exe_path.parent
-    extract_dir = zip_path.parent / "esp_update_extracted"
+    extract_dir = zip_path.parent / "fmail_update_extracted"
+
+    # BUGFIX: проверяем целостность ПЕРЕД распаковкой (было наоборот)
+    if not verify_zip_integrity(zip_path):
+        logger.error("Обновление отменено: ZIP не прошёл проверку целостности")
+        return False
+
     if extract_dir.exists():
         shutil.rmtree(extract_dir, ignore_errors=True)
     extract_dir.mkdir(parents=True, exist_ok=True)
     import zipfile
     with zipfile.ZipFile(zip_path, "r") as z:
         z.extractall(extract_dir)
-    if not verify_zip_integrity(zip_path):
-        logger.error("Обновление отменено: ZIP не прошёл проверку целостности")
-        return False
-    new_exes = list(extract_dir.rglob("EmailSenderPro.exe"))
+
+    new_exes = list(extract_dir.rglob("FMailSender.exe"))
     if not new_exes:
-        logger.error("No EmailSenderPro.exe found in downloaded ZIP")
+        # Fallback: искать любой .exe
+        new_exes = list(extract_dir.rglob("*.exe"))
+    if not new_exes:
+        logger.error("No FMailSender.exe found in downloaded ZIP")
         return False
     new_dir = new_exes[0].parent
-    bat_path = zip_path.parent / "esp_update.bat"
+    bat_path = zip_path.parent / "fmail_update.bat"
     pid = os.getpid()
     nd = str(new_dir)
     ad = str(app_dir)
-    ne = str(app_dir / "EmailSenderPro.exe")
+    ne = str(app_dir / "FMailSender.exe")
+    # BUGFIX: исправлен порядок операций в цикле ожидания.
+    # Было: goto wait перед increment/check → бесконечный цикл.
+    # Стало: increment и check ПЕРЕД goto wait → корректный выход через 60 сек.
     bat = [
         "@echo off",
-        "echo Waiting for EmailSenderPro to exit...",
+        "echo Waiting for FMail Sender to exit...",
         "set WAIT_COUNT=0",
         ":wait",
         f'tasklist /FI "PID eq {pid}" 2>NUL | find /I "{pid}" >NUL',
         "if not errorlevel 1 (",
         "    timeout /t 1 /nobreak >NUL",
-        "    goto wait",
-        "    if %WAIT_COUNT% GEQ 60 goto apply",
         "    set /A WAIT_COUNT+=1",
+        "    if %WAIT_COUNT% GEQ 60 goto apply",
+        "    goto wait",
         ")",
         ":apply",
         "echo Applying update...",
         f'xcopy /E /Y /I "{nd}" "{ad}"',
-        "echo Starting...",
+        "echo Starting FMail Sender...",
         f'start "" "{ne}"',
         'del "%~f0"',
     ]
