@@ -196,8 +196,8 @@ class SendingScreen(QWidget):
       rl.addWidget(clear_btn, 0, Qt.AlignmentFlag.AlignRight)
       splitter.addWidget(right)
       splitter.setSizes([380, 620])
-        layout.addWidget(splitter, 1)
-        self._restore_settings()
+      layout.addWidget(splitter, 1)
+      self._restore_settings()
 
   def set_accounts(self, accounts):
       self._accounts = accounts
@@ -216,25 +216,25 @@ class SendingScreen(QWidget):
       self.template_status.setStyleSheet(f"color:{Colors.SUCCESS};")
 
   def _restore_settings(self):
-        try:
-            s = self._settings
-            self.threads_slider.setValue(int(s.value("threads", 5)))
-            self.min_delay_spin.setValue(int(s.value("min_delay", 500)))
-            self.max_delay_spin.setValue(int(s.value("max_delay", 2000)))
-            self.pause_after_spin.setValue(int(s.value("pause_after", 50)))
-            self.pause_duration_spin.setValue(int(s.value("pause_duration", 60)))
-        except Exception:
-            pass
+      try:
+          s = self._settings
+          self.threads_slider.setValue(int(s.value("threads", 5)))
+          self.min_delay_spin.setValue(int(s.value("min_delay", 500)))
+          self.max_delay_spin.setValue(int(s.value("max_delay", 2000)))
+          self.pause_after_spin.setValue(int(s.value("pause_after", 50)))
+          self.pause_duration_spin.setValue(int(s.value("pause_duration", 60)))
+      except Exception:
+          pass
 
-    def _save_settings(self):
-        s = self._settings
-        s.setValue("threads", self.threads_slider.value())
-        s.setValue("min_delay", self.min_delay_spin.value())
-        s.setValue("max_delay", self.max_delay_spin.value())
-        s.setValue("pause_after", self.pause_after_spin.value())
-        s.setValue("pause_duration", self.pause_duration_spin.value())
+  def _save_settings(self):
+      s = self._settings
+      s.setValue("threads", self.threads_slider.value())
+      s.setValue("min_delay", self.min_delay_spin.value())
+      s.setValue("max_delay", self.max_delay_spin.value())
+      s.setValue("pause_after", self.pause_after_spin.value())
+      s.setValue("pause_duration", self.pause_duration_spin.value())
 
-    def _validate_ready(self):
+  def _validate_ready(self):
       if not self._accounts or not any(a.is_active for a in self._accounts):
           QMessageBox.warning(self, "Нет аккаунтов", "Добавьте хотя бы один активный SMTP-аккаунт")
           return False
