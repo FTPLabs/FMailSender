@@ -77,8 +77,10 @@ def kb_main(is_admin: bool = False) -> InlineKeyboardMarkup:
 def kb_plans() -> InlineKeyboardMarkup:
     rows = []
     for plan_id, plan in PLANS.items():
+        if plan.get("admin_only"):
+            continue
         rows.append([InlineKeyboardButton(
-            text=f"{plan['name']} — ${plan['price_usdt']} USDT",
+            text=f"{plan['name']} — ${plan['price_usdt']:.2f} USDT",
             callback_data=f"buy_plan:{plan_id}",
         )])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="menu_main")])
@@ -106,9 +108,12 @@ def kb_admin() -> InlineKeyboardMarkup:
 
 
 def kb_admin_plans() -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(
-        text=plan["name"], callback_data=f"admin_plan:{plan_id}"
-    )] for plan_id, plan in PLANS.items()]
+    rows = []
+    for plan_id, plan in PLANS.items():
+        label = plan["name"]
+        if plan.get("admin_only"):
+            label = f"[ПРОБНЫЙ] {label}"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"admin_plan:{plan_id}")])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -238,11 +243,12 @@ async def cb_my_licenses(query: CallbackQuery):
 async def cb_menu_buy(query: CallbackQuery):
     lines = ["💳 <b>Выбери тарифный план:</b>\n"]
     for plan_id, plan in PLANS.items():
+        if plan.get("admin_only"):
+            continue
         price = await db.get_plan_price(plan_id)
         lines.append(
-            f"{plan['name']}\n"
+            f"<b>{plan['name']}</b> — <b>${price:.2f} USDT</b>\n"
             f"   {plan['description']}\n"
-            f"   💰 <b>${price:.2f} USDT</b>\n"
         )
     await send_or_edit(query, "\n".join(lines), reply_markup=kb_plans())
 
@@ -252,6 +258,9 @@ async def cb_buy_plan(query: CallbackQuery, state: FSMContext):
     plan_id = query.data.split(":", 1)[1]
     if plan_id not in PLANS:
         await query.answer("Неизвестный план", show_alert=True)
+        return
+    if PLANS[plan_id].get("admin_only"):
+        await query.answer("Этот план выдаётся только администратором.", show_alert=True)
         return
     current_hwid = await db.get_user_hwid(query.from_user.id)
     await state.update_data(plan_id=plan_id, hwid_only=False)

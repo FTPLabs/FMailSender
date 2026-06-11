@@ -1,12 +1,19 @@
 """
-Build script — создаёт чистый .exe без установщика.
-Запуск: python build.py
+Build script -- creates clean .exe without installer.
+Run: python build.py
 """
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Fix Windows cp1252 console encoding
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 ROOT = Path(__file__).parent
 DIST = ROOT / "dist"

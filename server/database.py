@@ -160,9 +160,18 @@ async def create_license(
     note: str = "",
     override_days: Optional[int] = None,
 ) -> dict:
-    plan_data = PLANS.get(plan, PLANS["starter"])
-    days = override_days if override_days is not None else plan_data["days"]
-    expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat()
+    plan_data = PLANS.get(plan, list(PLANS.values())[1])  # default: first non-trial plan
+    hours = plan_data.get("hours", 0)
+    if override_days is not None:
+        days = override_days
+        expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat()
+    elif hours and not plan_data.get("days"):
+        # Trial plan: expires in hours
+        days = 0
+        expires_at = (datetime.utcnow() + timedelta(hours=hours)).isoformat()
+    else:
+        days = plan_data["days"]
+        expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat()
     key = _generate_key()
     now = _now()
 

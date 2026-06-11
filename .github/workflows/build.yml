@@ -42,8 +42,10 @@ jobs:
           HWID_SALT: ${{ secrets.HWID_SALT }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           LICENSE_API_URL: ${{ secrets.LICENSE_API_URL }}
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: "1"
         run: |
-          python build.py
+          python -X utf8 build.py
 
       - name: Verify EXE
         run: |
