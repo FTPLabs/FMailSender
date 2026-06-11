@@ -399,8 +399,12 @@ class RecipientsScreen(QWidget):
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             sample = f.read(4096)
 
-        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
-        separator = dialect.delimiter if dialect else ","
+        # BUGFIX: csv.Sniffer raises csv.Error when delimiter undetectable
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+            separator = dialect.delimiter
+        except csv.Error:
+            separator = ","
 
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             reader = csv.DictReader(f, delimiter=separator)
