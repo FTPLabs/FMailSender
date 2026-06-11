@@ -17,8 +17,13 @@ from PyQt6.QtGui import (
     QTextCharFormat, QFont, QColor, QSyntaxHighlighter,
     QTextDocument, QKeySequence, QIcon, QAction, QTextCursor
 )
-from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtCore import QUrl
+try:
+      from PyQt6.QtWebEngineWidgets import QWebEngineView
+      _HAS_WEBENGINE = True
+  except ImportError:
+      QWebEngineView = None  # type: ignore
+      _HAS_WEBENGINE = False
+  from PyQt6.QtCore import QUrl
 
 from gui.theme import Colors, Spacing
 
@@ -426,7 +431,8 @@ a {{ color: #6366F1; }}
 <body>{html}</body>
 </html>"""
 
-        self.preview.setHtml(html)
+        if self.preview is not None:
+              self.preview.setHtml(html)
 
     def _add_attachment(self):
         paths, _ = QFileDialog.getOpenFileNames(
