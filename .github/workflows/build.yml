@@ -65,6 +65,16 @@ jobs:
           pip install "wmi>=1.5.1"
           pip install "pyinstaller>=6.3.0"
 
+
+        - name: Verify Python syntax (py_compile)
+          shell: pwsh
+          run: |
+            Get-ChildItem -Recurse -Filter "*.py" | ForEach-Object {
+              python -m py_compile $_.FullName
+              if ($LASTEXITCODE -ne 0) { Write-Error "SyntaxError: $($_.FullName)"; exit 1 }
+            }
+            Write-Host "All Python files OK"
+  
       - name: Build exe with PyInstaller
         shell: pwsh
         run: python build.py
