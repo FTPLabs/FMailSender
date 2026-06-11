@@ -296,7 +296,7 @@ async def cb_buy_plan(query: CallbackQuery, state: FSMContext):
 async def cb_use_hwid(query: CallbackQuery, state: FSMContext):
     hwid = query.data.split(":", 1)[1]
     data = await state.get_data()
-    await _proceed_to_payment(query, state, hwid, data.get("plan_id", "starter"))
+    await _proceed_to_payment(query, state, hwid, data.get("plan_id", "week"))
 
 
 @dp.message(BuyFlow.waiting_hwid)
@@ -319,7 +319,7 @@ async def msg_hwid(message: Message, state: FSMContext):
         )
         return
 
-    plan_id = data.get("plan_id", "starter")
+    plan_id = data.get("plan_id", "week")
     await _proceed_to_payment(message, state, hwid, plan_id)
 
 
@@ -331,7 +331,7 @@ async def _proceed_to_payment(event, state: FSMContext, hwid: str, plan_id: str)
     try:
         invoice = await crypto_client.create_invoice(
             amount=price,
-            currency="USDT",
+            asset="USDT",
             description=f"FMail Sender Pro — {plan['name']}",
         )
         pay_url = invoice.get("pay_url", "")
