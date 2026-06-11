@@ -1,4 +1,4 @@
-"""CryptoBot (send.tg) payment client."""
+"""CryptoBot (send.tg / pay.crypt.bot) payment client."""
 import asyncio
 import logging
 from typing import Optional
@@ -28,12 +28,24 @@ class CryptoPayClient:
     async def _request(self, method: str, **params) -> dict:
         session = await self._get_session()
         url = f"{CRYPTO_BOT_API}/{method}"
+        # Convert Python booleans to lowercase strings for the API
+        cleaned = {}
+        for k, v in params.items():
+            if isinstance(v, bool):
+                cleaned[k] = "true" if v else "false"
+            elif v is not None and v != "":
+                cleaned[k] = v
         try:
-            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(
+                url, params=cleaned, timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
                 data = await resp.json()
                 if not data.get("ok"):
                     error = data.get("error", {})
-                    raise RuntimeError(f"CryptoBot error: {error.get('name', 'Unknown')} — {error.get('message', '')}")
+                    raise RuntimeError(
+                        f"CryptoBot API error: {error.get('name', 'Unknown')} — "
+                        f"{error.get('message', str(data))}"
+                    )
                 return data.get("result", {})
         except aiohttp.ClientError as e:
             raise RuntimeError(f"Network error: {e}") from e
@@ -46,22 +58,33 @@ class CryptoPayClient:
         payload: str = "",
         expires_in: int = 3600,
     ) -> dict:
-        result = await self._request(
-            "createInvoice",
+        """Create a payment invoice. Returns invoice dict with invoice_id and pay_url."""
+        kwargs = dict(
             asset=asset,
             amount=str(round(amount, 2)),
-            description=description[:1023],
-            payload=payload,
             expires_in=expires_in,
-            allow_comments=False,
-            allow_anonymous=False,
         )
+        if description:
+            kwargs["description"] = description[:1023]
+        if payload:
+            kwargs["payload"] = payload
+        result = await self._request("createInvoice", **kwargs)
         return result
 
     async def get_invoice(self, invoice_id: str) -> Optional[dict]:
-        result = await self._request("getInvoices", invoice_ids=invoice_id)
+        """Fetch a single invoice by its ID."""
+        result = await self._request("getInvoices", invoice_ids=str(invoice_id))
         items = result.get("items", [])
         return items[0] if items else None
+
+    async def check_invoice(self, invoice_id: str) -> bool:
+        """Return True if the invoice has been paid."""
+        try:
+            invoice = await self.get_invoice(invoice_id)
+            return bool(invoice and invoice.get("status") == "paid")
+        except Exception as e:
+            logger.warning("check_invoice error for %s: %s", invoice_id, e)
+            return False
 
     async def wait_for_payment(
         self,
@@ -69,6 +92,7 @@ class CryptoPayClient:
         timeout: int = 3600,
         poll_interval: int = 5,
     ) -> Optional[dict]:
+        """Poll until paid or timeout. Returns invoice dict or None."""
         deadline = asyncio.get_event_loop().time() + timeout
         while asyncio.get_event_loop().time() < deadline:
             try:
