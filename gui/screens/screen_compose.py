@@ -18,12 +18,12 @@ from PyQt6.QtGui import (
     QTextDocument, QKeySequence, QIcon, QAction, QTextCursor
 )
 try:
-      from PyQt6.QtWebEngineWidgets import QWebEngineView
-      _HAS_WEBENGINE = True
-  except ImportError:
-      QWebEngineView = None  # type: ignore
-      _HAS_WEBENGINE = False
-  from PyQt6.QtCore import QUrl
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
+    _HAS_WEBENGINE = True
+except ImportError:
+    QWebEngineView = None  # type: ignore
+    _HAS_WEBENGINE = False
+from PyQt6.QtCore import QUrl
 
 from gui.theme import Colors, Spacing
 
