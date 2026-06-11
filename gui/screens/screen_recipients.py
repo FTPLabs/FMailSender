@@ -4,10 +4,13 @@
 """
 import csv
 import json
+import logging
 import re
 import threading
 from pathlib import Path
 from typing import List
+
+logger = logging.getLogger("recipients")
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -33,8 +36,8 @@ def _load_unsubscribe() -> set:
         try:
             with open(UNSUBSCRIBE_FILE, "r", encoding="utf-8") as f:
                 return set(json.load(f))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Ошибка загрузки unsubscribe-листа: {e}")
     return set()
 
 

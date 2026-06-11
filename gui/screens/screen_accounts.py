@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
 from PyQt6.QtGui import QColor
 
-from core.license import _get_fernet_key
+from core.license import get_storage_key
 from core.sender import SmtpAccount, test_smtp_connection, get_smtp_config_for_domain
 from gui.theme import Colors, Spacing
 
@@ -33,7 +33,7 @@ def _encrypt_password(password: str) -> str:
     if not _HAS_FERNET:
         return password
     try:
-        f = Fernet(_get_fernet_key())
+        f = Fernet(get_storage_key())
         return f.encrypt(password.encode()).decode()
     except Exception:
         return password
@@ -43,7 +43,7 @@ def _decrypt_password(encrypted: str) -> str:
     if not _HAS_FERNET:
         return encrypted
     try:
-        f = Fernet(_get_fernet_key())
+        f = Fernet(get_storage_key())
         return f.decrypt(encrypted.encode()).decode()
     except Exception:
         return encrypted
@@ -98,12 +98,15 @@ def load_accounts() -> list[SmtpAccount]:
 
 
 class AccountDialog(QDialog):
+    _test_done = pyqtSignal(bool, str)  # thread-safe: success, log
+
     def __init__(self, parent=None, account: SmtpAccount = None):
         super().__init__(parent)
         self.setWindowTitle("Добавить аккаунт" if not account else "Редактировать аккаунт")
         self.setMinimumWidth(460)
         self._editing = account
         self._setup_ui()
+        self._test_done.connect(self._on_test_done)
         if account:
             self._fill(account)
 
@@ -220,11 +223,15 @@ class AccountDialog(QDialog):
             loop = asyncio.new_event_loop()
             success, log = loop.run_until_complete(run())
             loop.close()
-            color = Colors.SUCCESS if success else Colors.ERROR
-            self.test_result.setStyleSheet(f"color:{color};")
-            self.test_result.setPlainText(log)
+            self._test_done.emit(success, log)  # безопасная передача в GUI-поток
 
         threading.Thread(target=do, daemon=True).start()
+
+    def _on_test_done(self, success: bool, log: str) -> None:
+        """Вызывается в GUI-потоке через сигнал."""
+        color = Colors.SUCCESS if success else Colors.ERROR
+        self.test_result.setStyleSheet(f"color:{color};")
+        self.test_result.setPlainText(log)
 
     def get_account(self) -> SmtpAccount | None:
         email = self.email_input.text().strip()

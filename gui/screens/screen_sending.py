@@ -59,6 +59,7 @@ class SendingScreen(QWidget):
         self._gui_timer.setInterval(200)
         self._gui_timer.timeout.connect(self._flush_log_queue)
         self._gui_timer.start()
+        self._manually_stopped = False
         self._speed_timer = QTimer()
         self._speed_timer.setInterval(5000)
         self._speed_timer.timeout.connect(self._update_speed)
@@ -242,6 +243,7 @@ class SendingScreen(QWidget):
         self.progress_bar.setValue(0)
         self._engine.on_progress = self._on_progress
         self._engine.on_finished = self._on_finished
+        self._manually_stopped = False
         self._is_running = True
         self.start_btn.setEnabled(False)
         self.pause_btn.setEnabled(True)
@@ -312,18 +314,22 @@ class SendingScreen(QWidget):
             self.pause_btn.setText("Продолжить")
 
     def _stop_campaign(self):
+        self._manually_stopped = True
         if self._engine:
             self._engine.stop()
         self._finish_ui()
 
     def _on_campaign_done(self, results):
         self._finish_ui()
-        success = sum(1 for r in results if r.success)
-        QMessageBox.information(
-            self, "Рассылка завершена",
-            f"Итого: {len(results)} писем\nУспешно: {success}\nОшибок: {len(results) - success}"
-        )
-        self.campaign_finished.emit(results)
+        # Всегда эмитируем сигнал — аналитика и дашборд должны получить данные
+        real_results = [r for r in results if r.error != "stopped"]
+        self.campaign_finished.emit(real_results if real_results else results)
+        if not self._manually_stopped:
+            success = sum(1 for r in results if r.success)
+            QMessageBox.information(
+                self, "Рассылка завершена",
+                f"Итого: {len(results)} писем\nУспешно: {success}\nОшибок: {len(results) - success}"
+            )
 
     def _finish_ui(self):
         self._is_running = False

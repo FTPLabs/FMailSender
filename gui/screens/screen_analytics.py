@@ -4,9 +4,12 @@
 """
 import csv
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List
+
+logger = logging.getLogger("analytics")
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -27,8 +30,8 @@ def _load_analytics() -> dict:
         try:
             with open(ANALYTICS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Ошибка загрузки аналитики: {e}")
     return {"campaigns": [], "opens": {}, "clicks": {}, "bounces": []}
 
 
