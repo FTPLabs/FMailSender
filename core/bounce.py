@@ -1,8 +1,6 @@
 """
 IMAP bounce-парсер. Мониторит входящие, определяет hard/soft bounces,
 добавляет hard bounce в blacklist.
-FIX: добавлен вызов _parse_dsn_message(raw) — ранее переменная bounce не определялась (NameError).
-FIX: письмо помечается прочитанным только после успешного распознавания bounce.
 """
 import email
 import os
@@ -70,17 +68,23 @@ SOFT_BOUNCE_CODES = re.compile(
     r"service.?unavailable|deferred|too.?many)",
     re.IGNORECASE,
 )
-
 EMAIL_PATTERN = re.compile(
     r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"
 )
 
+# IMAP search queries — порядок от наиболее специфичного к общему
+_IMAP_SEARCHES = [
+    'FROM "MAILER-DAEMON"',
+    'SUBJECT "Delivery Status Notification"',
+    'SUBJECT "Undelivered Mail Returned to Sender"',
+    'SUBJECT "Mail delivery failed"',
+    'SUBJECT "Delivery Failure"',
+    'SUBJECT "Undeliverable"',
+    'SUBJECT "недоставлено"',
+]
+
 
 def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
-    """
-    Парсит DSN (NDR) сообщение и извлекает информацию о bounce.
-    Поддерживает multipart/report с message/delivery-status.
-    """
     try:
         msg = email.message_from_bytes(raw_message)
     except Exception:
@@ -89,9 +93,9 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
     subject = msg.get("Subject", "")
     is_bounce_subject = any(keyword in subject.lower() for keyword in [
         "delivery", "undelivered", "failure", "returned", "bounce",
-        "недоставлено", "ошибка доставки", "mailer-daemon",
+        "недоставлено", "ошибка доставки", "mailer-daemon", "undeliverable",
+        "mail delivery failed",
     ])
-
     sender = msg.get("From", "").lower()
     is_mailer_daemon = "mailer-daemon" in sender or "postmaster" in sender
 
@@ -105,7 +109,6 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
 
     for part in msg.walk():
         content_type = part.get_content_type()
-
         if content_type == "message/delivery-status":
             try:
                 payload = part.get_payload()
@@ -120,7 +123,6 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
                     status_text = payload
             except Exception:
                 pass
-
         elif content_type == "text/plain":
             try:
                 text = part.get_payload(decode=True)
@@ -132,7 +134,9 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
 
     combined = (status_text + "\n" + dsn_message).lower()
 
-    final_recipient = re.search(r"final-recipient[:\s]+rfc822[;\s]+([^\s\n]+)", combined, re.IGNORECASE)
+    final_recipient = re.search(
+        r"final-recipient[:\s]+rfc822[;\s]+([^\s\n]+)", combined, re.IGNORECASE
+    )
     if final_recipient:
         original_recipient = final_recipient.group(1).strip("<>").strip()
     else:
@@ -177,11 +181,6 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
 
 
 class BounceMonitor:
-    """
-    Мониторит IMAP-почтовый ящик для обнаружения bounce-уведомлений.
-    Автоматически добавляет hard bounces в blacklist.
-    """
-
     def __init__(
         self,
         imap_host: str,
@@ -197,13 +196,10 @@ class BounceMonitor:
         self.email_addr = email_addr
         self.password = password
         self.use_ssl = use_ssl
-
-        # FIX: use absolute APPDATA path — relative path creates file in wrong location when launched via shortcut
         self.blacklist_path = blacklist_path or (
             Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "blacklist.json"
         )
         self.bounce_log_path = bounce_log_path or Path("data/bounces.json")
-
         self._blacklist: Set[str] = self._load_blacklist()
         self._bounce_records: List[BounceRecord] = self._load_bounces()
 
@@ -233,10 +229,7 @@ class BounceMonitor:
     def _save_bounces(self) -> None:
         self.bounce_log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.bounce_log_path, "w", encoding="utf-8") as f:
-            json.dump(
-                [r.to_dict() for r in self._bounce_records],
-                f, ensure_ascii=False, indent=2
-            )
+            json.dump([r.to_dict() for r in self._bounce_records], f, ensure_ascii=False, indent=2)
 
     def is_blacklisted(self, email_addr: str) -> bool:
         return email_addr.lower() in self._blacklist
@@ -246,10 +239,6 @@ class BounceMonitor:
         self._save_blacklist()
 
     def check_bounces(self) -> List[BounceRecord]:
-        """
-        Подключается к IMAP и проверяет новые bounce-уведомления.
-        Возвращает список новых bounce-записей.
-        """
         new_bounces = []
         try:
             if self.use_ssl:
@@ -260,31 +249,33 @@ class BounceMonitor:
             conn.login(self.email_addr, self.password)
             conn.select("INBOX")
 
-            _, msg_ids = conn.search(None, 'UNSEEN FROM "MAILER-DAEMON"')
-            if not msg_ids[0]:
-                _, msg_ids = conn.search(None, 'UNSEEN SUBJECT "Delivery Status Notification"')
+            # FIX: перебираем все паттерны поиска, собираем уникальные ID
+            found_ids: Set[bytes] = set()
+            for search_query in _IMAP_SEARCHES:
+                try:
+                    _, msg_ids = conn.search(None, f'UNSEEN {search_query}')
+                    if msg_ids and msg_ids[0]:
+                        for mid in msg_ids[0].split():
+                            found_ids.add(mid)
+                except Exception:
+                    continue
 
-            if msg_ids[0]:
-                for msg_id in msg_ids[0].split():
-                    try:
-                        _, data = conn.fetch(msg_id, "(RFC822)")
-                        raw = data[0][1]
-                        # BUGFIX: вызываем парсер — ранее строка отсутствовала (NameError)
-                        bounce = _parse_dsn_message(raw)
-                        if bounce:
-                            # Помечаем прочитанным только после успешного распознавания
-                            conn.store(msg_id, '+FLAGS', '\\Seen')
-                            new_bounces.append(bounce)
-                            self._bounce_records.append(bounce)
-
-                            if bounce.bounce_type == BounceType.HARD:
-                                self.add_to_blacklist(bounce.email)
-                                logger.info(f"Hard bounce → blacklist: {bounce.email}")
-                    except Exception as e:
-                        logger.warning(f"Ошибка обработки сообщения {msg_id}: {e}")
+            for msg_id in found_ids:
+                try:
+                    _, data = conn.fetch(msg_id, "(RFC822)")
+                    raw = data[0][1]
+                    bounce = _parse_dsn_message(raw)
+                    if bounce:
+                        conn.store(msg_id, '+FLAGS', '\\Seen')
+                        new_bounces.append(bounce)
+                        self._bounce_records.append(bounce)
+                        if bounce.bounce_type == BounceType.HARD:
+                            self.add_to_blacklist(bounce.email)
+                            logger.info(f"Hard bounce → blacklist: {bounce.email}")
+                except Exception as e:
+                    logger.warning(f"Ошибка обработки сообщения {msg_id}: {e}")
 
             conn.logout()
-
             if new_bounces:
                 self._save_bounces()
 
@@ -296,7 +287,6 @@ class BounceMonitor:
         return new_bounces
 
     def filter_recipients(self, emails: List[str]) -> tuple:
-        """Фильтрует список получателей, убирая blacklist."""
         allowed = []
         blocked = []
         for e in emails:

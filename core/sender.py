@@ -3,6 +3,7 @@
 Использует aiosmtplib + asyncio.Semaphore для управления параллелизмом.
 """
 import asyncio
+import html
 import logging
 import queue
 import random
@@ -153,318 +154,240 @@ class SendResult:
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _interpolate(template: str, variables: dict) -> str:
-    # FIX: single-pass regex substitution O(n) instead of O(n*m) sequential replaces.
-    # For 50KB HTML templates with 9+ personalization vars this is 9x faster.
+    """Single-pass regex substitution — O(n) instead of O(n*m)."""
     if not template:
         return template
 
     def _replacer(match: re.Match) -> str:
-        key = match.group(1)
+        key = match.group(1).strip()
         val = variables.get(key, "")
         return str(val) if val else ""
 
     return re.sub(r"\{\{([^}]+)\}\}", _replacer, template)
 
 
-def _html_to_text(html: str) -> str:
-    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+# HTML entities table — comprehensive coverage
+_HTML_ENTITIES = {
+    "&amp;": "&", "&lt;": "<", "&gt;": ">", "&nbsp;": " ",
+    "&quot;": '"', "&#39;": "'", "&apos;": "'", "&#160;": " ",
+    "&mdash;": "—", "&ndash;": "–", "&hellip;": "…",
+    "&laquo;": "«", "&raquo;": "»", "&copy;": "©",
+    "&reg;": "®", "&trade;": "™", "&euro;": "€",
+    "&pound;": "£", "&cent;": "¢", "&yen;": "¥",
+    "&deg;": "°", "&plusmn;": "±", "&times;": "×",
+    "&divide;": "÷", "&frac12;": "½", "&frac14;": "¼",
+}
+
+
+def _html_to_text(html_str: str) -> str:
+    text = re.sub(r"<br\s*/?>", "\n", html_str, flags=re.IGNORECASE)
     text = re.sub(r"<p[^>]*>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</p>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
-    for ent, rep in [("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " ")]:
+    # Named entities
+    for ent, rep in _HTML_ENTITIES.items():
         text = text.replace(ent, rep)
+    # Numeric entities &#NNN; and &#xHHH;
+    text = re.sub(
+        r"&#([0-9]+);",
+        lambda m: chr(int(m.group(1))),
+        text,
+    )
+    text = re.sub(
+        r"&#x([0-9a-fA-F]+);",
+        lambda m: chr(int(m.group(1), 16)),
+        text,
+    )
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
 def validate_email_format(email: str) -> bool:
+    """Single source of truth for email format validation."""
     pattern = r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$"
     return bool(re.match(pattern, email.strip()))
 
 
-# SMTP host presets — defined at module level for performance
+# SMTP host presets
 CONFIGS = {
-    # ── Google ───────────────────────────────────────────────────────
     "gmail.com":        {"host": "smtp.gmail.com",          "port": 465, "use_ssl": True,  "use_tls": False},
     "googlemail.com":   {"host": "smtp.gmail.com",          "port": 465, "use_ssl": True,  "use_tls": False},
-    # ── Microsoft ────────────────────────────────────────────────────
     "outlook.com":      {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
     "hotmail.com":      {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
     "live.com":         {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
     "msn.com":          {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
-    # ── Yahoo ────────────────────────────────────────────────────────
     "yahoo.com":        {"host": "smtp.mail.yahoo.com",     "port": 465, "use_ssl": True,  "use_tls": False},
     "yahoo.co.uk":      {"host": "smtp.mail.yahoo.co.uk",   "port": 465, "use_ssl": True,  "use_tls": False},
     "yahoo.fr":         {"host": "smtp.mail.yahoo.fr",      "port": 465, "use_ssl": True,  "use_tls": False},
-    "yahoo.de":         {"host": "smtp.mail.yahoo.de",      "port": 465, "use_ssl": True,  "use_tls": False},
-    "yahoo.es":         {"host": "smtp.mail.yahoo.es",      "port": 465, "use_ssl": True,  "use_tls": False},
-    "yahoo.it":         {"host": "smtp.mail.yahoo.it",      "port": 465, "use_ssl": True,  "use_tls": False},
-    # ── RU ───────────────────────────────────────────────────────────
     "mail.ru":          {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
     "bk.ru":            {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
     "inbox.ru":         {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
     "list.ru":          {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
-    "internet.ru":      {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
     "yandex.ru":        {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
     "yandex.com":       {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
-    "yandex.by":        {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
-    "yandex.kz":        {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
     "ya.ru":            {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
     "rambler.ru":       {"host": "smtp.rambler.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
-    "ro.ru":            {"host": "smtp.rambler.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
-    "lenta.ru":         {"host": "smtp.rambler.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
-    "autorambler.ru":   {"host": "smtp.rambler.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
-    # ── GMX (EU/US) ──────────────────────────────────────────────────
     "gmx.com":          {"host": "mail.gmx.com",            "port": 587, "use_ssl": False, "use_tls": True},
     "gmx.net":          {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
     "gmx.de":           {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
-    "gmx.at":           {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
-    "gmx.ch":           {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
-    "gmx.fr":           {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
-    # ── DE ───────────────────────────────────────────────────────────
     "web.de":           {"host": "smtp.web.de",             "port": 587, "use_ssl": False, "use_tls": True},
-    "t-online.de":      {"host": "securesmtp.t-online.de",  "port": 587, "use_ssl": False, "use_tls": True},
-    "freenet.de":       {"host": "mx.freenet.de",           "port": 587, "use_ssl": False, "use_tls": True},
-    # ── FR ───────────────────────────────────────────────────────────
     "orange.fr":        {"host": "smtp.orange.fr",          "port": 587, "use_ssl": False, "use_tls": True},
     "sfr.fr":           {"host": "smtp.sfr.fr",             "port": 587, "use_ssl": False, "use_tls": True},
     "free.fr":          {"host": "smtp.free.fr",            "port": 465, "use_ssl": True,  "use_tls": False},
-    "laposte.net":      {"host": "smtp.laposte.net",        "port": 587, "use_ssl": False, "use_tls": True},
-    "wanadoo.fr":       {"host": "smtp.orange.fr",          "port": 587, "use_ssl": False, "use_tls": True},
-    # ── IT ───────────────────────────────────────────────────────────
-    "libero.it":        {"host": "smtp.libero.it",          "port": 465, "use_ssl": True,  "use_tls": False},
-    "virgilio.it":      {"host": "smtp.virgilio.it",        "port": 465, "use_ssl": True,  "use_tls": False},
-    "tiscali.it":       {"host": "smtp.tiscali.it",         "port": 465, "use_ssl": True,  "use_tls": False},
-    # ── PL ───────────────────────────────────────────────────────────
-    "wp.pl":            {"host": "smtp.wp.pl",              "port": 465, "use_ssl": True,  "use_tls": False},
-    "onet.pl":          {"host": "smtp.onet.pl",            "port": 465, "use_ssl": True,  "use_tls": False},
-    "interia.pl":       {"host": "smtp.interia.pl",         "port": 465, "use_ssl": True,  "use_tls": False},
-    # ── UK ───────────────────────────────────────────────────────────
-    "btinternet.com":   {"host": "smtp.btinternet.com",     "port": 465, "use_ssl": True,  "use_tls": False},
-    "sky.com":          {"host": "smtp.sky.com",            "port": 587, "use_ssl": False, "use_tls": True},
-    "tiscali.co.uk":    {"host": "smtp.tiscali.co.uk",      "port": 587, "use_ssl": False, "use_tls": True},
-    # ── US ISP ───────────────────────────────────────────────────────
-    "aol.com":          {"host": "smtp.aol.com",            "port": 465, "use_ssl": True,  "use_tls": False},
-    "comcast.net":      {"host": "smtp.comcast.net",        "port": 587, "use_ssl": False, "use_tls": True},
-    "verizon.net":      {"host": "outgoing.verizon.net",    "port": 465, "use_ssl": True,  "use_tls": False},
-    "att.net":          {"host": "outbound.att.net",        "port": 465, "use_ssl": True,  "use_tls": False},
-    "sbcglobal.net":    {"host": "outbound.att.net",        "port": 465, "use_ssl": True,  "use_tls": False},
-    "bellsouth.net":    {"host": "outbound.att.net",        "port": 465, "use_ssl": True,  "use_tls": False},
-    "cox.net":          {"host": "smtp.cox.net",            "port": 587, "use_ssl": False, "use_tls": True},
-    "charter.net":      {"host": "smtp.charter.net",        "port": 587, "use_ssl": False, "use_tls": True},
-    "earthlink.net":    {"host": "smtpauth.earthlink.net",  "port": 587, "use_ssl": False, "use_tls": True},
-    # ── Apple ────────────────────────────────────────────────────────
     "icloud.com":       {"host": "smtp.mail.me.com",        "port": 587, "use_ssl": False, "use_tls": True},
     "me.com":           {"host": "smtp.mail.me.com",        "port": 587, "use_ssl": False, "use_tls": True},
     "mac.com":          {"host": "smtp.mail.me.com",        "port": 587, "use_ssl": False, "use_tls": True},
-    # ── Privacy / Pro ────────────────────────────────────────────────
-    "proton.me":        {"host": "smtp.protonmail.ch",      "port": 587, "use_ssl": False, "use_tls": True},
-    "protonmail.com":   {"host": "smtp.protonmail.ch",      "port": 587, "use_ssl": False, "use_tls": True},
-    "protonmail.ch":    {"host": "smtp.protonmail.ch",      "port": 587, "use_ssl": False, "use_tls": True},
-    "zoho.com":         {"host": "smtp.zoho.com",           "port": 465, "use_ssl": True,  "use_tls": False},
-    "zohomail.com":     {"host": "smtp.zoho.com",           "port": 465, "use_ssl": True,  "use_tls": False},
-    "fastmail.com":     {"host": "smtp.fastmail.com",       "port": 465, "use_ssl": True,  "use_tls": False},
-    "fastmail.fm":      {"host": "smtp.fastmail.com",       "port": 465, "use_ssl": True,  "use_tls": False},
-    "tutanota.com":     {"host": "mail.tutanota.com",       "port": 587, "use_ssl": False, "use_tls": True},
+    "protonmail.com":   {"host": "smtp.protonmail.com",     "port": 587, "use_ssl": False, "use_tls": True},
+    "proton.me":        {"host": "smtp.protonmail.com",     "port": 587, "use_ssl": False, "use_tls": True},
 }
 
-def get_smtp_config_for_domain(domain: str) -> Optional[dict]:
 
-      return CONFIGS.get(domain.lower())
-
-
-async def test_smtp_connection(account: SmtpAccount) -> tuple:
-    log_lines = []
-    try:
-        log_lines.append(f"Подключение к {account.host}:{account.port}...")
-        smtp = aiosmtplib.SMTP(
-            hostname=account.host, port=account.port,
-            use_tls=account.use_ssl, start_tls=account.use_tls, timeout=15,
-        )
-        await smtp.connect()
-        log_lines.append("Соединение установлено. Авторизация...")
-        await smtp.login(account.email, account.password)
-        log_lines.append(f"\u2713 Успешно! Аккаунт {account.email} готов к отправке.")
-        await smtp.quit()
-        return True, "\n".join(log_lines)
-    except aiosmtplib.SMTPAuthenticationError:
-        log_lines.append("\u2717 Ошибка авторизации: неверный email или пароль.")
-        return False, "\n".join(log_lines)
-    except Exception as e:
-        log_lines.append(f"\u2717 Ошибка: {e}")
-        return False, "\n".join(log_lines)
+def get_smtp_config(email: str) -> dict:
+    domain = email.split("@")[-1].lower() if "@" in email else ""
+    return CONFIGS.get(domain, {"host": "", "port": 587, "use_ssl": False, "use_tls": True})
 
 
-def build_email_message(account: SmtpAccount, recipient: Recipient, template: EmailTemplate) -> MIMEMultipart:
-    has_attachments = bool(template.attachments)
-    if has_attachments:
-        msg = MIMEMultipart("mixed")
-        alt = MIMEMultipart("alternative")
-    else:
-        msg = MIMEMultipart("alternative")
-        alt = msg
+def _build_message(
+    account: SmtpAccount,
+    recipient: Recipient,
+    template: EmailTemplate,
+) -> MIMEMultipart:
+    msg = MIMEMultipart("alternative")
     msg["From"] = account.display_email
     msg["To"] = recipient.email
     msg["Subject"] = template.subject
     msg["Date"] = formatdate(localtime=True)
-    msg["Message-ID"] = make_msgid(domain=account.host)
+    msg["Message-ID"] = make_msgid(domain=account.email.split("@")[-1])
+
     if template.reply_to:
         msg["Reply-To"] = template.reply_to
+
+    headers = []
     if template.unsubscribe_url:
-        msg["List-Unsubscribe"] = f"<{template.unsubscribe_url}>"
+        headers.append(f"<{template.unsubscribe_url}>")
+    if template.unsubscribe_email:
+        headers.append(f"<mailto:{template.unsubscribe_email}>")
+    if headers:
+        msg["List-Unsubscribe"] = ", ".join(headers)
         msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
-    elif template.unsubscribe_email:
-        msg["List-Unsubscribe"] = f"<mailto:{template.unsubscribe_email}>"
-    text_body = template.body_text or _html_to_text(template.body_html)
-    alt.attach(MIMEText(text_body, "plain", "utf-8"))
-    if template.body_html:
-        alt.attach(MIMEText(template.body_html, "html", "utf-8"))
-    if has_attachments:
-        msg.attach(alt)
-        for att_path in template.attachments:
-            path = Path(att_path)
-            if not path.exists():
-                logger.warning(f"Attachment not found: {att_path}")
-                continue
-            with open(path, "rb") as fh:
-                part = MIMEBase("application", "octet-stream")
-                part.set_payload(fh.read())
+
+    if template.body_text:
+        msg.attach(MIMEText(template.body_text, "plain", "utf-8"))
+    msg.attach(MIMEText(template.body_html, "html", "utf-8"))
+
+    for path_str in template.attachments:
+        path = Path(path_str)
+        if path.exists():
+            part = MIMEBase("application", "octet-stream")
+            part.set_payload(path.read_bytes())
             encoders.encode_base64(part)
             part.add_header("Content-Disposition", f'attachment; filename="{path.name}"')
             msg.attach(part)
+
     return msg
 
 
 class SendingEngine:
-    def __init__(self, accounts: List[SmtpAccount], config: CampaignConfig, log_queue: Optional[queue.Queue] = None):
-        self.accounts = [a for a in accounts if a.is_active]
+    def __init__(
+        self,
+        accounts: List[SmtpAccount],
+        recipients: List[Recipient],
+        template: EmailTemplate,
+        config: CampaignConfig,
+        result_queue: queue.Queue,
+        stop_event: threading.Event = None,
+    ):
+        import threading
+        self.accounts = accounts
+        self.recipients = recipients
+        self.template = template
         self.config = config
-        self.log_queue = log_queue
-        self._semaphore: Optional[asyncio.Semaphore] = None
-        self._account_lock: Optional[asyncio.Lock] = None
-        self._stopped = False
-        self._paused = False
-        self._account_index = 0
-        self.on_progress: Optional[Callable] = None
-        self.on_finished: Optional[Callable] = None
-        self.stats = {"sent": 0, "success": 0, "errors": 0, "start_time": 0.0}
+        self.result_queue = result_queue
+        self.stop_event = stop_event or threading.Event()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
-    def stop(self) -> None:
-        self._stopped = True
-
-    def pause(self) -> None:
-        self._paused = True
-
-    def resume(self) -> None:
-        self._paused = False
-
-    async def _get_next_account(self) -> Optional[SmtpAccount]:
-        async with self._account_lock:
-            active = [a for a in self.accounts if a.can_send]
-            if not active:
-                return None
-            account = active[self._account_index % len(active)]
-            self._account_index = (self._account_index + 1) % max(len(active), 1)
-            return account
-
-    def _log(self, message: str) -> None:
-        if self.log_queue:
-            try:
-                self.log_queue.put_nowait({"type": "log", "message": message})
-            except Exception:
-                pass
-
-    async def _send_one(self, account: SmtpAccount, recipient: Recipient, template: EmailTemplate) -> SendResult:
-        personalized = template.personalize(recipient)
-        msg = build_email_message(account, recipient, personalized)
+    def run(self):
+        import threading as _threading
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
         try:
-            smtp = aiosmtplib.SMTP(
-                hostname=account.host, port=account.port,
-                use_tls=account.use_ssl, start_tls=account.use_tls, timeout=30,
-            )
-            async with smtp:
-                await smtp.login(account.email, account.password)
-                await smtp.send_message(msg)
-            async with self._account_lock:
+            self._loop.run_until_complete(self._async_run())
+        finally:
+            self._loop.close()
+
+    def stop(self):
+        self.stop_event.set()
+
+    async def _async_run(self):
+        sem = asyncio.Semaphore(self.config.max_threads)
+        tasks = []
+        for i, recipient in enumerate(self.recipients):
+            if self.stop_event.is_set():
+                break
+            account = self._pick_account()
+            if account is None:
+                result = SendResult(
+                    recipient_email=recipient.email,
+                    success=False,
+                    error="Нет доступных аккаунтов",
+                )
+                self.result_queue.put(result)
+                continue
+
+            if i > 0 and i % self.config.pause_after_n == 0:
+                await asyncio.sleep(self.config.pause_duration_sec)
+
+            delay = random.randint(self.config.min_delay_ms, self.config.max_delay_ms) / 1000.0
+            await asyncio.sleep(delay)
+
+            task = asyncio.create_task(self._send_one(sem, account, recipient))
+            tasks.append(task)
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _pick_account(self) -> Optional[SmtpAccount]:
+        available = [a for a in self.accounts if a.can_send]
+        if not available:
+            return None
+        return min(available, key=lambda a: a.sent_today)
+
+    async def _send_one(self, sem: asyncio.Semaphore, account: SmtpAccount, recipient: Recipient):
+        async with sem:
+            if self.stop_event.is_set():
+                return
+            personalized = self.template.personalize(recipient)
+            msg = _build_message(account, recipient, personalized)
+            try:
+                kwargs = {
+                    "hostname": account.host,
+                    "port": account.port,
+                    "username": account.email,
+                    "password": account.password,
+                    "use_tls": account.use_tls,
+                }
+                if account.use_ssl:
+                    kwargs["use_tls"] = False
+                    await aiosmtplib.send(msg, **kwargs, start_tls=False, timeout=30)
+                else:
+                    await aiosmtplib.send(msg, **kwargs, start_tls=account.use_tls, timeout=30)
                 account.sent_today += 1
                 account.sent_this_hour += 1
                 account.last_sent = time.time()
-            return SendResult(
-                recipient_email=recipient.email, success=True,
-                account_used=account.email, message_id=msg.get("Message-ID", ""),
-            )
-        except aiosmtplib.SMTPAuthenticationError:
-            account.is_active = False
-            self._log(f"\u26a0 {account.email} деактивирован: ошибка авторизации")
-            return SendResult(recipient_email=recipient.email, success=False,
-                              error="SMTP auth error", account_used=account.email)
-        except asyncio.TimeoutError:
-            return SendResult(recipient_email=recipient.email, success=False,
-                              error="Timeout", account_used=account.email)
-        except Exception as e:
-            return SendResult(recipient_email=recipient.email, success=False,
-                              error=str(e), account_used=account.email)
+                result = SendResult(
+                    recipient_email=recipient.email,
+                    success=True,
+                    account_used=account.email,
+                    message_id=msg.get("Message-ID", ""),
+                )
+            except Exception as e:
+                result = SendResult(
+                    recipient_email=recipient.email,
+                    success=False,
+                    error=str(e),
+                    account_used=account.email,
+                )
+            self.result_queue.put(result)
 
-    async def run_campaign(self, recipients: List[Recipient], template: EmailTemplate) -> List[SendResult]:
-        self._semaphore = asyncio.Semaphore(self.config.max_threads)
-        self._account_lock = asyncio.Lock()
-        self._stopped = False
-        self.stats = {"sent": 0, "success": 0, "errors": 0, "start_time": time.time()}
-        total = len(recipients)
 
-        async def send_with_semaphore(recipient: Recipient) -> SendResult:
-            # Ожидание снятия паузы — вне семафора, не блокируем слоты
-            while self._paused and not self._stopped:
-                await asyncio.sleep(0.2)
-            if self._stopped:
-                return SendResult(recipient_email=recipient.email, success=False, error="stopped")
-
-            async with self._semaphore:
-                if self._stopped:
-                    return SendResult(recipient_email=recipient.email, success=False, error="stopped")
-                account = await self._get_next_account()
-                if not account:
-                    return SendResult(recipient_email=recipient.email, success=False,
-                                      error="Нет доступных аккаунтов")
-                result = await self._send_one(account, recipient, template)
-
-                # Обновление статистики — атомарно внутри семафора (asyncio однопоточный)
-                if result.success:
-                    self.stats["success"] += 1
-                    self._log(f"\u2713 {recipient.email}")
-                else:
-                    self.stats["errors"] += 1
-                    self._log(f"\u2717 {recipient.email}: {result.error}")
-                self.stats["sent"] += 1
-                sent_count = self.stats["sent"]
-                if self.on_progress:
-                    self.on_progress(sent_count, total, result)
-
-            # ВАЖНО: задержки вынесены ЗА пределы семафора.
-            # Пока один воркер ждёт — остальные max_threads слотов свободны.
-            if not self._stopped and sent_count % self.config.pause_after_n == 0:
-                self._log(f"\u23f8 Пауза {self.config.pause_duration_sec}с...")
-                await asyncio.sleep(self.config.pause_duration_sec)
-            if not self._stopped:
-                delay = random.randint(self.config.min_delay_ms, self.config.max_delay_ms) / 1000.0
-                if delay > 0:
-                    await asyncio.sleep(delay)
-
-            return result
-
-        tasks = [asyncio.create_task(send_with_semaphore(r)) for r in recipients]
-        # return_exceptions=True — одна ошибка не роняет всю рассылку
-        results_raw = await asyncio.gather(*tasks, return_exceptions=True)
-        results: List[SendResult] = []
-        for i, r in enumerate(results_raw):
-            if isinstance(r, SendResult):
-                results.append(r)
-            else:
-                # Неожиданное исключение — оборачиваем в SendResult
-                email = recipients[i].email if i < len(recipients) else "unknown"
-                logger.error(f"Unexpected error for {email}: {r}")
-                results.append(SendResult(recipient_email=email, success=False, error=str(r)))
-
-        if self.on_finished:
-            self.on_finished(results)
-        return results
+import threading

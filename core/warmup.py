@@ -2,7 +2,6 @@
 Модуль прогрева SMTP-аккаунтов.
 Автоматически увеличивает объём отправки по кривой: день 1→5, день 7→50, день 30→500+
 """
-import asyncio
 import json
 import math
 import random
@@ -14,10 +13,6 @@ from typing import Dict, List, Optional
 
 
 def get_warmup_limit(day: int) -> int:
-    """
-    Возвращает максимальное количество писем для заданного дня прогрева.
-    день 1: 5 | день 7: 50 | день 14: 150 | день 21: 300 | день 30: 500+
-    """
     if day <= 0:
         return 0
     if day >= 30:
@@ -31,7 +26,6 @@ WARMUP_SCHEDULE = {day: get_warmup_limit(day) for day in range(1, 61)}
 
 @dataclass
 class WarmupRecord:
-    """Запись прогрева для одного аккаунта."""
     email: str
     start_date: str
     current_day: int = 1
@@ -85,18 +79,14 @@ class WarmupRecord:
 
 
 class WarmupScheduler:
-    """
-    Управляет прогревом нескольких SMTP-аккаунтов.
-    Хранит данные в JSON-файле.
-    """
-
     def __init__(self, data_path: Path):
         self.data_path = data_path
         self.records: Dict[str, WarmupRecord] = {}
+        # FIX: инициализируем _save_counter в __init__, не через getattr
+        self._save_counter: int = 0
         self._load()
 
     def _advance_pending_days(self, record: WarmupRecord) -> None:
-        """Автоматически продвигает счётчик дней прогрева по календарю."""
         if not record.is_active:
             return
         try:
@@ -126,6 +116,18 @@ class WarmupScheduler:
                 {email: r.to_dict() for email, r in self.records.items()},
                 f, ensure_ascii=False, indent=2
             )
+        self._save_counter = 0
+
+    def flush(self) -> None:
+        """Принудительное сохранение — вызывать при завершении приложения."""
+        if self.records:
+            self._save()
+
+    def __del__(self):
+        try:
+            self.flush()
+        except Exception:
+            pass
 
     def add_account(self, email: str) -> WarmupRecord:
         if email not in self.records:
@@ -147,15 +149,13 @@ class WarmupScheduler:
         return list(self.records.values())
 
     def record_sent(self, email: str, count: int = 1) -> None:
-        # FIX: debounced save — write to disk every 10 calls, not every email.
-        # Prevents 500+ filesystem writes during active warmup campaigns.
+        """Debounced save — flush every 10 calls or on explicit flush()."""
         record = self.records.get(email)
         if record:
             record.record_sent(count)
-            self._save_counter = getattr(self, "_save_counter", 0) + 1
+            self._save_counter += 1
             if self._save_counter >= 10:
                 self._save()
-                self._save_counter = 0
 
     def can_send(self, email: str) -> bool:
         record = self.records.get(email)
@@ -181,10 +181,8 @@ class WarmupScheduler:
             self._save()
 
     def get_summary(self) -> dict:
-        active = sum(1 for r in self.records.values() if r.is_active)
-        total_sent = sum(r.total_sent for r in self.records.values())
         return {
             "total_accounts": len(self.records),
-            "active_accounts": active,
-            "total_sent": total_sent,
+            "active": sum(1 for r in self.records.values() if r.is_active),
+            "total_sent": sum(r.total_sent for r in self.records.values()),
         }

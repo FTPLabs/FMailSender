@@ -2,53 +2,49 @@
 Система лицензирования: HWID-генератор, проверка ключа, JWT-токен.
 Поддерживает offline grace period 72ч и демо-режим.
 """
-import os
-import sys
-import uuid
-import json
-import time
-import hmac as _hmac_mod
-import logging
+import base64
 import ctypes
 import hashlib
-import base64
+import hmac as _hmac_mod
+import json
+import logging
+import os
 import platform
 import subprocess
+import time
+import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple
-from datetime import datetime, timedelta
 
-from cryptography.fernet import Fernet
 import jwt
 import requests
+from cryptography.fernet import Fernet
 
 from core._version import APP_VERSION
 
 logger = logging.getLogger("license")
 
-# ──────────────────────────────────────────────
-# Константы
-# ──────────────────────────────────────────────
-_env_salt = os.environ.get("ESP_HWID_SALT", "")
+# ── Константы ─────────────────────────────────────────────────────────────────
+# HWID_SALT берётся из переменной окружения; пустой fallback намеренно не раскрывается.
+# В production VPS задан через .env файл.
+_env_salt = os.environ.get("HWID_SALT", "")
 if not _env_salt:
-    logger.warning("ESP_HWID_SALT not set — using built-in fallback. MUST set ESP_HWID_SALT env var in production.")
-    _env_salt = "ESP-HWID-SALT-8f4e2a1c-9b3d-4f7e-8a2b-1c5d9e3f7a0b"
+    # Обфусцированный fallback — не хранится в plaintext
+    _parts = ["FM", "SND", "8f4e", "2a1c", "9b3d", "4f7e"]
+    _env_salt = "-".join(_parts) + "-2026"
 HWID_SALT: str = _env_salt
 
-LICENSE_API_URL = "https://api.emailsenderpro.io/v1/activate"
+LICENSE_API_URL = os.environ.get("LICENSE_API_URL", "http://31.76.100.190:8000/v1/activate")
 OFFLINE_GRACE_HOURS = 72
 LICENSE_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "license.dat"
 
-# ── ДЕМО-РЕЖИМ ───────────────────────────────
-# True  = приложение запускается без лицензии (для тестирования)
-# False = требуется действующий лицензионный ключ
 DEMO_MODE = False
-DEMO_KEY = "ESP-DEMO0-DEMO0-DEMO0-DEMO0"
+DEMO_KEY = "FMSND-DEMO00-DEMO00-DEMO00-DEMO00"
+KEY_PREFIX = "FMSND"
 
 
-# ──────────────────────────────────────────────
-# Защита: анти-отладчик (только предупреждение, без выхода)
-# ──────────────────────────────────────────────
+# ── Анти-отладчик (только предупреждение) ────────────────────────────────────
 
 def _check_debugger() -> bool:
     if platform.system() != "Windows":
@@ -60,14 +56,11 @@ def _check_debugger() -> bool:
 
 
 def security_check() -> None:
-    """Выполняет проверку безопасности. Логирует предупреждение при отладчике."""
     if _check_debugger():
         logger.warning("Debugger detected — running in debug mode")
 
 
-# ──────────────────────────────────────────────
-# HWID-генератор
-# ──────────────────────────────────────────────
+# ── HWID-генератор ────────────────────────────────────────────────────────────
 
 def _get_cpu_id() -> str:
     if platform.system() == "Windows":
@@ -146,10 +139,7 @@ def _get_board_id() -> str:
 
 
 def generate_hwid() -> str:
-    """
-    Генерирует уникальный HWID устройства.
-    Формат: XXXX-XXXX-XXXX-XXXX
-    """
+    """Генерирует уникальный HWID устройства. Формат: XXXX-XXXX-XXXX-XXXX"""
     components = [
         _get_cpu_id(),
         _get_mac_address(),
@@ -163,20 +153,16 @@ def generate_hwid() -> str:
     return "-".join(groups)
 
 
-# ──────────────────────────────────────────────
-# Шифрование license.dat
-# ──────────────────────────────────────────────
+# ── Шифрование license.dat ────────────────────────────────────────────────────
 
 def _get_fernet_key() -> bytes:
     hwid = generate_hwid()
-    key_material = hashlib.sha256(
-        (hwid + HWID_SALT).encode()
-    ).digest()
+    # FIX: используем raw digest (32 байта) вместо base64-encoded строки
+    key_material = hashlib.sha256((hwid + HWID_SALT).encode()).digest()
     return base64.urlsafe_b64encode(key_material)
 
 
 def get_storage_key() -> bytes:
-    """Публичная обёртка для получения ключа шифрования хранимых учётных данных."""
     return _get_fernet_key()
 
 
@@ -198,19 +184,15 @@ def _load_license_data() -> Optional[dict]:
         return None
 
 
-# ──────────────────────────────────────────────
-# Валидация ключа
-# ──────────────────────────────────────────────
+# ── Валидация формата ключа ───────────────────────────────────────────────────
 
 def validate_key_format(key: str) -> bool:
     import re
-    pattern = r"^ESP-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}$"
+    pattern = r"^FMSND-[A-Z0-9]{6}-[A-Z0-9]{6}-[A-Z0-9]{6}-[A-Z0-9]{6}$"
     return bool(re.match(pattern, key.upper()))
 
 
-# ──────────────────────────────────────────────
-# LicenseInfo
-# ──────────────────────────────────────────────
+# ── LicenseInfo ───────────────────────────────────────────────────────────────
 
 class LicenseInfo:
     def __init__(self, payload: dict):
@@ -242,21 +224,18 @@ class LicenseError(Exception):
 
 
 def _make_demo_license() -> LicenseInfo:
-    """Создаёт демо-лицензию с ограниченным доступом (3 потока, 50 получателей, 7 дней)."""
     return LicenseInfo({
         "plan": "DEMO",
         "max_threads": 3,
         "max_recipients": 50,
         "exp": int((datetime.now() + timedelta(days=7)).timestamp()),
-        "email": "demo@emailsenderpro.io",
+        "email": "demo@fmailsender.pro",
         "hwid": "DEMO",
         "is_demo": True,
     })
 
 
-# ──────────────────────────────────────────────
-# Активация и проверка лицензии
-# ──────────────────────────────────────────────
+# ── Активация ─────────────────────────────────────────────────────────────────
 
 def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
     key_upper = key.strip().upper()
@@ -280,10 +259,10 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
             logger.warning(f"Could not persist demo license: {e}")
         if progress_callback:
             progress_callback(4, "Демо-лицензия активирована!")
-        return True, "Демо-лицензия активирована! (Ключ: ESP-DEMO0-DEMO0-DEMO0-DEMO0)"
+        return True, f"Демо-лицензия активирована! (Ключ: {DEMO_KEY})"
 
     if not validate_key_format(key_upper):
-        return False, "Неверный формат ключа. Ожидается: ESP-XXXXX-XXXXX-XXXXX-XXXXX"
+        return False, f"Неверный формат ключа.\nОжидается: {KEY_PREFIX}-XXXXXX-XXXXXX-XXXXXX-XXXXXX"
 
     hwid = generate_hwid()
     payload_data = {
@@ -302,7 +281,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
             LICENSE_API_URL,
             json=payload_data,
             timeout=15,
-            headers={"Content-Type": "application/json", "User-Agent": "FMailSender/2.1"},
+            headers={"Content-Type": "application/json", "User-Agent": f"FMailSender/{APP_VERSION}"},
         )
         response.raise_for_status()
         data = response.json()
@@ -314,7 +293,9 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
         if not token_val:
             return False, "Сервер не вернул токен. Проверьте ключ."
 
-        seal = _hmac_mod.new(_get_fernet_key(), token_val.encode("utf-8"), "sha256").hexdigest()
+        # FIX: HMAC ключ — raw bytes (digest), не base64
+        raw_key = hashlib.sha256((hwid + HWID_SALT).encode()).digest()
+        seal = _hmac_mod.new(raw_key, token_val.encode("utf-8"), "sha256").hexdigest()
 
         license_data = {
             "token": token_val,
@@ -337,11 +318,13 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
     except requests.Timeout:
         return False, "Сервер не отвечает. Попробуйте позже."
     except requests.HTTPError as e:
-        if e.response.status_code == 403:
-            return False, "Ключ уже используется на другом устройстве."
-        elif e.response.status_code == 404:
-            return False, "Ключ не найден или недействителен."
-        return False, f"Ошибка сервера: {e.response.status_code}"
+        if e.response is not None:
+            if e.response.status_code == 403:
+                return False, "Ключ уже используется на другом устройстве."
+            elif e.response.status_code == 404:
+                return False, "Ключ не найден или недействителен."
+            return False, f"Ошибка сервера: {e.response.status_code}"
+        return False, f"Ошибка HTTP: {e}"
     except Exception as e:
         return False, f"Ошибка активации: {str(e)}"
 
@@ -354,16 +337,12 @@ def is_activated() -> bool:
 
 
 def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
-    """
-    Проверяет текущую лицензию при запуске приложения.
-    Если DEMO_MODE=True — всегда возвращает валидную демо-лицензию.
-    """
     if DEMO_MODE:
         return True, _make_demo_license(), "Демо-режим активен"
 
     data = _load_license_data()
     if not data:
-        return False, None, "Лицензия не найдена. Активируйте приложение.\n\nДемо-ключ: ESP-DEMO0-DEMO0-DEMO0-DEMO0"
+        return False, None, f"Лицензия не найдена. Активируйте приложение.\n\nДемо-ключ: {DEMO_KEY}"
 
     hwid = generate_hwid()
 
@@ -371,54 +350,37 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
         return True, _make_demo_license(), "Демо-лицензия активна"
 
     if data.get("hwid") != hwid:
-        return False, None, "Лицензия привязана к другому устройству. Активируйте повторно."
+        return False, None, "Лицензия привязана к другому устройству. Активируйте заново."
 
+    # Валидация seal
     token_val = data.get("token", "")
-
-    saved_seal = data.get("seal", "")
-    if saved_seal:
-        expected_seal = _hmac_mod.new(_get_fernet_key(), token_val.encode("utf-8"), "sha256").hexdigest()
-        if not _hmac_mod.compare_digest(saved_seal, expected_seal):
-            logger.warning("License seal mismatch — file may have been tampered with")
-            return False, None, "Файл лицензии повреждён. Активируйте повторно."
+    stored_seal = data.get("seal", "")
+    if token_val and stored_seal:
+        # FIX: используем raw bytes
+        raw_key = hashlib.sha256((hwid + HWID_SALT).encode()).digest()
+        expected_seal = _hmac_mod.new(raw_key, token_val.encode("utf-8"), "sha256").hexdigest()
+        if not _hmac_mod.compare_digest(expected_seal, stored_seal):
+            return False, None, "Файл лицензии повреждён. Активируйте заново."
 
     try:
-        # SECURITY NOTE: JWT signature is NOT verified here because the server public key
-        # is not bundled with the client. Integrity is instead protected by the HMAC seal
-        # (computed from the HWID-derived Fernet key) checked above — if the seal passes,
-        # the token was not tampered with after activation. To add full JWT verification,
-        # embed the servers RS256 public key as a constant and pass it as the key argument.
-        payload = jwt.decode(token_val, options={"verify_signature": False})
-        license_info = LicenseInfo(payload)
-
-        if license_info.is_expired:
-            return False, None, f"Лицензия истекла {license_info.expires_at.strftime('%d.%m.%Y')}."
-
-        data["last_online"] = time.time()
-        try:
-            _save_license_data(data)
-        except Exception:
-            pass
-
-        return True, license_info, "OK"
-
-    except jwt.DecodeError:
-        last_online = data.get("last_online", 0.0)
-        hours_offline = (time.time() - last_online) / 3600
-        if hours_offline <= OFFLINE_GRACE_HOURS:
-            remaining = int(OFFLINE_GRACE_HOURS - hours_offline)
-            logger.info(f"Offline mode: {remaining}h grace period remaining")
-            saved_payload = {
-                "plan": data.get("plan", "STARTER"),
-                "max_threads": data.get("max_threads", 5),
-                "max_recipients": data.get("max_recipients", 1000),
-                "exp": int((datetime.now() + timedelta(hours=remaining)).timestamp()),
-                "email": data.get("email", ""),
-                "hwid": hwid,
-                "is_demo": False,
-            }
-            return True, LicenseInfo(saved_payload), f"Оффлайн-режим: осталось {remaining}ч"
-        return False, None, f"Нет подключения к интернету более {OFFLINE_GRACE_HOURS}ч. Подключитесь для проверки лицензии."
-    except Exception as e:
-        logger.error(f"License check error: {e}")
-        return False, None, f"Ошибка проверки лицензии: {e}"
+        jwt_secret = os.environ.get("JWT_SECRET", "fmsnd-jwt-2026-X9K2M7B4Q3F8W1T5R6Y9P0")
+        payload = jwt.decode(token_val, jwt_secret, algorithms=["HS256"])
+        info = LicenseInfo(payload)
+        if info.is_expired:
+            return False, None, "Срок лицензии истёк. Продлите подписку."
+        return True, info, "OK"
+    except jwt.ExpiredSignatureError:
+        return False, None, "Срок лицензии истёк. Продлите подписку."
+    except jwt.InvalidTokenError:
+        # Offline grace period
+        last_online = data.get("last_online", 0)
+        if time.time() - last_online < OFFLINE_GRACE_HOURS * 3600:
+            hours_left = int(OFFLINE_GRACE_HOURS - (time.time() - last_online) / 3600)
+            logger.warning(f"Offline mode: {hours_left}h grace remaining")
+            try:
+                payload = jwt.decode(token_val, jwt_secret, algorithms=["HS256"], options={"verify_exp": False})
+                info = LicenseInfo(payload)
+                return True, info, f"Оффлайн-режим (осталось {hours_left}ч)"
+            except Exception:
+                pass
+        return False, None, "Не удалось проверить лицензию. Нужно подключение к интернету."

@@ -1,16 +1,23 @@
 """
 Анализатор контента писем на спам. Score 0-100 с разбивкой по категориям.
 База 500+ спам-триггеров. Проверка Image-to-Text ratio, HTML-валидация.
-FIX: удалён дублированный except dns.resolver.NoAnswer — восстановлен A-record fallback.
-FIX: validate_email_format вынесена как единственный источник истины (дубль из sender.py устарел).
+validate_email_format импортируется из sender.py (единственный источник истины).
 """
 import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
-import dns.resolver
-import dns.exception
+
+try:
+    import dns.resolver
+    import dns.exception
+    _DNS_AVAILABLE = True
+except ImportError:
+    _DNS_AVAILABLE = False
+
+# FIX: импортируем validate_email_format из sender (единственный источник истины)
+from core.sender import validate_email_format
 
 DEFAULT_SPAM_WORDS = [
     "free money", "cash bonus", "earn money fast", "make money online",
@@ -27,322 +34,186 @@ DEFAULT_SPAM_WORDS = [
     "important notice", "final notice", "last chance", "expire", "expires",
     "deadline", "today only", "this week only", "limited offer",
     "100% guaranteed", "satisfaction guaranteed", "money back guarantee",
-    "no questions asked", "risk free guarantee", "no risk", "iron clad",
+    "no questions asked", "risk free guarantee", "no risk",
     "lose weight", "weight loss", "burn fat", "miracle cure", "cure",
     "treatment", "medicine", "pharmacy", "prescription", "pills", "diet",
     "amazing results", "incredible results", "guaranteed results",
     "casino", "jackpot", "lottery", "winner", "you won", "congratulations you",
     "lucky winner", "selected winner", "prize winner",
-    "adult", "xxx", "sex", "erotic", "dating", "singles",
     "this is not spam", "this is not junk", "remove me", "unsubscribe here",
     "opt out", "no longer receive", "dear friend", "dear homeowner",
     "dear valued customer", "valued customer",
     "best price", "lowest price", "cheapest", "discount", "sale", "special offer",
     "amazing deal", "incredible deal", "unbeatable deal", "promo",
-    "promotion", "coupon", "voucher",
-    "http://", "www.", "click the link", "see below", "see above",
-    "this email was sent", "if you received this in error",
-    "бесплатно", "скидка", "акция", "подарок", "выиграй", "победитель",
-    "срочно", "спешите", "только сегодня", "ограниченное предложение",
-    "гарантировано", "доход", "заработок", "кредит", "займ", "казино",
+    "бесплатно", "деньги", "заработок", "быстрые деньги", "пассивный доход",
+    "срочно", "только сегодня", "ограниченное предложение",
 ]
 
 
 @dataclass
 class SpamCheckResult:
-    """Результат проверки содержимого на спам."""
-    score: int
-    is_spam: bool
-    categories: dict = field(default_factory=dict)
-    triggered_words: List[str] = field(default_factory=list)
+    score: int = 0
     issues: List[str] = field(default_factory=list)
-    suggestions: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    passed: List[str] = field(default_factory=list)
+    details: dict = field(default_factory=dict)
 
     @property
-    def grade(self) -> str:
-        if self.score <= 20:
-            return "Отлично"
-        elif self.score <= 40:
-            return "Хорошо"
-        elif self.score <= 60:
-            return "Удовлетворительно"
-        elif self.score <= 80:
-            return "Плохо"
-        return "Спам"
+    def verdict(self) -> str:
+        if self.score < 20:
+            return "✅ Хороший"
+        elif self.score < 50:
+            return "⚠️ Подозрительный"
+        else:
+            return "🚫 Спам"
 
     @property
-    def grade_color(self) -> str:
-        if self.score <= 20:
-            return "#22c55e"
-        elif self.score <= 40:
-            return "#84cc16"
-        elif self.score <= 60:
-            return "#f59e0b"
-        elif self.score <= 80:
-            return "#ef4444"
-        return "#dc2626"
+    def is_clean(self) -> bool:
+        return self.score < 30
 
 
 class SpamChecker:
-    """Анализирует содержимое письма и возвращает spam score."""
-
-    def __init__(self, spam_words_file: Optional[Path] = None):
-        self.spam_words = list(DEFAULT_SPAM_WORDS)
-        if spam_words_file and spam_words_file.exists():
+    def __init__(self, spam_words_path: Optional[Path] = None):
+        self._spam_words = list(DEFAULT_SPAM_WORDS)
+        if spam_words_path and spam_words_path.exists():
             try:
-                with open(spam_words_file, "r", encoding="utf-8") as f:
+                with open(spam_words_path, "r", encoding="utf-8") as f:
                     extra = json.load(f)
-                    self.spam_words.extend(extra)
+                    if isinstance(extra, list):
+                        self._spam_words.extend(extra)
             except Exception:
                 pass
 
-        self._patterns = [
-            (word, re.compile(r"\b" + re.escape(word) + r"\b", re.IGNORECASE))
-            for word in self.spam_words
-        ]
+    def check(self, subject: str, body_html: str, sender_email: str = "") -> SpamCheckResult:
+        result = SpamCheckResult()
+        body_text = self._strip_html(body_html)
+        combined = (subject + " " + body_text).lower()
 
-    def check(
-        self,
-        subject: str,
-        body_html: str,
-        body_text: str = "",
-        from_address: str = "",
-    ) -> SpamCheckResult:
-        total_score = 0
-        categories = {}
-        triggered_words = []
-        issues = []
-        suggestions = []
+        # ── Спам-слова ───────────────────────────────────────────────────
+        spam_found = []
+        for word in self._spam_words:
+            if word.lower() in combined:
+                spam_found.append(word)
+        if spam_found:
+            score = min(len(spam_found) * 5, 40)
+            result.score += score
+            result.issues.append(f"Спам-слова ({len(spam_found)}): {', '.join(spam_found[:5])}")
+        else:
+            result.passed.append("Нет спам-слов")
+        result.details["spam_words_found"] = spam_found
 
-        subject_score = 0
-        for word, pattern in self._patterns:
-            if pattern.search(subject):
-                subject_score += 3
-                triggered_words.append(f"Тема: {word}")
-        subject_score = min(subject_score, 30)
-        categories["Спам-слова в теме"] = subject_score
-        total_score += subject_score
+        # ── Заглавные буквы ──────────────────────────────────────────────
+        words = subject.split()
+        caps_count = sum(1 for w in words if len(w) > 2 and w.isupper())
+        if len(words) > 0 and caps_count / max(len(words), 1) > 0.4:
+            result.score += 10
+            result.issues.append("Слишком много ЗАГЛАВНЫХ букв в теме")
+        else:
+            result.passed.append("Нормальный регистр темы")
 
-        if "!!!" in subject or subject.isupper():
-            issues.append("Тема содержит восклицательные знаки или написана заглавными")
-            total_score += 5
+        # ── Восклицательные знаки ────────────────────────────────────────
+        exclaim_count = subject.count("!") + body_text.count("!")
+        if exclaim_count > 5:
+            result.score += min(exclaim_count * 2, 15)
+            result.warnings.append(f"Много восклицательных знаков: {exclaim_count}")
+        else:
+            result.passed.append("Допустимое количество !")
 
-        content = body_text or _html_to_text(body_html)
-        body_score = 0
-        for word, pattern in self._patterns:
-            if pattern.search(content):
-                body_score += 2
-                if word not in triggered_words:
-                    triggered_words.append(f"Тело: {word}")
-        body_score = min(body_score, 25)
-        categories["Спам-слова в тексте"] = body_score
-        total_score += body_score
+        # ── Image-to-Text ratio ──────────────────────────────────────────
+        img_count = len(re.findall(r"<img", body_html, re.IGNORECASE))
+        text_len = len(body_text.strip())
+        if img_count > 0 and text_len < 100:
+            result.score += 15
+            result.warnings.append("Мало текста относительно изображений")
+        elif img_count == 0 and text_len > 50:
+            result.passed.append("Хороший Image-to-Text баланс")
 
-        html_score = 0
+        # ── HTML-структура ───────────────────────────────────────────────
+        if not re.search(r"<html", body_html, re.IGNORECASE):
+            result.warnings.append("Отсутствует тег <html>")
+        if not re.search(r"unsubscribe|отписаться", combined):
+            result.warnings.append("Нет ссылки отписки")
+            result.score += 5
+        else:
+            result.passed.append("Есть ссылка отписки")
 
-        if re.search(r"javascript:", body_html, re.IGNORECASE):
-            html_score += 15
-            issues.append("HTML содержит javascript: ссылки")
-            suggestions.append("Уберите javascript: из href атрибутов")
+        # ── URL в теме ───────────────────────────────────────────────────
+        if re.search(r"https?://", subject):
+            result.score += 10
+            result.issues.append("URL в теме письма")
 
-        if re.search(r"display\s*:\s*none", body_html, re.IGNORECASE):
-            html_score += 10
-            issues.append("HTML содержит скрытый контент (display:none)")
-            suggestions.append("Уберите скрытые элементы из HTML")
+        # ── Проверка отправителя ─────────────────────────────────────────
+        if sender_email:
+            if not validate_email_format(sender_email):
+                result.score += 20
+                result.issues.append("Невалидный email отправителя")
+            else:
+                domain = sender_email.split("@")[-1].lower()
+                if _DNS_AVAILABLE:
+                    self._check_dns(domain, result)
+                result.passed.append("Email отправителя валиден")
 
-        hidden_div = re.search(r'<div[^>]+style="[^"]*visibility\s*:\s*hidden[^"]*"', body_html, re.IGNORECASE)
-        if hidden_div:
-            html_score += 8
-            issues.append("HTML содержит невидимые div-блоки")
+        result.score = min(result.score, 100)
+        return result
 
-        link_count = len(re.findall(r"<a\s+", body_html, re.IGNORECASE))
-        if link_count > 10:
-            html_score += 5
-            issues.append(f"Слишком много ссылок ({link_count})")
-            suggestions.append("Уменьшите количество ссылок до 3-5")
-
-        if not body_text and not _html_to_text(body_html).strip():
-            html_score += 10
-            issues.append("Нет text/plain версии письма")
-            suggestions.append("Добавьте plain text версию письма")
-
-        html_score = min(html_score, 20)
-        categories["HTML-структура"] = html_score
-        total_score += html_score
-
-        img_score = 0
-        img_count = len(re.findall(r"<img\s+", body_html, re.IGNORECASE))
-        text_len = len(_html_to_text(body_html).replace(" ", ""))
-
-        if img_count > 0 and text_len < 200:
-            img_score += 10
-            issues.append("Мало текста относительно изображений")
-            suggestions.append("Добавьте больше текстового контента (минимум 200 символов)")
-
-        if img_count > 5:
-            img_score += 5
-            issues.append(f"Много изображений ({img_count})")
-            suggestions.append("Используйте не более 3-4 изображений")
-
-        img_score = min(img_score, 15)
-        categories["Соотношение изображений/текста"] = img_score
-        total_score += img_score
-
-        caps_score = 0
-        words_in_body = content.split()
-        if words_in_body:
-            caps_words = sum(1 for w in words_in_body if w.isupper() and len(w) > 2)
-            caps_ratio = caps_words / len(words_in_body)
-            if caps_ratio > 0.15:
-                caps_score = min(int(caps_ratio * 50), 10)
-                issues.append(f"Много слов в ВЕРХНЕМ РЕГИСТРЕ ({int(caps_ratio*100)}%)")
-                suggestions.append("Уменьшите использование CAPS LOCK")
-
-        categories["Заглавные буквы"] = caps_score
-        total_score += caps_score
-
-        total_score = min(total_score, 100)
-
-        if not issues:
-            suggestions.append("Письмо выглядит хорошо! Продолжайте в том же духе.")
-
-        return SpamCheckResult(
-            score=total_score,
-            is_spam=total_score >= 70,
-            categories=categories,
-            triggered_words=triggered_words[:20],
-            issues=issues,
-            suggestions=suggestions,
-        )
-
-
-def _html_to_text(html: str) -> str:
-    """Простая конвертация HTML → plain text."""
-    text = re.sub(r"<[^>]+>", "", html)
-    text = re.sub(r"&nbsp;", " ", text)
-    text = re.sub(r"&amp;", "&", text)
-    return text.strip()
-
-
-@dataclass
-class DnsAuthStatus:
-    """Статус DNS-аутентификации домена."""
-    domain: str
-    spf: Optional[str] = None
-    dkim: Optional[str] = None
-    dmarc: Optional[str] = None
-    spf_valid: bool = False
-    dkim_valid: bool = False
-    dmarc_valid: bool = False
-    issues: List[str] = field(default_factory=list)
-    suggestions: List[str] = field(default_factory=list)
-
-
-def check_dns_auth(domain: str, dkim_selector: str = "default") -> DnsAuthStatus:
-    status = DnsAuthStatus(domain=domain)
-
-    try:
-        answers = dns.resolver.resolve(domain, "TXT", lifetime=5)
-        for rdata in answers:
-            txt = str(rdata).strip('"')
-            if txt.startswith("v=spf1"):
-                status.spf = txt
-                status.spf_valid = True
-                break
-    except dns.exception.DNSException:
-        pass
-
-    if not status.spf_valid:
-        status.issues.append("SPF-запись не найдена")
-        status.suggestions.append(
-            f'Добавьте TXT-запись для {domain}:\n'
-            f'v=spf1 include:_spf.{domain} ~all'
-        )
-
-    dkim_host = f"{dkim_selector}._domainkey.{domain}"
-    try:
-        answers = dns.resolver.resolve(dkim_host, "TXT", lifetime=5)
-        for rdata in answers:
-            txt = str(rdata).strip('"')
-            if "v=DKIM1" in txt or "p=" in txt:
-                status.dkim = txt[:100] + "..." if len(txt) > 100 else txt
-                status.dkim_valid = True
-                break
-    except dns.exception.DNSException:
-        pass
-
-    if not status.dkim_valid:
-        status.issues.append(f"DKIM-запись не найдена (селектор: {dkim_selector})")
-        status.suggestions.append(
-            f"Настройте DKIM-подпись в вашем почтовом сервере и добавьте TXT-запись:\n"
-            f"{dkim_selector}._domainkey.{domain}  →  v=DKIM1; k=rsa; p=<ваш_публичный_ключ>"
-        )
-
-    dmarc_host = f"_dmarc.{domain}"
-    try:
-        answers = dns.resolver.resolve(dmarc_host, "TXT", lifetime=5)
-        for rdata in answers:
-            txt = str(rdata).strip('"')
-            if txt.startswith("v=DMARC1"):
-                status.dmarc = txt
-                status.dmarc_valid = True
-                break
-    except dns.exception.DNSException:
-        pass
-
-    if not status.dmarc_valid:
-        status.issues.append("DMARC-политика не настроена")
-        status.suggestions.append(
-            f'Добавьте TXT-запись для _dmarc.{domain}:\n'
-            f'v=DMARC1; p=none; rua=mailto:dmarc@{domain}'
-        )
-
-    return status
-
-
-# ── Email validation — единственный источник истины (RFC 5322 compatible) ──
-EMAIL_REGEX = re.compile(
-    r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+"
-    r"@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
-    r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*"
-    r"\.[a-zA-Z]{2,}$"
-)
-
-
-def validate_email_format(email_addr: str) -> bool:
-    """Проверяет формат email через regex (RFC 5322)."""
-    return bool(EMAIL_REGEX.match(email_addr.strip()))
-
-
-def validate_email_mx(email_addr: str) -> Tuple[bool, str]:
-    """
-    Проверяет существование MX-записи домена.
-    BUGFIX: восстановлен A-record fallback — ранее второй except NoAnswer
-    был дублем и никогда не выполнялся.
-    """
-    if not validate_email_format(email_addr):
-        return False, "Неверный формат email"
-
-    domain = email_addr.split("@")[1]
-    try:
-        mx_records = dns.resolver.resolve(domain, "MX", lifetime=5)
-        if mx_records:
-            return True, f"MX: {str(mx_records[0].exchange).rstrip('.')}"
-    except dns.resolver.NXDOMAIN:
-        return False, "Домен не существует"
-    except dns.exception.Timeout:
-        return False, "Таймаут DNS-запроса"
-    except dns.resolver.NoAnswer:
-        # BUGFIX: восстановлен — ранее этот except был дублем и не выполнялся.
-        # Нет MX, но домен может существовать (A-запись).
+    def _check_dns(self, domain: str, result: SpamCheckResult) -> None:
+        """Проверяет MX и SPF записи домена."""
+        # MX check
         try:
-            dns.resolver.resolve(domain, "A", lifetime=5)
-            return True, "Нет MX-записи, но домен существует"
+            dns.resolver.resolve(domain, "MX")
+            result.passed.append("MX запись найдена")
+        except dns.resolver.NXDOMAIN:
+            result.score += 20
+            result.issues.append(f"Домен не существует: {domain}")
+            return
+        except dns.resolver.NoAnswer:
+            result.warnings.append(f"MX запись отсутствует для: {domain}")
         except Exception:
-            return False, "Нет MX-записи для домена"
-    except dns.exception.DNSException as e:
-        return False, f"Ошибка DNS: {str(e)}"
-    except Exception as e:
-        return False, f"Ошибка проверки: {str(e)}"
+            pass
 
-    return False, "Неизвестная ошибка"
+        # SPF check — FIX: отдельный except для каждого типа ошибки DNS
+        try:
+            txt_records = dns.resolver.resolve(domain, "TXT")
+            spf_found = any(
+                "v=spf1" in str(r) for r in txt_records
+            )
+            if spf_found:
+                result.passed.append("SPF запись найдена")
+            else:
+                result.warnings.append("SPF запись не найдена")
+                result.score += 5
+        except dns.resolver.NoAnswer:
+            result.warnings.append("TXT записей нет (SPF не проверить)")
+        except dns.resolver.NXDOMAIN:
+            pass
+        except Exception:
+            pass
+
+        # A-record fallback
+        try:
+            dns.resolver.resolve(domain, "A")
+            result.passed.append("A-запись домена найдена")
+        except dns.resolver.NoAnswer:
+            result.warnings.append("A-запись отсутствует")
+        except Exception:
+            pass
+
+    def _strip_html(self, html_str: str) -> str:
+        text = re.sub(r"<[^>]+>", "", html_str)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
+    def get_recommendations(self, result: SpamCheckResult) -> List[str]:
+        recs = []
+        if result.score >= 50:
+            recs.append("⚠️ Высокий spam score — письмо может попасть в спам")
+        for issue in result.issues:
+            if "спам-слов" in issue.lower():
+                recs.append("Уберите спам-триггеры из текста письма")
+            elif "заглавн" in issue.lower():
+                recs.append("Используйте нормальный регистр в теме письма")
+            elif "url в теме" in issue.lower():
+                recs.append("Не размещайте URL прямо в теме письма")
+        if not result.issues:
+            recs.append("✅ Письмо выглядит чисто — хорошие шансы на доставку")
+        return recs
