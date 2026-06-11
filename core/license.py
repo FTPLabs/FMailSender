@@ -37,7 +37,7 @@ HWID_SALT: str = _env_salt
 
 LICENSE_API_URL = "https://api.emailsenderpro.io/v1/activate"
 OFFLINE_GRACE_HOURS = 72
-LICENSE_FILE = Path(os.environ.get("APPDATA", ".")) / "EmailSenderPro" / "license.dat"
+LICENSE_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "license.dat"
 
 # ── ДЕМО-РЕЖИМ ───────────────────────────────
 # True  = приложение запускается без лицензии (для тестирования)
@@ -302,7 +302,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
             LICENSE_API_URL,
             json=payload_data,
             timeout=15,
-            headers={"Content-Type": "application/json", "User-Agent": "EmailSenderPro/1.0"},
+            headers={"Content-Type": "application/json", "User-Agent": "FMailSender/2.1"},
         )
         response.raise_for_status()
         data = response.json()
@@ -383,6 +383,11 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
             return False, None, "Файл лицензии повреждён. Активируйте повторно."
 
     try:
+        # SECURITY NOTE: JWT signature is NOT verified here because the server public key
+        # is not bundled with the client. Integrity is instead protected by the HMAC seal
+        # (computed from the HWID-derived Fernet key) checked above — if the seal passes,
+        # the token was not tampered with after activation. To add full JWT verification,
+        # embed the servers RS256 public key as a constant and pass it as the key argument.
         payload = jwt.decode(token_val, options={"verify_signature": False})
         license_info = LicenseInfo(payload)
 
