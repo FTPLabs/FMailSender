@@ -44,6 +44,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel setuptools
           pip install "PyQt6==6.7.1"
+          pip install "PyQt6-WebEngine==6.7.1"
           pip install "aiosmtplib>=3.0.0"
           pip install "cryptography>=41.0.0"
           pip install "PyJWT>=2.8.0"
