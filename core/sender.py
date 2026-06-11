@@ -175,19 +175,91 @@ def validate_email_format(email: str) -> bool:
 
 
 def get_smtp_config_for_domain(domain: str) -> Optional[dict]:
-    CONFIGS = {
-        "gmail.com":      {"host": "smtp.gmail.com",      "port": 465, "use_ssl": True,  "use_tls": False},
-        "googlemail.com": {"host": "smtp.gmail.com",      "port": 465, "use_ssl": True,  "use_tls": False},
-        "outlook.com":    {"host": "smtp.office365.com",  "port": 587, "use_ssl": False, "use_tls": True},
-        "hotmail.com":    {"host": "smtp.office365.com",  "port": 587, "use_ssl": False, "use_tls": True},
-        "live.com":       {"host": "smtp.office365.com",  "port": 587, "use_ssl": False, "use_tls": True},
-        "yahoo.com":      {"host": "smtp.mail.yahoo.com", "port": 465, "use_ssl": True,  "use_tls": False},
-        "mail.ru":        {"host": "smtp.mail.ru",        "port": 465, "use_ssl": True,  "use_tls": False},
-        "yandex.ru":      {"host": "smtp.yandex.ru",      "port": 465, "use_ssl": True,  "use_tls": False},
-        "yandex.com":     {"host": "smtp.yandex.ru",      "port": 465, "use_ssl": True,  "use_tls": False},
-        "icloud.com":     {"host": "smtp.mail.me.com",    "port": 587, "use_ssl": False, "use_tls": True},
-    }
-    return CONFIGS.get(domain.lower())
+      CONFIGS = {
+          # ── Google ───────────────────────────────────────────────────────
+          "gmail.com":        {"host": "smtp.gmail.com",          "port": 465, "use_ssl": True,  "use_tls": False},
+          "googlemail.com":   {"host": "smtp.gmail.com",          "port": 465, "use_ssl": True,  "use_tls": False},
+          # ── Microsoft ────────────────────────────────────────────────────
+          "outlook.com":      {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
+          "hotmail.com":      {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
+          "live.com":         {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
+          "msn.com":          {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
+          # ── Yahoo ────────────────────────────────────────────────────────
+          "yahoo.com":        {"host": "smtp.mail.yahoo.com",     "port": 465, "use_ssl": True,  "use_tls": False},
+          "yahoo.co.uk":      {"host": "smtp.mail.yahoo.co.uk",   "port": 465, "use_ssl": True,  "use_tls": False},
+          "yahoo.fr":         {"host": "smtp.mail.yahoo.fr",      "port": 465, "use_ssl": True,  "use_tls": False},
+          "yahoo.de":         {"host": "smtp.mail.yahoo.de",      "port": 465, "use_ssl": True,  "use_tls": False},
+          "yahoo.es":         {"host": "smtp.mail.yahoo.es",      "port": 465, "use_ssl": True,  "use_tls": False},
+          "yahoo.it":         {"host": "smtp.mail.yahoo.it",      "port": 465, "use_ssl": True,  "use_tls": False},
+          # ── RU ───────────────────────────────────────────────────────────
+          "mail.ru":          {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
+          "bk.ru":            {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
+          "inbox.ru":         {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
+          "list.ru":          {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
+          "internet.ru":      {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
+          "yandex.ru":        {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
+          "yandex.com":       {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
+          "yandex.by":        {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
+          "yandex.kz":        {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
+          "ya.ru":            {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
+          "rambler.ru":       {"host": "smtp.rambler.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
+          "ro.ru":            {"host": "smtp.rambler.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
+          "lenta.ru":         {"host": "smtp.rambler.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
+          "autorambler.ru":   {"host": "smtp.rambler.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
+          # ── GMX (EU/US) ──────────────────────────────────────────────────
+          "gmx.com":          {"host": "mail.gmx.com",            "port": 587, "use_ssl": False, "use_tls": True},
+          "gmx.net":          {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
+          "gmx.de":           {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
+          "gmx.at":           {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
+          "gmx.ch":           {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
+          "gmx.fr":           {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
+          # ── DE ───────────────────────────────────────────────────────────
+          "web.de":           {"host": "smtp.web.de",             "port": 587, "use_ssl": False, "use_tls": True},
+          "t-online.de":      {"host": "securesmtp.t-online.de",  "port": 587, "use_ssl": False, "use_tls": True},
+          "freenet.de":       {"host": "mx.freenet.de",           "port": 587, "use_ssl": False, "use_tls": True},
+          # ── FR ───────────────────────────────────────────────────────────
+          "orange.fr":        {"host": "smtp.orange.fr",          "port": 587, "use_ssl": False, "use_tls": True},
+          "sfr.fr":           {"host": "smtp.sfr.fr",             "port": 587, "use_ssl": False, "use_tls": True},
+          "free.fr":          {"host": "smtp.free.fr",            "port": 465, "use_ssl": True,  "use_tls": False},
+          "laposte.net":      {"host": "smtp.laposte.net",        "port": 587, "use_ssl": False, "use_tls": True},
+          "wanadoo.fr":       {"host": "smtp.orange.fr",          "port": 587, "use_ssl": False, "use_tls": True},
+          # ── IT ───────────────────────────────────────────────────────────
+          "libero.it":        {"host": "smtp.libero.it",          "port": 465, "use_ssl": True,  "use_tls": False},
+          "virgilio.it":      {"host": "smtp.virgilio.it",        "port": 465, "use_ssl": True,  "use_tls": False},
+          "tiscali.it":       {"host": "smtp.tiscali.it",         "port": 465, "use_ssl": True,  "use_tls": False},
+          # ── PL ───────────────────────────────────────────────────────────
+          "wp.pl":            {"host": "smtp.wp.pl",              "port": 465, "use_ssl": True,  "use_tls": False},
+          "onet.pl":          {"host": "smtp.onet.pl",            "port": 465, "use_ssl": True,  "use_tls": False},
+          "interia.pl":       {"host": "smtp.interia.pl",         "port": 465, "use_ssl": True,  "use_tls": False},
+          # ── UK ───────────────────────────────────────────────────────────
+          "btinternet.com":   {"host": "smtp.btinternet.com",     "port": 465, "use_ssl": True,  "use_tls": False},
+          "sky.com":          {"host": "smtp.sky.com",            "port": 587, "use_ssl": False, "use_tls": True},
+          "tiscali.co.uk":    {"host": "smtp.tiscali.co.uk",      "port": 587, "use_ssl": False, "use_tls": True},
+          # ── US ISP ───────────────────────────────────────────────────────
+          "aol.com":          {"host": "smtp.aol.com",            "port": 465, "use_ssl": True,  "use_tls": False},
+          "comcast.net":      {"host": "smtp.comcast.net",        "port": 587, "use_ssl": False, "use_tls": True},
+          "verizon.net":      {"host": "outgoing.verizon.net",    "port": 465, "use_ssl": True,  "use_tls": False},
+          "att.net":          {"host": "outbound.att.net",        "port": 465, "use_ssl": True,  "use_tls": False},
+          "sbcglobal.net":    {"host": "outbound.att.net",        "port": 465, "use_ssl": True,  "use_tls": False},
+          "bellsouth.net":    {"host": "outbound.att.net",        "port": 465, "use_ssl": True,  "use_tls": False},
+          "cox.net":          {"host": "smtp.cox.net",            "port": 587, "use_ssl": False, "use_tls": True},
+          "charter.net":      {"host": "smtp.charter.net",        "port": 587, "use_ssl": False, "use_tls": True},
+          "earthlink.net":    {"host": "smtpauth.earthlink.net",  "port": 587, "use_ssl": False, "use_tls": True},
+          # ── Apple ────────────────────────────────────────────────────────
+          "icloud.com":       {"host": "smtp.mail.me.com",        "port": 587, "use_ssl": False, "use_tls": True},
+          "me.com":           {"host": "smtp.mail.me.com",        "port": 587, "use_ssl": False, "use_tls": True},
+          "mac.com":          {"host": "smtp.mail.me.com",        "port": 587, "use_ssl": False, "use_tls": True},
+          # ── Privacy / Pro ────────────────────────────────────────────────
+          "proton.me":        {"host": "smtp.protonmail.ch",      "port": 587, "use_ssl": False, "use_tls": True},
+          "protonmail.com":   {"host": "smtp.protonmail.ch",      "port": 587, "use_ssl": False, "use_tls": True},
+          "protonmail.ch":    {"host": "smtp.protonmail.ch",      "port": 587, "use_ssl": False, "use_tls": True},
+          "zoho.com":         {"host": "smtp.zoho.com",           "port": 465, "use_ssl": True,  "use_tls": False},
+          "zohomail.com":     {"host": "smtp.zoho.com",           "port": 465, "use_ssl": True,  "use_tls": False},
+          "fastmail.com":     {"host": "smtp.fastmail.com",       "port": 465, "use_ssl": True,  "use_tls": False},
+          "fastmail.fm":      {"host": "smtp.fastmail.com",       "port": 465, "use_ssl": True,  "use_tls": False},
+          "tutanota.com":     {"host": "mail.tutanota.com",       "port": 587, "use_ssl": False, "use_tls": True},
+      }
+      return CONFIGS.get(domain.lower())
 
 
 async def test_smtp_connection(account: SmtpAccount) -> tuple:

@@ -5,12 +5,15 @@ Add, test, delete accounts. Passwords stored encrypted via Fernet.
 import asyncio
 import json
 import os
+import re
+import threading
 from pathlib import Path
 from PyQt6.QtWidgets import (
   QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
   QLineEdit, QComboBox, QSpinBox, QCheckBox, QTableWidget,
   QTableWidgetItem, QHeaderView, QDialog, QFormLayout,
-  QMessageBox, QDialogButtonBox, QTextEdit, QFrame
+  QMessageBox, QDialogButtonBox, QTextEdit, QFrame,
+  QFileDialog, QProgressBar
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
 from PyQt6.QtGui import QColor
@@ -252,6 +255,355 @@ class AccountDialog(QDialog):
       )
 
 
+
+  def _parse_accounts_file(text: str) -> list[dict]:
+    """Парсит файл с аккаунтами. Поддерживаемые форматы:
+    email:password
+    email;password
+    email|password
+    email,password
+    email:password:host:port
+    email:password:host:port:ssl  (ssl=true/false/1/0)
+    """
+    results = []
+    seen = set()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#'):
+            continue
+        # Разделители в порядке приоритета
+        parts = None
+        for sep in [':', ';', '|', ',']:
+            if sep in line:
+                parts = line.split(sep)
+                break
+        if not parts or len(parts) < 2:
+            continue
+        email = parts[0].strip().lower()
+        password = parts[1].strip()
+        if not re.match(r'^[^@]+@[^@]+.[^@]+
+  accounts_changed = pyqtSignal(list)
+
+  def __init__(self, parent=None):
+      super().__init__(parent)
+      self._accounts: list[SmtpAccount] = load_accounts()
+      self._setup_ui()
+      self._refresh_table()
+
+  def _setup_ui(self):
+      layout = QVBoxLayout(self)
+      layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+      layout.setSpacing(Spacing.LG)
+
+      header_row = QHBoxLayout()
+      title = QLabel("SMTP Аккаунты")
+      title.setObjectName("section_header")
+      header_row.addWidget(title)
+      header_row.addStretch()
+      add_btn = QPushButton("+ Добавить аккаунт")
+      add_btn.setObjectName("btn_primary")
+      add_btn.clicked.connect(self._add_account)
+      header_row.addWidget(add_btn)
+      layout.addLayout(header_row)
+
+      stats_card = QFrame()
+      stats_card.setObjectName("card")
+      stats_layout = QHBoxLayout(stats_card)
+      self.stats_label = QLabel("Аккаунтов: 0 | Активных: 0")
+      self.stats_label.setObjectName("label_muted")
+      stats_layout.addWidget(self.stats_label)
+      stats_layout.addStretch()
+      layout.addWidget(stats_card)
+
+      self.table = QTableWidget()
+      self.table.setColumnCount(7)
+      self.table.setHorizontalHeaderLabels([
+          "Email", "SMTP Сервер", "Порт", "Шифр.",
+          "Лимит/день", "Лимит/час", "Статус"
+      ])
+      self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+      self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+      self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+      self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+      self.table.setAlternatingRowColors(True)
+      layout.addWidget(self.table, 1)
+
+      actions_row = QHBoxLayout()
+      edit_btn = QPushButton("Редактировать")
+      edit_btn.clicked.connect(self._edit_selected)
+      actions_row.addWidget(edit_btn)
+      test_btn = QPushButton("Проверить подключение")
+      test_btn.clicked.connect(self._test_selected)
+      actions_row.addWidget(test_btn)
+      toggle_btn = QPushButton("Вкл/Выкл")
+      toggle_btn.clicked.connect(self._toggle_selected)
+      actions_row.addWidget(toggle_btn)
+      del_btn = QPushButton("Удалить")
+      del_btn.setObjectName("btn_danger")
+      del_btn.clicked.connect(self._delete_selected)
+      actions_row.addWidget(del_btn)
+      actions_row.addStretch()
+      layout.addLayout(actions_row)
+
+  def _refresh_table(self):
+      self.table.setRowCount(len(self._accounts))
+      for i, acc in enumerate(self._accounts):
+          self.table.setItem(i, 0, QTableWidgetItem(acc.email))
+          self.table.setItem(i, 1, QTableWidgetItem(acc.host))
+          self.table.setItem(i, 2, QTableWidgetItem(str(acc.port)))
+          enc = "SSL" if acc.use_ssl else ("TLS" if acc.use_tls else "Нет")
+          self.table.setItem(i, 3, QTableWidgetItem(enc))
+          self.table.setItem(i, 4, QTableWidgetItem(str(acc.daily_limit)))
+          self.table.setItem(i, 5, QTableWidgetItem(str(acc.hourly_limit)))
+          status_item = QTableWidgetItem("Активен" if acc.is_active else "Отключён")
+          status_item.setForeground(
+              QColor(Colors.SUCCESS) if acc.is_active else QColor(Colors.TEXT_MUTED)
+          )
+          self.table.setItem(i, 6, status_item)
+      active = sum(1 for a in self._accounts if a.is_active)
+      self.stats_label.setText(f"Аккаунтов: {len(self._accounts)} | Активных: {active}")
+      self.accounts_changed.emit(self._accounts)
+
+  def _add_account(self):
+      dlg = AccountDialog(self)
+      if dlg.exec() == QDialog.DialogCode.Accepted:
+          acc = dlg.get_account()
+          if acc:
+              self._accounts.append(acc)
+              save_accounts(self._accounts)
+              self._refresh_table()
+
+  def _edit_selected(self):
+      row = self.table.currentRow()
+      if row < 0:
+          return
+      dlg = AccountDialog(self, self._accounts[row])
+      if dlg.exec() == QDialog.DialogCode.Accepted:
+          acc = dlg.get_account()
+          if acc:
+              self._accounts[row] = acc
+              save_accounts(self._accounts)
+              self._refresh_table()
+
+  def _test_selected(self):
+      row = self.table.currentRow()
+      if row < 0:
+          QMessageBox.information(self, "Тест", "Выберите аккаунт из таблицы")
+          return
+      acc = self._accounts[row]
+      QMessageBox.information(self, "Тест", f"Проверка {acc.email}...")
+      import threading
+      def do():
+          import asyncio
+          loop = asyncio.new_event_loop()
+          success, log = loop.run_until_complete(test_smtp_connection(acc))
+          loop.close()
+          status = "OK" if success else "ОШИБКА"
+          QMessageBox.information(self, f"Тест — {status}", log)
+      threading.Thread(target=do, daemon=True).start()
+
+  def _toggle_selected(self):
+      row = self.table.currentRow()
+      if row < 0:
+          return
+      self._accounts[row].is_active = not self._accounts[row].is_active
+      save_accounts(self._accounts)
+      self._refresh_table()
+
+  def _delete_selected(self):
+      row = self.table.currentRow()
+      if row < 0:
+          return
+      reply = QMessageBox.question(
+          self, "Удалить?",
+          f"Удалить аккаунт {self._accounts[row].email}?",
+          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+      )
+      if reply == QMessageBox.StandardButton.Yes:
+          self._accounts.pop(row)
+          save_accounts(self._accounts)
+          self._refresh_table()
+, email):
+            continue
+        if email in seen:
+            continue
+        seen.add(email)
+        # Опциональные: host, port, ssl
+        host_override = parts[2].strip() if len(parts) > 2 else ""
+        port_override = int(parts[3]) if len(parts) > 3 and parts[3].strip().isdigit() else 0
+        ssl_override = None
+        if len(parts) > 4:
+            v = parts[4].strip().lower()
+            ssl_override = v in ('true', '1', 'ssl', 'yes')
+        results.append({
+            "email": email, "password": password,
+            "host_override": host_override,
+            "port_override": port_override,
+            "ssl_override": ssl_override,
+        })
+    return results
+
+
+  class BulkImportAccountsDialog(QDialog):
+    """Диалог массового импорта SMTP-аккаунтов из файла."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Массовый импорт аккаунтов")
+        self.setMinimumSize(720, 500)
+        self._parsed: list[dict] = []
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(Spacing.LG)
+        layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+
+        # Описание форматов
+        info = QLabel(
+            "<b>Поддерживаемые форматы:</b><br>"
+            "• <code>email:пароль</code> &nbsp;&nbsp;"
+            "• <code>email;пароль</code> &nbsp;&nbsp;"
+            "• <code>email|пароль</code> &nbsp;&nbsp;"
+            "• <code>email,пароль</code><br>"
+            "• <code>email:пароль:smtp-хост:порт</code> &nbsp;—&nbsp; явные настройки<br>"
+            "<span style='color:#888;'>SMTP-сервер определяется автоматически по домену "
+            "(Gmail, Outlook, Yahoo, Mail.ru, Yandex, GMX, AOL и др.)</span>"
+        )
+        info.setWordWrap(True)
+        info.setObjectName("label_muted")
+        layout.addWidget(info)
+
+        # Кнопки выбора файла / вставки текста
+        file_row = QHBoxLayout()
+        self.file_label = QLabel("Файл не выбран")
+        self.file_label.setObjectName("label_muted")
+        file_row.addWidget(self.file_label, 1)
+        browse_btn = QPushButton("Выбрать файл…")
+        browse_btn.setObjectName("btn_icon")
+        browse_btn.clicked.connect(self._browse_file)
+        file_row.addWidget(browse_btn)
+        layout.addLayout(file_row)
+
+        # Текстовое поле для ручной вставки
+        self.text_area = QTextEdit()
+        self.text_area.setPlaceholderText(
+            "или вставьте список сюда:
+"
+            "user1@gmail.com:password1
+"
+            "user2@mail.ru:password2
+"
+            "user3@gmx.com:password3:mail.gmx.com:587"
+        )
+        self.text_area.setMaximumHeight(120)
+        layout.addWidget(self.text_area)
+
+        parse_btn = QPushButton("▶ Распознать аккаунты")
+        parse_btn.setObjectName("btn_primary")
+        parse_btn.clicked.connect(self._parse)
+        layout.addWidget(parse_btn)
+
+        # Таблица предпросмотра
+        self.preview_label = QLabel("Предпросмотр:")
+        layout.addWidget(self.preview_label)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["Email", "SMTP Сервер", "Порт", "Шифр.", "Статус", "Пароль"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        layout.addWidget(self.table, 1)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Импортировать")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _browse_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выбрать файл с аккаунтами", "",
+            "Текстовые файлы (*.txt *.csv *.tsv *.dat);;Все файлы (*)"
+        )
+        if path:
+            self.file_label.setText(path)
+            try:
+                for enc in ('utf-8', 'utf-8-sig', 'cp1251', 'latin-1'):
+                    try:
+                        text = open(path, encoding=enc).read()
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                self.text_area.setPlainText(text)
+            except Exception as e:
+                QMessageBox.warning(self, "Ошибка", f"Не удалось прочитать файл: {e}")
+
+    def _parse(self):
+        text = self.text_area.toPlainText()
+        parsed = _parse_accounts_file(text)
+        self._parsed = []
+        self.table.setRowCount(0)
+
+        for item in parsed:
+            email = item["email"]
+            domain = email.split("@")[1]
+            # Авто-определение SMTP
+            cfg = get_smtp_config_for_domain(domain)
+            if item["host_override"]:
+                host = item["host_override"]
+                port = item["port_override"] or (465 if not item["ssl_override"] is False else 587)
+                use_ssl = item["ssl_override"] if item["ssl_override"] is not None else True
+                use_tls = not use_ssl
+            elif cfg:
+                host = cfg["host"]
+                port = cfg["port"]
+                use_ssl = cfg["use_ssl"]
+                use_tls = cfg["use_tls"]
+            else:
+                host = f"mail.{domain}"
+                port = 587
+                use_ssl = False
+                use_tls = True
+
+            enc_str = "SSL" if use_ssl else "STARTTLS"
+            status = "✓ Авто" if cfg else ("✓ Явный" if item["host_override"] else "⚠ Неизвестен")
+
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(email))
+            self.table.setItem(row, 1, QTableWidgetItem(host))
+            self.table.setItem(row, 2, QTableWidgetItem(str(port)))
+            self.table.setItem(row, 3, QTableWidgetItem(enc_str))
+            status_item = QTableWidgetItem(status)
+            from PyQt6.QtGui import QColor as _QColor
+            status_item.setForeground(_QColor(Colors.SUCCESS if "✓" in status else Colors.WARNING))
+            self.table.setItem(row, 4, status_item)
+            self.table.setItem(row, 5, QTableWidgetItem("●●●●●●"))
+
+            self._parsed.append(SmtpAccount(
+                email=email,
+                password=item["password"],
+                host=host,
+                port=port,
+                use_ssl=use_ssl,
+                use_tls=use_tls,
+            ))
+
+        self.preview_label.setText(
+            f"Предпросмотр: найдено <b>{len(self._parsed)}</b> аккаунтов"
+            f" из {len(text.splitlines())} строк"
+        )
+
+    def get_accounts(self) -> list[SmtpAccount]:
+        return self._parsed
+
+
+  
 class AccountsScreen(QWidget):
   accounts_changed = pyqtSignal(list)
 

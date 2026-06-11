@@ -238,21 +238,663 @@ class RecipientsScreen(QWidget):
         layout.addLayout(bottom_row)
 
     def _import_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Импорт получателей", "",
-            "Таблицы (*.csv *.xlsx *.txt);;CSV (*.csv);;Excel (*.xlsx);;TXT (*.txt)"
+          path, _ = QFileDialog.getOpenFileName(
+              self, "Импорт получателей", "",
+              "Все поддерживаемые (*.csv *.xlsx *.txt *.tsv *.dat);;CSV (*.csv);;Excel (*.xlsx);;TXT/DAT (*.txt *.tsv *.dat);;Все файлы (*)"
+          )
+          if not path:
+              return
+
+          ext = Path(path).suffix.lower()
+          try:
+              if ext in (".csv", ".txt", ".tsv", ".dat", ""):
+                  for enc in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
+                      try:
+                          sample = open(path, encoding=enc, errors="replace").read(2048)
+                          break
+                      except Exception:
+                          continue
+                  if self._looks_like_credential_list(sample):
+                      self._import_credential_list(path)
+                  else:
+                      self._import_csv(path)
+              elif ext == ".xlsx":
+                  self._import_xlsx(path)
+          except Exception as e:
+              QMessageBox.critical(self, "Ошибка импорта", str(e))
+
+      def _looks_like_credential_list(self, sample: str) -> bool:
+          """Эвристика: большинство строк — email:пароль без заголовка CSV."""
+          lines = [l.strip() for l in sample.splitlines() if l.strip() and not l.startswith('#')][:20]
+          if not lines:
+              return False
+          cred_count = 0
+          for line in lines:
+              for sep in (':', ';', '|'):
+                  parts = line.split(sep, 1)
+                  if len(parts) == 2 and re.match(r'^[^@]+@[^@]+\.[^@]+
+
+    def _import_csv(self, path: str):
+        # Автодетект разделителя
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            sample = f.read(4096)
+
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+        separator = dialect.delimiter if dialect else ","
+
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            reader = csv.DictReader(f, delimiter=separator)
+            columns = reader.fieldnames or []
+            if not columns:
+                QMessageBox.warning(self, "Ошибка", "Файл не содержит заголовков")
+                return
+            rows = list(reader)
+
+        # Маппинг полей
+        mapping_dialog = FieldMappingDialog(columns, parent=self)
+        if mapping_dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        mapping = mapping_dialog.get_mapping()
+        recipients = []
+        for row in rows:
+            email = row.get(mapping.get("email", ""), "").strip()
+            if not email:
+                continue
+            r = Recipient(
+                email=email,
+                first_name=row.get(mapping.get("first_name", ""), "").strip(),
+                last_name=row.get(mapping.get("last_name", ""), "").strip(),
+                company=row.get(mapping.get("company", ""), "").strip(),
+                custom_1=row.get(mapping.get("custom_1", ""), "").strip(),
+                custom_2=row.get(mapping.get("custom_2", ""), "").strip(),
+                custom_3=row.get(mapping.get("custom_3", ""), "").strip(),
+                custom_4=row.get(mapping.get("custom_4", ""), "").strip(),
+                custom_5=row.get(mapping.get("custom_5", ""), "").strip(),
+            )
+            recipients.append(r)
+
+        self._process_imported(recipients)
+
+    def _import_xlsx(self, path: str):
+        try:
+            import openpyxl
+        except ImportError:
+            QMessageBox.warning(self, "Ошибка", "Установите openpyxl: pip install openpyxl")
+            return
+
+        wb = openpyxl.load_workbook(path, read_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return
+
+        headers = [str(h).strip() if h else f"col_{i}" for i, h in enumerate(rows[0])]
+        mapping_dialog = FieldMappingDialog(headers, parent=self)
+        if mapping_dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        mapping = mapping_dialog.get_mapping()
+        recipients = []
+        for row in rows[1:]:
+            row_dict = {headers[i]: str(v).strip() if v else "" for i, v in enumerate(row)}
+            email = row_dict.get(mapping.get("email", ""), "").strip()
+            if not email:
+                continue
+            r = Recipient(
+                email=email,
+                first_name=row_dict.get(mapping.get("first_name", ""), "").strip(),
+                last_name=row_dict.get(mapping.get("last_name", ""), "").strip(),
+                company=row_dict.get(mapping.get("company", ""), "").strip(),
+            )
+            recipients.append(r)
+
+        wb.close()
+        self._process_imported(recipients)
+
+    def _process_imported(self, new_recipients: List[Recipient]):
+        """Дедупликация и добавление получателей."""
+        existing_emails = {r.email.lower() for r in self._recipients}
+        added = 0
+        dupes = 0
+
+        for r in new_recipients:
+            if r.email.lower() in existing_emails:
+                dupes += 1
+            else:
+                self._recipients.append(r)
+                existing_emails.add(r.email.lower())
+                added += 1
+
+        self._refresh_table()
+        QMessageBox.information(
+            self, "Импорт завершён",
+            f"Добавлено: {added}\nДубликатов пропущено: {dupes}"
+        )
+
+    def _refresh_table(self):
+        """Обновляет таблицу с получателями."""
+        self.table.setRowCount(len(self._recipients))
+        valid_count = 0
+        invalid_count = 0
+        unsub_count = 0
+
+        for row, r in enumerate(self._recipients):
+            self.table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+            self.table.setItem(row, 1, QTableWidgetItem(r.email))
+            self.table.setItem(row, 2, QTableWidgetItem(r.first_name))
+            self.table.setItem(row, 3, QTableWidgetItem(r.last_name))
+            self.table.setItem(row, 4, QTableWidgetItem(r.company))
+
+            # Статус
+            is_valid = validate_email_format(r.email)
+            is_unsub = r.email.lower() in self._unsubscribe
+
+            if is_unsub:
+                status = "Отписался"
+                color = Colors.WARNING
+                unsub_count += 1
+            elif is_valid:
+                status = "✓ Валидный"
+                color = Colors.SUCCESS
+                valid_count += 1
+            else:
+                status = "✗ Невалидный"
+                color = Colors.ERROR
+                invalid_count += 1
+
+            status_item = QTableWidgetItem(status)
+            status_item.setForeground(QColor(color))
+            self.table.setItem(row, 5, status_item)
+
+            # Кнопка удаления
+            del_btn = QPushButton("✕")
+            del_btn.setObjectName("btn_icon")
+            del_btn.setFixedSize(28, 28)
+            del_btn.clicked.connect(lambda _, idx=row: self._delete_recipient(idx))
+            self.table.setCellWidget(row, 6, del_btn)
+            self.table.setRowHeight(row, 40)
+
+        total = len(self._recipients)
+        self.total_label.setText(f"Всего: {total}")
+        self.valid_label.setText(f"Валидных: {valid_count}")
+        self.invalid_label.setText(f"Невалидных: {invalid_count}")
+        self.unsub_label.setText(f"Отписавшихся: {unsub_count}")
+        self.use_list_btn.setEnabled(valid_count > 0)
+
+    def _filter_table(self):
+        """Фильтрует строки таблицы."""
+        search = self.search_input.text().lower()
+        filter_mode = self.filter_combo.currentText()
+
+        for row in range(self.table.rowCount()):
+            email_item = self.table.item(row, 1)
+            status_item = self.table.item(row, 5)
+            if not email_item:
+                continue
+
+            email = email_item.text().lower()
+            name = (self.table.item(row, 2) or QTableWidgetItem("")).text().lower()
+            company = (self.table.item(row, 4) or QTableWidgetItem("")).text().lower()
+            status = (status_item or QTableWidgetItem("")).text()
+
+            match_search = not search or search in email or search in name or search in company
+            match_filter = (
+                filter_mode == "Все" or
+                (filter_mode == "Валидные" and "Валидный" in status) or
+                (filter_mode == "Невалидные" and "Невалидный" in status) or
+                (filter_mode == "Отписавшиеся" and "Отписался" in status)
+            )
+            self.table.setRowHidden(row, not (match_search and match_filter))
+
+    def _deduplicate(self):
+        before = len(self._recipients)
+        seen = set()
+        unique = []
+        for r in self._recipients:
+            key = r.email.lower()
+            if key not in seen:
+                seen.add(key)
+                unique.append(r)
+        self._recipients = unique
+        removed = before - len(self._recipients)
+        self._refresh_table()
+        self.dupes_label.setText(f"Удалено дубликатов: {removed}")
+        if removed > 0:
+            QMessageBox.information(self, "Дедупликация", f"Удалено дубликатов: {removed}")
+
+    def _delete_recipient(self, row: int):
+        if 0 <= row < len(self._recipients):
+            self._recipients.pop(row)
+            self._refresh_table()
+
+    def _add_manual(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Добавить получателя")
+        layout = QFormLayout(dialog)
+        email_input = QLineEdit()
+        first_input = QLineEdit()
+        last_input = QLineEdit()
+        company_input = QLineEdit()
+        layout.addRow("Email *:", email_input)
+        layout.addRow("Имя:", first_input)
+        layout.addRow("Фамилия:", last_input)
+        layout.addRow("Компания:", company_input)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            email = email_input.text().strip()
+            if email:
+                r = Recipient(
+                    email=email,
+                    first_name=first_input.text().strip(),
+                    last_name=last_input.text().strip(),
+                    company=company_input.text().strip(),
+                )
+                self._recipients.append(r)
+                self._refresh_table()
+
+    def _manage_unsubscribe(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Список отписавшихся")
+        dialog.setMinimumSize(400, 400)
+        layout = QVBoxLayout(dialog)
+
+        info = QLabel(f"Всего отписавшихся: {len(self._unsubscribe)}")
+        layout.addWidget(info)
+
+        text = QTextEdit()
+        text.setPlainText("\n".join(sorted(self._unsubscribe)))
+        text.setPlaceholderText("По одному email на строку")
+        layout.addWidget(text)
+
+        save_btn = QPushButton("Сохранить")
+        save_btn.setObjectName("btn_primary")
+        layout.addWidget(save_btn)
+
+        def save():
+            lines = [l.strip() for l in text.toPlainText().splitlines() if l.strip()]
+            self._unsubscribe = set(lines)
+            _save_unsubscribe(self._unsubscribe)
+            info.setText(f"Всего отписавшихся: {len(self._unsubscribe)}")
+            self._refresh_table()
+
+        save_btn.clicked.connect(save)
+        dialog.exec()
+
+    def _export_csv(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Экспорт в CSV", "recipients.csv", "CSV files (*.csv)"
         )
         if not path:
             return
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["email", "first_name", "last_name", "company",
+                             "custom_1", "custom_2", "custom_3"])
+            for r in self._recipients:
+                writer.writerow([r.email, r.first_name, r.last_name, r.company,
+                                 r.custom_1, r.custom_2, r.custom_3])
+        QMessageBox.information(self, "Экспорт", f"Сохранено: {path}")
 
-        ext = Path(path).suffix.lower()
+    def _emit_list(self):
+        """Отправляет валидных получателей (без отписок) в следующий экран."""
+        valid = [
+            r for r in self._recipients
+            if validate_email_format(r.email) and r.email.lower() not in self._unsubscribe
+        ]
+        self.list_ready.emit(valid)
+
+    def get_recipients(self) -> List[Recipient]:
+        return [
+            r for r in self._recipients
+            if validate_email_format(r.email) and r.email.lower() not in self._unsubscribe
+        ]
+
+
+def _stat_label(text: str, color: str = Colors.TEXT_SECONDARY) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet(f"color: {color}; font-size: 12px;")
+    lbl.setObjectName("card")
+    lbl.setContentsMargins(8, 4, 8, 4)
+    return lbl
+, parts[0].strip()):
+                      cred_count += 1
+                      break
+          return cred_count > len(lines) * 0.5
+
+      def _import_credential_list(self, path: str):
+          """Импортирует email из файлов типа email:пароль — пароли игнорируются."""
+          text = ""
+          for enc in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
+              try:
+                  text = open(path, encoding=enc, errors="replace").read()
+                  break
+              except Exception:
+                  continue
+          recipients = []
+          seen: set = set()
+          skipped = 0
+          for line in text.splitlines():
+              line = line.strip()
+              if not line or line.startswith('#'):
+                  continue
+              email = None
+              for sep in (':', ';', '|', ','):
+                  if sep in line:
+                      email = line.split(sep, 1)[0].strip().lower()
+                      break
+              if not email:
+                  email = line.lower()
+              if not re.match(r'^[^@]+@[^@]+\.[^@]+
+
+    def _import_csv(self, path: str):
+        # Автодетект разделителя
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            sample = f.read(4096)
+
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+        separator = dialect.delimiter if dialect else ","
+
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            reader = csv.DictReader(f, delimiter=separator)
+            columns = reader.fieldnames or []
+            if not columns:
+                QMessageBox.warning(self, "Ошибка", "Файл не содержит заголовков")
+                return
+            rows = list(reader)
+
+        # Маппинг полей
+        mapping_dialog = FieldMappingDialog(columns, parent=self)
+        if mapping_dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        mapping = mapping_dialog.get_mapping()
+        recipients = []
+        for row in rows:
+            email = row.get(mapping.get("email", ""), "").strip()
+            if not email:
+                continue
+            r = Recipient(
+                email=email,
+                first_name=row.get(mapping.get("first_name", ""), "").strip(),
+                last_name=row.get(mapping.get("last_name", ""), "").strip(),
+                company=row.get(mapping.get("company", ""), "").strip(),
+                custom_1=row.get(mapping.get("custom_1", ""), "").strip(),
+                custom_2=row.get(mapping.get("custom_2", ""), "").strip(),
+                custom_3=row.get(mapping.get("custom_3", ""), "").strip(),
+                custom_4=row.get(mapping.get("custom_4", ""), "").strip(),
+                custom_5=row.get(mapping.get("custom_5", ""), "").strip(),
+            )
+            recipients.append(r)
+
+        self._process_imported(recipients)
+
+    def _import_xlsx(self, path: str):
         try:
-            if ext == ".csv" or ext == ".txt":
-                self._import_csv(path)
-            elif ext == ".xlsx":
-                self._import_xlsx(path)
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка импорта", str(e))
+            import openpyxl
+        except ImportError:
+            QMessageBox.warning(self, "Ошибка", "Установите openpyxl: pip install openpyxl")
+            return
+
+        wb = openpyxl.load_workbook(path, read_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return
+
+        headers = [str(h).strip() if h else f"col_{i}" for i, h in enumerate(rows[0])]
+        mapping_dialog = FieldMappingDialog(headers, parent=self)
+        if mapping_dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        mapping = mapping_dialog.get_mapping()
+        recipients = []
+        for row in rows[1:]:
+            row_dict = {headers[i]: str(v).strip() if v else "" for i, v in enumerate(row)}
+            email = row_dict.get(mapping.get("email", ""), "").strip()
+            if not email:
+                continue
+            r = Recipient(
+                email=email,
+                first_name=row_dict.get(mapping.get("first_name", ""), "").strip(),
+                last_name=row_dict.get(mapping.get("last_name", ""), "").strip(),
+                company=row_dict.get(mapping.get("company", ""), "").strip(),
+            )
+            recipients.append(r)
+
+        wb.close()
+        self._process_imported(recipients)
+
+    def _process_imported(self, new_recipients: List[Recipient]):
+        """Дедупликация и добавление получателей."""
+        existing_emails = {r.email.lower() for r in self._recipients}
+        added = 0
+        dupes = 0
+
+        for r in new_recipients:
+            if r.email.lower() in existing_emails:
+                dupes += 1
+            else:
+                self._recipients.append(r)
+                existing_emails.add(r.email.lower())
+                added += 1
+
+        self._refresh_table()
+        QMessageBox.information(
+            self, "Импорт завершён",
+            f"Добавлено: {added}\nДубликатов пропущено: {dupes}"
+        )
+
+    def _refresh_table(self):
+        """Обновляет таблицу с получателями."""
+        self.table.setRowCount(len(self._recipients))
+        valid_count = 0
+        invalid_count = 0
+        unsub_count = 0
+
+        for row, r in enumerate(self._recipients):
+            self.table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+            self.table.setItem(row, 1, QTableWidgetItem(r.email))
+            self.table.setItem(row, 2, QTableWidgetItem(r.first_name))
+            self.table.setItem(row, 3, QTableWidgetItem(r.last_name))
+            self.table.setItem(row, 4, QTableWidgetItem(r.company))
+
+            # Статус
+            is_valid = validate_email_format(r.email)
+            is_unsub = r.email.lower() in self._unsubscribe
+
+            if is_unsub:
+                status = "Отписался"
+                color = Colors.WARNING
+                unsub_count += 1
+            elif is_valid:
+                status = "✓ Валидный"
+                color = Colors.SUCCESS
+                valid_count += 1
+            else:
+                status = "✗ Невалидный"
+                color = Colors.ERROR
+                invalid_count += 1
+
+            status_item = QTableWidgetItem(status)
+            status_item.setForeground(QColor(color))
+            self.table.setItem(row, 5, status_item)
+
+            # Кнопка удаления
+            del_btn = QPushButton("✕")
+            del_btn.setObjectName("btn_icon")
+            del_btn.setFixedSize(28, 28)
+            del_btn.clicked.connect(lambda _, idx=row: self._delete_recipient(idx))
+            self.table.setCellWidget(row, 6, del_btn)
+            self.table.setRowHeight(row, 40)
+
+        total = len(self._recipients)
+        self.total_label.setText(f"Всего: {total}")
+        self.valid_label.setText(f"Валидных: {valid_count}")
+        self.invalid_label.setText(f"Невалидных: {invalid_count}")
+        self.unsub_label.setText(f"Отписавшихся: {unsub_count}")
+        self.use_list_btn.setEnabled(valid_count > 0)
+
+    def _filter_table(self):
+        """Фильтрует строки таблицы."""
+        search = self.search_input.text().lower()
+        filter_mode = self.filter_combo.currentText()
+
+        for row in range(self.table.rowCount()):
+            email_item = self.table.item(row, 1)
+            status_item = self.table.item(row, 5)
+            if not email_item:
+                continue
+
+            email = email_item.text().lower()
+            name = (self.table.item(row, 2) or QTableWidgetItem("")).text().lower()
+            company = (self.table.item(row, 4) or QTableWidgetItem("")).text().lower()
+            status = (status_item or QTableWidgetItem("")).text()
+
+            match_search = not search or search in email or search in name or search in company
+            match_filter = (
+                filter_mode == "Все" or
+                (filter_mode == "Валидные" and "Валидный" in status) or
+                (filter_mode == "Невалидные" and "Невалидный" in status) or
+                (filter_mode == "Отписавшиеся" and "Отписался" in status)
+            )
+            self.table.setRowHidden(row, not (match_search and match_filter))
+
+    def _deduplicate(self):
+        before = len(self._recipients)
+        seen = set()
+        unique = []
+        for r in self._recipients:
+            key = r.email.lower()
+            if key not in seen:
+                seen.add(key)
+                unique.append(r)
+        self._recipients = unique
+        removed = before - len(self._recipients)
+        self._refresh_table()
+        self.dupes_label.setText(f"Удалено дубликатов: {removed}")
+        if removed > 0:
+            QMessageBox.information(self, "Дедупликация", f"Удалено дубликатов: {removed}")
+
+    def _delete_recipient(self, row: int):
+        if 0 <= row < len(self._recipients):
+            self._recipients.pop(row)
+            self._refresh_table()
+
+    def _add_manual(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Добавить получателя")
+        layout = QFormLayout(dialog)
+        email_input = QLineEdit()
+        first_input = QLineEdit()
+        last_input = QLineEdit()
+        company_input = QLineEdit()
+        layout.addRow("Email *:", email_input)
+        layout.addRow("Имя:", first_input)
+        layout.addRow("Фамилия:", last_input)
+        layout.addRow("Компания:", company_input)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            email = email_input.text().strip()
+            if email:
+                r = Recipient(
+                    email=email,
+                    first_name=first_input.text().strip(),
+                    last_name=last_input.text().strip(),
+                    company=company_input.text().strip(),
+                )
+                self._recipients.append(r)
+                self._refresh_table()
+
+    def _manage_unsubscribe(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Список отписавшихся")
+        dialog.setMinimumSize(400, 400)
+        layout = QVBoxLayout(dialog)
+
+        info = QLabel(f"Всего отписавшихся: {len(self._unsubscribe)}")
+        layout.addWidget(info)
+
+        text = QTextEdit()
+        text.setPlainText("\n".join(sorted(self._unsubscribe)))
+        text.setPlaceholderText("По одному email на строку")
+        layout.addWidget(text)
+
+        save_btn = QPushButton("Сохранить")
+        save_btn.setObjectName("btn_primary")
+        layout.addWidget(save_btn)
+
+        def save():
+            lines = [l.strip() for l in text.toPlainText().splitlines() if l.strip()]
+            self._unsubscribe = set(lines)
+            _save_unsubscribe(self._unsubscribe)
+            info.setText(f"Всего отписавшихся: {len(self._unsubscribe)}")
+            self._refresh_table()
+
+        save_btn.clicked.connect(save)
+        dialog.exec()
+
+    def _export_csv(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Экспорт в CSV", "recipients.csv", "CSV files (*.csv)"
+        )
+        if not path:
+            return
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["email", "first_name", "last_name", "company",
+                             "custom_1", "custom_2", "custom_3"])
+            for r in self._recipients:
+                writer.writerow([r.email, r.first_name, r.last_name, r.company,
+                                 r.custom_1, r.custom_2, r.custom_3])
+        QMessageBox.information(self, "Экспорт", f"Сохранено: {path}")
+
+    def _emit_list(self):
+        """Отправляет валидных получателей (без отписок) в следующий экран."""
+        valid = [
+            r for r in self._recipients
+            if validate_email_format(r.email) and r.email.lower() not in self._unsubscribe
+        ]
+        self.list_ready.emit(valid)
+
+    def get_recipients(self) -> List[Recipient]:
+        return [
+            r for r in self._recipients
+            if validate_email_format(r.email) and r.email.lower() not in self._unsubscribe
+        ]
+
+
+def _stat_label(text: str, color: str = Colors.TEXT_SECONDARY) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet(f"color: {color}; font-size: 12px;")
+    lbl.setObjectName("card")
+    lbl.setContentsMargins(8, 4, 8, 4)
+    return lbl
+, email):
+                  skipped += 1
+                  continue
+              if email in seen:
+                  continue
+              seen.add(email)
+              recipients.append(Recipient(email=email))
+          if not recipients:
+              QMessageBox.warning(self, "Импорт", "Не найдено валидных email-адресов")
+              return
+          added = self._merge_recipients(recipients)
+          QMessageBox.information(
+              self, "Импорт завершён",
+              f"Импортировано: {added} адресов\nПропущено/дублей: {len(recipients) - added + skipped}"
+          )
 
     def _import_csv(self, path: str):
         # Автодетект разделителя
