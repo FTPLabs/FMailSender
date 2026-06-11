@@ -5,6 +5,7 @@ FIX: добавлен вызов _parse_dsn_message(raw) — ранее пере
 FIX: письмо помечается прочитанным только после успешного распознавания bounce.
 """
 import email
+import os
 import imaplib
 import json
 import logging
@@ -197,7 +198,10 @@ class BounceMonitor:
         self.password = password
         self.use_ssl = use_ssl
 
-        self.blacklist_path = blacklist_path or Path("data/blacklist.json")
+        # FIX: use absolute APPDATA path — relative path creates file in wrong location when launched via shortcut
+          self.blacklist_path = blacklist_path or (
+              Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "blacklist.json"
+          )
         self.bounce_log_path = bounce_log_path or Path("data/bounces.json")
 
         self._blacklist: Set[str] = self._load_blacklist()

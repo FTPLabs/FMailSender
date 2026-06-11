@@ -147,10 +147,15 @@ class WarmupScheduler:
         return list(self.records.values())
 
     def record_sent(self, email: str, count: int = 1) -> None:
+        # FIX: debounced save — write to disk every 10 calls, not every email.
+        # Prevents 500+ filesystem writes during active warmup campaigns.
         record = self.records.get(email)
         if record:
             record.record_sent(count)
-            self._save()
+            self._save_counter = getattr(self, "_save_counter", 0) + 1
+            if self._save_counter >= 10:
+                self._save()
+                self._save_counter = 0
 
     def can_send(self, email: str) -> bool:
         record = self.records.get(email)

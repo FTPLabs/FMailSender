@@ -30,7 +30,8 @@ except ImportError:
   _HAS_FERNET = False
 
 
-ACCOUNTS_FILE = Path(os.environ.get("APPDATA", ".")) / "EmailSenderPro" / "accounts.dat"
+# FIX: unified data folder — was "EmailSenderPro", now "FMailSender" to match license.py path
+  ACCOUNTS_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "accounts.dat"
 
 # ──────────────────────────────────────────────
 # Encryption helpers
@@ -142,7 +143,8 @@ def _parse_accounts_file(text: str) -> list[dict]:
       parts = None
       for sep in [':', ';', '|', ',']:
           if sep in line:
-              parts = line.split(sep)
+              # FIX: maxsplit=5 preserves passwords containing the separator char
+              parts = line.split(sep, 5)
               break
       if not parts or len(parts) < 2:
           continue

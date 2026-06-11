@@ -40,18 +40,23 @@ class VersionError(Exception):
 
 
 def _parse_version(v: str) -> tuple:
-    v = v.lstrip("v").strip()
-    parts = re.split(r"[.\-]", v)
+    # FIX: log warning on malformed input instead of silently returning (0,0,0)
+    # A bad version string would make every remote release appear "newer" than local.
+    cleaned = v.lstrip("v").strip()
+    if not cleaned:
+        logger.warning(f"_parse_version: empty version string — returning (0,0,0)")
+        return (0, 0, 0)
+    parts = re.split(r"[.\-]", cleaned)
     result = []
     for p in parts[:3]:
         try:
             result.append(int(p))
         except ValueError:
+            logger.debug(f"_parse_version: non-numeric part in '{v}'")
             break
     while len(result) < 3:
         result.append(0)
     return tuple(result)
-
 
 def is_newer(remote: str, local: str) -> bool:
     return _parse_version(remote) > _parse_version(local)

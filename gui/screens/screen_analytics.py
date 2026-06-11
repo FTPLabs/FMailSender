@@ -3,6 +3,7 @@
 Открытия (tracking pixel), клики, bounces, экспорт CSV/PDF.
 """
 import csv
+import os
 import json
 import logging
 from datetime import datetime
@@ -22,7 +23,8 @@ from PyQt6.QtGui import QColor
 from core.sender import SendResult
 from gui.theme import Colors, Spacing
 
-ANALYTICS_FILE = Path("data/analytics.json")
+# FIX: use absolute APPDATA path — relative path fails when app is launched from shortcut/different CWD
+  ANALYTICS_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "analytics.json"
 
 
 def _load_analytics() -> dict:
