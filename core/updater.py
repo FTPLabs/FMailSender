@@ -130,6 +130,21 @@ class Downloader(threading.Thread):
                 self._finished_cb(None, str(e))
 
 
+def verify_zip_integrity(zip_path: Path) -> bool:
+    """Проверяет структурную целостность скачанного ZIP перед применением."""
+    import zipfile, hashlib
+    try:
+        with zipfile.ZipFile(zip_path, "r") as z:
+            bad = z.testzip()
+            if bad:
+                logger.error(f"ZIP повреждён, первый плохой файл: {bad}")
+                return False
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка проверки ZIP: {e}")
+        return False
+
+
 def apply_update_windows(zip_path: Path) -> bool:
     if platform.system() != "Windows":
         return False
@@ -142,6 +157,9 @@ def apply_update_windows(zip_path: Path) -> bool:
     import zipfile
     with zipfile.ZipFile(zip_path, "r") as z:
         z.extractall(extract_dir)
+    if not verify_zip_integrity(zip_path):
+        logger.error("Обновление отменено: ZIP не прошёл проверку целостности")
+        return False
     new_exes = list(extract_dir.rglob("EmailSenderPro.exe"))
     if not new_exes:
         logger.error("No EmailSenderPro.exe found in downloaded ZIP")
@@ -155,12 +173,16 @@ def apply_update_windows(zip_path: Path) -> bool:
     bat = [
         "@echo off",
         "echo Waiting for EmailSenderPro to exit...",
+        "set WAIT_COUNT=0",
         ":wait",
         f'tasklist /FI "PID eq {pid}" 2>NUL | find /I "{pid}" >NUL',
         "if not errorlevel 1 (",
         "    timeout /t 1 /nobreak >NUL",
         "    goto wait",
+        "    if %WAIT_COUNT% GEQ 60 goto apply",
+        "    set /A WAIT_COUNT+=1",
         ")",
+        ":apply",
         "echo Applying update...",
         f'xcopy /E /Y /I "{nd}" "{ad}"',
         "echo Starting...",
