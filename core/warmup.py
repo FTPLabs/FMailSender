@@ -116,14 +116,29 @@ class WarmupScheduler:
         self.records: Dict[str, WarmupRecord] = {}
         self._load()
 
-    def _load(self) -> None:
+    def _advance_pending_days(self, record: "WarmupRecord") -> None:
+          """BUG FIX: auto-advance warmup day counter based on calendar days elapsed.
+          Previously advance_day() was never called automatically — progress stalled."""
+          if not record.is_active:
+              return
+          try:
+              start = date.fromisoformat(record.start_date)
+              expected_day = (date.today() - start).days + 1
+              if expected_day > record.current_day:
+                  record.current_day = min(expected_day, 60)
+          except (ValueError, TypeError):
+              pass
+
+      def _load(self) -> None:
         """Загружает данные из файла."""
         if self.data_path.exists():
             try:
                 with open(self.data_path, "r", encoding="utf-8") as f:
                     raw = json.load(f)
                 for email, data in raw.items():
-                    self.records[email] = WarmupRecord.from_dict(data)
+                    r = WarmupRecord.from_dict(data)
+                      self._advance_pending_days(r)
+                      self.records[email] = r
             except Exception:
                 self.records = {}
 
