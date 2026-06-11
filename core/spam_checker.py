@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
 import dns.resolver
+import dns.exception
 
 # ──────────────────────────────────────────────
 # База спам-слов (расширяется из spam_words.json)
@@ -370,7 +371,7 @@ def validate_email_mx(email_addr: str) -> Tuple[bool, str]:
         mx_records = dns.resolver.resolve(domain, "MX")
         if mx_records:
             return True, f"MX: {str(mx_records[0].exchange).rstrip('.')}"
-    except dns.resolver.NXDOMAIN:
+    except (dns.resolver.NXDOMAIN, dns.exception.Timeout, dns.resolver.NoAnswer):
         return False, "Домен не существует"
     except dns.resolver.NoAnswer:
         # Нет MX, но может быть A-запись
