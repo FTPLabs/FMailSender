@@ -141,16 +141,20 @@ jobs:
           if-no-files-found: error
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: "v${{ steps.ver.outputs.ver }}"
           name: "Email Sender Pro v${{ steps.ver.outputs.ver }}"
+          make_latest: "true"
           body: |
             ## Email Sender Pro v${{ steps.ver.outputs.ver }}
 
+            **Aether Dark** — полностью переработанный интерфейс
+
             ### Установка
             1. Скачайте **${{ steps.installer.outputs.setup_name }}** ниже
-            2. Запустите установщик
+            2. Запустите установщик — не требует прав администратора
             3. Готово — ярлык на рабочем столе
 
             ### Демо-ключ
@@ -158,5 +162,6 @@ jobs:
             ESP-DEMO0-DEMO0-DEMO0-DEMO0
             ```
           files: ${{ steps.installer.outputs.setup_path }}
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
