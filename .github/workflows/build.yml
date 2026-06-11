@@ -66,16 +66,15 @@ jobs:
           pip install "pyinstaller>=6.3.0"
 
 
-        - name: Verify Python syntax (py_compile)
-          shell: pwsh
-          run: |
-            Get-ChildItem -Recurse -Filter "*.py" | ForEach-Object {
-              python -m py_compile $_.FullName
-              if ($LASTEXITCODE -ne 0) { Write-Error "SyntaxError: $($_.FullName)"; exit 1 }
-            }
-            Write-Host "All Python files OK"
-  
-      - name: Build exe with PyInstaller
+      - name: Verify Python syntax
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Recurse -Filter "*.py" | Select-Object -ExpandProperty FullName
+          foreach ($f in $files) {
+            python -m py_compile $f
+            if ($LASTEXITCODE -ne 0) { Write-Error "SyntaxError in: $f"; exit 1 }
+          }
+          Write-Host "Syntax OK: $($files.Count) files checked"
         shell: pwsh
         run: python build.py
         env:
