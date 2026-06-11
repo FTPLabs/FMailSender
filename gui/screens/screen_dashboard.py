@@ -302,6 +302,19 @@ class DashboardScreen(QWidget):
         self._refresh_timer.start()
         self._refresh_demo()
 
-    def _refresh_demo(self):
-        """Обновляет демо-данные."""
-        pass  # В реальном приложении данные берутся из БД
+    def update_stats(self, results: list) -> None:
+        """Получает реальные данные кампании и обновляет KPI + график."""
+        total = len(results)
+        success = sum(1 for r in results if getattr(r, "success", False))
+        self._stats["sent_today"] += total
+        self._stats["success"] += success
+        self._stats["errors"] += total - success
+        self._stats["queued"] = 0
+        self.kpi_sent.set_value(self._stats["sent_today"])
+        self.kpi_success.set_value(self._stats["success"])
+        self.kpi_errors.set_value(self._stats["errors"])
+        self.kpi_queued.set_value(0)
+        hour = datetime.now().hour
+        self._activity_data[hour] += success
+        self.chart.set_data(self._activity_data)
+        self.chart_stat_label.setText(f"{self._stats['sent_today']} писем сегодня")
