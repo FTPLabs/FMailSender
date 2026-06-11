@@ -1,5 +1,6 @@
 """
 Main window: sidebar navigation, header, QStackedWidget with all screens.
+Renamed: Email Sender Pro → FMail Sender
 """
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
@@ -16,6 +17,7 @@ from gui.screens.screen_recipients import RecipientsScreen
 from gui.screens.screen_sending import SendingScreen
 from gui.screens.screen_analytics import AnalyticsScreen
 from core.license import LicenseInfo
+from core._version import APP_NAME
 
 
 ICONS: dict[str, bytes] = {
@@ -27,9 +29,22 @@ ICONS: dict[str, bytes] = {
     "analytics":  b'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="COLOR" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
 }
 
+# FMail Sender Web3 logo SVG
+LOGO_SVG = b"""<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" style="stop-color:#7C3AED"/>
+    <stop offset="100%" style="stop-color:#06B6D4"/>
+  </linearGradient>
+</defs>
+<rect width="28" height="28" rx="7" fill="url(#lg)" opacity="0.15"/>
+<rect x="1" y="1" width="26" height="26" rx="6" fill="none" stroke="url(#lg)" stroke-width="1.5"/>
+<path d="M5 10 L14 16 L23 10" stroke="#8B5CF6" stroke-width="2" fill="none" stroke-linecap="round"/>
+<rect x="5" y="8" width="18" height="12" rx="2" fill="none" stroke="#06B6D4" stroke-width="1.5"/>
+</svg>"""
+
 
 def _make_svg_icon(name: str, color: str = Colors.TEXT_SECONDARY) -> QSvgWidget:
-    """Build a colored SVG icon widget. Replaces literal COLOR placeholder."""
     svg_data = ICONS.get(name, b"")
     colored = svg_data.replace(b"COLOR", color.encode("utf-8"))
     svg = QSvgWidget()
@@ -69,7 +84,7 @@ class MainWindow(QMainWindow):
     def __init__(self, license_info: LicenseInfo):
         super().__init__()
         self._license = license_info
-        self.setWindowTitle("Email Sender Pro")
+        self.setWindowTitle(APP_NAME)
         self.setMinimumSize(1100, 680)
         self.resize(1280, 780)
         self._setup_ui()
@@ -88,13 +103,18 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(8, 16, 8, 16)
         sidebar_layout.setSpacing(2)
 
+        # Logo row — FMail Sender Web3 brand
         logo_row = QHBoxLayout()
-        logo_row.setContentsMargins(8, 0, 8, 8)
-        logo_icon = _make_svg_icon("sending", Colors.ACCENT)
-        logo_row.addWidget(logo_icon)
-        logo_title = QLabel("EmailSender Pro")
+        logo_row.setContentsMargins(8, 0, 8, 12)
+        logo_svg = QSvgWidget()
+        logo_svg.load(QByteArray(LOGO_SVG))
+        logo_svg.setFixedSize(28, 28)
+        logo_row.addWidget(logo_svg)
+        logo_title = QLabel(APP_NAME)
         logo_title.setStyleSheet(
-            f"font-size:14px;font-weight:bold;color:{Colors.TEXT_PRIMARY};"
+            f"font-size:14px;font-weight:bold;"
+            f"background: transparent;"
+            f"color: {Colors.TEXT_PRIMARY};"
         )
         logo_row.addWidget(logo_title)
         logo_row.addStretch()
