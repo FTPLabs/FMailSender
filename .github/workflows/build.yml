@@ -66,9 +66,9 @@ name: Build EmailSenderPro Windows Installer
         - name: Verify exe exists
           shell: pwsh
           run: |
-            $exe = "dist\\EmailSenderPro\\EmailSenderPro.exe"
+            $exe = "dist\EmailSenderPro\EmailSenderPro.exe"
             if (-not (Test-Path $exe)) {
-              Write-Error "EmailSenderPro.exe not found after build!"
+              Write-Error "EXE not found after build!"
               Get-ChildItem dist -Recurse | Select-Object FullName
               exit 1
             }
@@ -78,39 +78,36 @@ name: Build EmailSenderPro Windows Installer
         - name: Install Inno Setup
           shell: pwsh
           run: |
-            if (-not (Test-Path "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe")) {
+            if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
               choco install innosetup --yes --no-progress
             } else {
-              Write-Host "Inno Setup already installed"
+              Write-Host "Inno Setup already present"
             }
 
         - name: Patch version in setup.iss
           shell: pwsh
           run: |
             $ver = "${{ steps.ver.outputs.ver }}"
-            $issPath = "installer\\setup.iss"
-            (Get-Content $issPath) -replace '#define MyAppVersion.*', "#define MyAppVersion   ""$ver""" | Set-Content $issPath
-            Write-Host "Patched version to $ver in setup.iss"
+            $issPath = "installer\setup.iss"
+            (Get-Content $issPath) -replace '#define MyAppVersion.*', "#define MyAppVersion   `"$ver`"" | Set-Content $issPath
+            Write-Host "Patched setup.iss version to $ver"
 
         - name: Build installer with Inno Setup
           shell: pwsh
           run: |
-            $iscc = "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe"
-            & $iscc "installer\\setup.iss"
-            if ($LASTEXITCODE -ne 0) {
-              Write-Error "Inno Setup failed with exit code $LASTEXITCODE"
-              exit $LASTEXITCODE
-            }
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+            & $iscc "installer\setup.iss"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-        - name: Verify installer
-          shell: pwsh
+        - name: Verify and capture installer path
           id: installer
+          shell: pwsh
           run: |
             $ver = "${{ steps.ver.outputs.ver }}"
-            $setupExe = "dist\\installer\\EmailSenderPro-$ver-Setup.exe"
+            $setupExe = "dist\installer\EmailSenderPro-$ver-Setup.exe"
             if (-not (Test-Path $setupExe)) {
               Write-Error "Installer not found: $setupExe"
-              Get-ChildItem dist\\installer -ErrorAction SilentlyContinue | Select-Object FullName
+              Get-ChildItem dist -Recurse | Select-Object FullName
               exit 1
             }
             $sizeMB = [math]::Round((Get-Item $setupExe).Length / 1MB, 1)
@@ -137,7 +134,7 @@ name: Build EmailSenderPro Windows Installer
               ### Установка
               1. Скачайте **${{ steps.installer.outputs.setup_name }}** ниже
               2. Запустите установщик — он сам всё сделает
-              3. Ярлык появится на рабочем столе (если выбрали)
+              3. Ярлык появится на рабочем столе (если выбрали при установке)
 
               ### Демо-ключ
               ```
