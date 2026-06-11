@@ -1,184 +1,181 @@
 name: Build FMail Sender Windows Installer
 
-  on:
-    push:
-      branches: [main]
-      tags: ["v*"]
-    workflow_dispatch:
-      inputs:
-        version:
-          description: "Version (e.g. 2.1.1)"
-          required: false
-          default: "2.1.1"
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 2.1.1)"
+        required: false
+        default: "2.1.1"
 
-  jobs:
-    build-windows:
-      runs-on: windows-latest
-      timeout-minutes: 60
-      permissions:
-        contents: write
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
 
-      steps:
-        - name: Checkout repository
-          uses: actions/checkout@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-        - name: Determine version
-          id: ver
-          shell: pwsh
-          run: |
-            \$ref = "${{ github.ref }}"
-            \$v = "${{ inputs.version }}"
-            if (\$ref -like "refs/tags/v*") { \$v = "${{ github.ref_name }}" }
-            if ([string]::IsNullOrWhiteSpace(\$v)) { \$v = "2.1.1" }
-            \$v = \$v.TrimStart("v")
-            echo "ver=\$v" >> \$env:GITHUB_OUTPUT
-            Write-Host "Building version: \$v"
+      - name: Determine version
+        id: ver
+        shell: pwsh
+        run: |
+          $ref = "${{ github.ref }}"
+          $v = "${{ inputs.version }}"
+          if ($ref -like "refs/tags/v*") { $v = "${{ github.ref_name }}" }
+          if ([string]::IsNullOrWhiteSpace($v)) { $v = "2.1.1" }
+          $v = $v.TrimStart("v")
+          echo "ver=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version: $v"
 
-        - name: Set up Python 3.11
-          uses: actions/setup-python@v5
-          with:
-            python-version: "3.11"
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-        - name: Cache pip packages
-          uses: actions/cache@v4
-          with:
-            path: ~\\AppData\\Local\\pip\\Cache
-            key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-            restore-keys: |
-              ${{ runner.os }}-pip-
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-        - name: Install Python dependencies
-          shell: pwsh
-          run: |
-            python -m pip install --upgrade pip wheel setuptools
-            pip install "PyQt6==6.7.1"
-            pip install "PyQt6-WebEngine==6.7.1"
-            pip install "aiosmtplib>=3.0.0"
-            pip install "cryptography>=41.0.0"
-            pip install "PyJWT>=2.8.0"
-            pip install "dnspython>=2.4.0"
-            pip install "openpyxl>=3.1.2"
-            pip install "reportlab>=4.0.0"
-            pip install "psutil>=5.9.0"
-            pip install "requests>=2.31.0"
-            pip install "pywin32>=306"
-            pip install "wmi>=1.5.1"
-            pip install "pyinstaller>=6.3.0"
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          pip install "PyQt6==6.7.1"
+          pip install "PyQt6-WebEngine==6.7.1"
+          pip install "aiosmtplib>=3.0.0"
+          pip install "cryptography>=41.0.0"
+          pip install "PyJWT>=2.8.0"
+          pip install "dnspython>=2.4.0"
+          pip install "openpyxl>=3.1.2"
+          pip install "reportlab>=4.0.0"
+          pip install "psutil>=5.9.0"
+          pip install "requests>=2.31.0"
+          pip install "pywin32>=306"
+          pip install "wmi>=1.5.1"
+          pip install "pyinstaller>=6.3.0"
 
-        - name: Verify Python syntax
-          shell: pwsh
-          run: |
-            \$files = Get-ChildItem -Recurse -Filter "*.py" | Select-Object -ExpandProperty FullName
-            foreach (\$f in \$files) {
-              python -m py_compile \$f
-              if (\$LASTEXITCODE -ne 0) { Write-Error "SyntaxError in: \$f"; exit 1 }
-            }
-            Write-Host "Syntax OK: \$(\$files.Count) files checked"
+      - name: Verify Python syntax
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Recurse -Filter "*.py" | Select-Object -ExpandProperty FullName
+          foreach ($f in $files) {
+            python -m py_compile $f
+            if ($LASTEXITCODE -ne 0) { Write-Error "SyntaxError in: $f"; exit 1 }
+          }
+          Write-Host "Syntax OK: $($files.Count) files checked"
 
-        - name: Build exe with PyInstaller
-          shell: pwsh
-          run: python build.py
-          env:
-            PYTHONIOENCODING: utf-8
-            PYTHONUTF8: 1
+      - name: Build exe with PyInstaller
+        shell: pwsh
+        run: python build.py
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: 1
 
-        - name: Verify exe exists
-          shell: pwsh
-          run: |
-            # FIX: corrected path to match APP_NAME = "FMailSender" in build.py
-            \$exe = "dist\\FMailSender\\FMailSender.exe"
-            if (-not (Test-Path \$exe)) {
-              Write-Error "EXE not found! Expected: \$exe"
-              Get-ChildItem dist -Recurse | Select-Object FullName
-              exit 1
-            }
-            \$mb = [math]::Round((Get-Item \$exe).Length/1MB,1)
-            Write-Host "EXE OK: \$exe (\$mb MB)"
+      - name: Verify exe exists
+        shell: pwsh
+        run: |
+          $exe = "dist\FMailSender\FMailSender.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Error "EXE not found! Expected: $exe"
+            Get-ChildItem dist -Recurse | Select-Object FullName
+            exit 1
+          }
+          $mb = [math]::Round((Get-Item $exe).Length/1MB,1)
+          Write-Host "EXE OK: $exe ($mb MB)"
 
-        - name: Install Inno Setup
-          shell: pwsh
-          run: |
-            if (-not (Test-Path "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe")) {
-              choco install innosetup --yes --no-progress
-            } else {
-              Write-Host "Inno Setup already present"
-            }
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+          } else {
+            Write-Host "Inno Setup already present"
+          }
 
-        - name: Install Pillow (for installer bitmaps)
-          shell: pwsh
-          run: pip install Pillow --quiet
+      - name: Install Pillow
+        shell: pwsh
+        run: pip install Pillow --quiet
 
-        - name: Generate wizard bitmaps
-          shell: pwsh
-          run: python installer/create_wizard_bitmaps.py ${{ steps.ver.outputs.ver }}
+      - name: Generate wizard bitmaps
+        shell: pwsh
+        run: python installer/create_wizard_bitmaps.py ${{ steps.ver.outputs.ver }}
 
-        - name: Patch version in setup.iss
-          shell: pwsh
-          run: |
-            \$ver = "${{ steps.ver.outputs.ver }}"
-            \$iss = "installer\\setup.iss"
-            (Get-Content \$iss) -replace '#define MyAppVersion.*', "#define MyAppVersion   `"\$ver`"" | Set-Content \$iss
-            Write-Host "Patched version: \$ver"
+      - name: Patch version in setup.iss
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.ver }}"
+          $iss = "installer\setup.iss"
+          (Get-Content $iss) -replace '#define MyAppVersion.*', "#define MyAppVersion   `"$ver`"" | Set-Content $iss
+          Write-Host "Patched version: $ver"
 
-        - name: Build installer with Inno Setup
-          shell: pwsh
-          run: |
-            \$iscc = "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe"
-            & \$iscc "installer\\setup.iss"
-            if (\$LASTEXITCODE -ne 0) { exit \$LASTEXITCODE }
+      - name: Build installer with Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "installer\setup.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-        - name: Verify installer
-          id: installer
-          shell: pwsh
-          run: |
-            \$ver = "${{ steps.ver.outputs.ver }}"
-            # FIX: corrected filename to match OutputBaseFilename in setup.iss
-            \$path = "dist\\installer\\FMailSender-\$ver-Setup.exe"
-            if (-not (Test-Path \$path)) {
-              Write-Error "Installer not found: \$path"
-              Get-ChildItem dist -Recurse | Select-Object FullName
-              exit 1
-            }
-            \$mb = [math]::Round((Get-Item \$path).Length/1MB,1)
-            Write-Host "Installer OK: \$path (\$mb MB)"
-            echo "setup_path=\$path" >> \$env:GITHUB_OUTPUT
-            echo "setup_name=FMailSender-\$ver-Setup.exe" >> \$env:GITHUB_OUTPUT
+      - name: Verify installer
+        id: installer
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.ver }}"
+          $path = "dist\installer\FMailSender-$ver-Setup.exe"
+          if (-not (Test-Path $path)) {
+            Write-Error "Installer not found: $path"
+            Get-ChildItem dist -Recurse | Select-Object FullName
+            exit 1
+          }
+          $mb = [math]::Round((Get-Item $path).Length/1MB,1)
+          Write-Host "Installer OK: $path ($mb MB)"
+          echo "setup_path=$path" >> $env:GITHUB_OUTPUT
+          echo "setup_name=FMailSender-$ver-Setup.exe" >> $env:GITHUB_OUTPUT
 
-        - name: Upload installer artifact
-          uses: actions/upload-artifact@v4
-          with:
-            name: "FMailSender-${{ steps.ver.outputs.ver }}-Setup"
-            path: ${{ steps.installer.outputs.setup_path }}
-            retention-days: 90
-            if-no-files-found: error
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "FMailSender-${{ steps.ver.outputs.ver }}-Setup"
+          path: ${{ steps.installer.outputs.setup_path }}
+          retention-days: 90
+          if-no-files-found: error
 
-        - name: Create GitHub Release
-          if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-          uses: softprops/action-gh-release@v2
-          with:
-            tag_name: "v${{ steps.ver.outputs.ver }}"
-            name: "FMail Sender v${{ steps.ver.outputs.ver }}"
-            make_latest: "true"
-            body: |
-              ## FMail Sender v${{ steps.ver.outputs.ver }}
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.ver.outputs.ver }}"
+          name: "FMail Sender v${{ steps.ver.outputs.ver }}"
+          make_latest: "true"
+          body: |
+            ## FMail Sender v${{ steps.ver.outputs.ver }}
 
-              ### Что нового
-              - Исправлены критические баги: race condition счётчиков, пути данных, парсинг паролей
-              - Улучшена производительность: персонализация писем через regex
-              - Исправлены пути аналитики и blacklist (APPDATA)
-              - Web3 / Glassmorphism дизайн
+            ### Что нового в v${{ steps.ver.outputs.ver }}
+            - Исправлены критические баги: пути данных, парсинг паролей, сборка .exe
+            - Улучшена производительность персонализации писем (regex)
+            - Исправлены пути аналитики и blacklist (APPDATA/FMailSender)
+            - Web3 / Glassmorphism дизайн интерфейса
 
-              ### Установка
-              1. Скачайте **${{ steps.installer.outputs.setup_name }}** ниже
-              2. Запустите установщик
-              3. Готово — ярлык на рабочем столе
+            ### Установка
+            1. Скачайте **${{ steps.installer.outputs.setup_name }}** ниже
+            2. Запустите установщик
+            3. Готово — ярлык на рабочем столе
 
-              ### Демо-ключ
-              ```
-              ESP-DEMO0-DEMO0-DEMO0-DEMO0
-              ```
-            files: ${{ steps.installer.outputs.setup_path }}
-            fail_on_unmatched_files: true
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  
+            ### Демо-ключ
+            ```
+            ESP-DEMO0-DEMO0-DEMO0-DEMO0
+            ```
+          files: ${{ steps.installer.outputs.setup_path }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
