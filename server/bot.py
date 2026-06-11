@@ -4,12 +4,14 @@ FMail Sender — Telegram Bot + FastAPI License Server
 """
 import asyncio
 import logging
+import os
 import sys
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Optional
 
+import jwt
 import uvicorn
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
@@ -28,7 +30,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import database as db
-from config import ADMIN_IDS, BOT_TOKEN, DEMO_KEY, KEY_PREFIX, PLANS
+from config import ADMIN_IDS, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS
 from crypto_pay import crypto_client
 
 logging.basicConfig(
@@ -52,6 +54,7 @@ class BuyFlow(StatesGroup):
 
 class AdminFlow(StatesGroup):
     issue_plan = State()
+    issue_telegram_id = State()   # FIX: новый шаг — Telegram ID получателя
     issue_hwid = State()
     issue_note = State()
     set_price_plan = State()
@@ -328,119 +331,89 @@ async def _proceed_to_payment(event, state: FSMContext, hwid: str, plan_id: str)
     try:
         invoice = await crypto_client.create_invoice(
             amount=price,
-            asset="USDT",
+            currency="USDT",
             description=f"FMail Sender Pro — {plan['name']}",
-            payload=f"{user_id}:{plan_id}:{hwid}",
-            expires_in=3600,
         )
+        pay_url = invoice.get("pay_url", "")
+        invoice_id = str(invoice.get("invoice_id", ""))
     except Exception as e:
-        logger.error("CryptoBot error: %s", e)
-        text = "❌ Ошибка создания счёта. Попробуйте позже."
+        logger.error(f"CryptoPay error: {e}")
+        err_text = f"❌ Ошибка создания платежа: {e}"
         if isinstance(event, CallbackQuery):
-            await send_or_edit(event, text, reply_markup=kb_back_main())
+            await send_or_edit(event, err_text, reply_markup=kb_back_main())
         else:
-            await event.answer(text, reply_markup=kb_back_main())
+            await event.answer(err_text, reply_markup=kb_back_main())
+        await state.clear()
         return
 
-    invoice_id = str(invoice.get("invoice_id", ""))
-    pay_url = invoice.get("pay_url") or invoice.get("bot_invoice_url", "")
-
-    await db.create_payment(
+    await db.save_payment(
         telegram_id=user_id,
         invoice_id=invoice_id,
         plan=plan_id,
         hwid=hwid,
         amount=price,
     )
+    await state.update_data(invoice_id=invoice_id, hwid=hwid)
     await state.set_state(BuyFlow.waiting_payment)
-    await state.update_data(invoice_id=invoice_id, plan_id=plan_id, hwid=hwid)
 
     text = (
-        f"💳 <b>Счёт создан!</b>\n\n"
+        f"💳 <b>Оплата</b>\n\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
         f"💰 Сумма: <b>${price:.2f} USDT</b>\n"
-        f"💻 HWID: <code>{hwid}</code>\n"
-        f"⏰ Действителен: 60 минут\n\n"
-        f"После оплаты нажми <b>«Проверить оплату»</b>"
+        f"💻 HWID: <code>{hwid}</code>\n\n"
+        f"Нажми <b>«Оплатить»</b> и после оплаты проверь статус."
     )
     if isinstance(event, CallbackQuery):
         await send_or_edit(event, text, reply_markup=kb_payment(pay_url, invoice_id))
     else:
         await event.answer(text, reply_markup=kb_payment(pay_url, invoice_id))
 
-    asyncio.create_task(_poll_payment(user_id, invoice_id, plan_id, hwid, pay_url))
-
-
-async def _poll_payment(user_id: int, invoice_id: str, plan_id: str, hwid: str, pay_url: str):
-    deadline = asyncio.get_event_loop().time() + 3600
-    while asyncio.get_event_loop().time() < deadline:
-        try:
-            invoice = await crypto_client.get_invoice(invoice_id)
-            if invoice and invoice.get("status") == "paid":
-                payment = await db.get_payment_by_invoice(invoice_id)
-                if payment and payment.get("status") == "paid":
-                    return
-                license_data = await db.create_license(
-                    plan=plan_id, telegram_id=user_id, hwid=hwid,
-                    note=f"Auto via CryptoBot invoice {invoice_id}"
-                )
-                await db.mark_payment_paid(invoice_id, license_data["key"])
-                plan = PLANS[plan_id]
-                exp = license_data["expires_at"][:10]
-                text = (
-                    f"🎉 <b>Оплата подтверждена!</b>\n\n"
-                    f"📦 Тариф: <b>{plan['name']}</b>\n"
-                    f"💻 HWID: <code>{hwid}</code>\n"
-                    f"📅 Истекает: <b>{exp}</b>\n\n"
-                    f"🔑 <b>Ваш лицензионный ключ:</b>\n"
-                    f"<code>{license_data['key']}</code>\n\n"
-                    f"Скопируй ключ и введи его в программе FMail Sender Pro."
-                )
-                try:
-                    await bot.send_message(user_id, text)
-                    await bot.send_message(
-                        ADMIN_IDS[0],
-                        f"✅ Новая продажа!\n"
-                        f"👤 User ID: <code>{user_id}</code>\n"
-                        f"📦 {plan['name']}\n"
-                        f"🔑 <code>{license_data['key']}</code>",
-                    )
-                except Exception as e:
-                    logger.error("Failed to notify user %s: %s", user_id, e)
-                return
-        except Exception as e:
-            logger.warning("Poll error for invoice %s: %s", invoice_id, e)
-        await asyncio.sleep(8)
-
 
 @dp.callback_query(F.data.startswith("check_pay:"))
 async def cb_check_pay(query: CallbackQuery, state: FSMContext):
     invoice_id = query.data.split(":", 1)[1]
     try:
-        invoice = await crypto_client.get_invoice(invoice_id)
+        paid = await crypto_client.check_invoice(invoice_id)
     except Exception as e:
-        await query.answer(f"Ошибка: {e}", show_alert=True)
+        await query.answer(f"Ошибка проверки: {e}", show_alert=True)
         return
 
-    if not invoice:
-        await query.answer("Счёт не найден", show_alert=True)
+    if not paid:
+        await query.answer("⏳ Оплата ещё не поступила. Попробуй через минуту.", show_alert=True)
         return
 
-    status = invoice.get("status", "")
-    if status == "paid":
-        payment = await db.get_payment_by_invoice(invoice_id)
-        if payment and payment.get("license_key"):
-            key = payment["license_key"]
-            await query.answer("✅ Оплачено! Ключ уже отправлен выше.", show_alert=True)
-        else:
-            await query.answer("✅ Обрабатываем платёж...", show_alert=True)
-    elif status == "active":
-        await query.answer("⏳ Оплата ещё не поступила. Подождите.", show_alert=True)
-    elif status == "expired":
-        await query.answer("❌ Счёт истёк. Создайте новый.", show_alert=True)
+    payment = await db.get_payment(invoice_id)
+    if not payment:
+        await query.answer("❌ Платёж не найден.", show_alert=True)
+        return
+
+    existing_license = await db.get_payment_license(invoice_id)
+    if existing_license:
+        await send_or_edit(
+            query,
+            f"✅ Оплата подтверждена!\n\n🔑 <b>Ваш ключ:</b>\n<code>{existing_license}</code>\n\n"
+            f"Введите его в программе на экране активации.",
+            reply_markup=kb_main(is_admin(query.from_user.id)),
+        )
         await state.clear()
-    else:
-        await query.answer(f"Статус: {status}", show_alert=True)
+        return
+
+    license_data = await db.create_license(
+        plan=payment["plan"],
+        hwid=payment.get("hwid", ""),
+        telegram_id=payment["telegram_id"],
+    )
+    await db.mark_payment_paid(invoice_id, license_data["key"])
+    await state.clear()
+
+    text = (
+        f"✅ <b>Оплата подтверждена!</b>\n\n"
+        f"📦 Тариф: <b>{PLANS.get(payment['plan'], {}).get('name', payment['plan'])}</b>\n\n"
+        f"🔑 <b>Ваш лицензионный ключ:</b>\n<code>{license_data['key']}</code>\n\n"
+        f"Введите его в программе на экране активации.\n"
+        f"💻 Привязан к HWID: <code>{payment.get('hwid') or 'при первой активации'}</code>"
+    )
+    await send_or_edit(query, text, reply_markup=kb_main(is_admin(query.from_user.id)))
 
 
 # ─── Admin Panel ─────────────────────────────────────────────────────────────
@@ -448,7 +421,6 @@ async def cb_check_pay(query: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "admin_panel")
 async def cb_admin_panel(query: CallbackQuery, state: FSMContext):
     if not is_admin(query.from_user.id):
-        await query.answer("⛔ Нет доступа", show_alert=True)
         return
     await state.clear()
     stats = await db.get_stats()
@@ -456,10 +428,24 @@ async def cb_admin_panel(query: CallbackQuery, state: FSMContext):
         f"⚙️ <b>Админ-панель</b>\n\n"
         f"📊 Активных лицензий: <b>{stats['active_licenses']}</b>\n"
         f"💰 Выручка: <b>${stats['total_revenue_usdt']:.2f} USDT</b>\n"
-        f"👥 Пользователей: <b>{stats['total_users']}</b>\n"
-        f"🛒 Продаж: <b>{stats['paid_orders']}</b>"
+        f"👥 Пользователей: <b>{stats['total_users']}</b>"
     )
     await send_or_edit(query, text, reply_markup=kb_admin())
+
+
+@dp.callback_query(F.data == "admin_list")
+async def cb_admin_list(query: CallbackQuery):
+    if not is_admin(query.from_user.id):
+        return
+    licenses = await db.get_all_licenses(limit=10)
+    if not licenses:
+        await send_or_edit(query, "📋 Лицензий пока нет.", reply_markup=kb_back_admin())
+        return
+    parts = [f"📋 <b>Последние {len(licenses)} лицензий:</b>\n"]
+    for lic in licenses:
+        parts.append(fmt_license(lic))
+        parts.append("")
+    await send_or_edit(query, "\n".join(parts), reply_markup=kb_back_admin())
 
 
 @dp.callback_query(F.data == "admin_stats")
@@ -469,35 +455,16 @@ async def cb_admin_stats(query: CallbackQuery):
     stats = await db.get_stats()
     text = (
         f"📊 <b>Статистика</b>\n\n"
+        f"✅ Активных лицензий: <b>{stats['active_licenses']}</b>\n"
+        f"📦 Всего лицензий: <b>{stats['total_licenses']}</b>\n"
         f"👥 Пользователей: <b>{stats['total_users']}</b>\n"
-        f"🗂 Лицензий всего: <b>{stats['total_licenses']}</b>\n"
-        f"✅ Активных: <b>{stats['active_licenses']}</b>\n"
-        f"🛒 Оплаченных заказов: <b>{stats['paid_orders']}</b>\n"
         f"💰 Выручка: <b>${stats['total_revenue_usdt']:.2f} USDT</b>"
     )
     await send_or_edit(query, text, reply_markup=kb_back_admin())
 
 
-@dp.callback_query(F.data == "admin_list")
-async def cb_admin_list(query: CallbackQuery):
-    if not is_admin(query.from_user.id):
-        return
-    licenses = await db.get_all_licenses(limit=10)
-    if not licenses:
-        await send_or_edit(query, "Лицензий нет.", reply_markup=kb_back_admin())
-        return
-    parts = [f"📋 <b>Последние лицензии ({len(licenses)} из 10):</b>\n"]
-    for lic in licenses:
-        exp = lic.get("expires_at", "")[:10]
-        active_mark = "✅" if lic.get("is_active") else "❌"
-        plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", ""))
-        tg = lic.get("telegram_id") or "—"
-        parts.append(
-            f"{active_mark} <code>{lic['key']}</code>\n"
-            f"   📦 {plan_name} | 📅 {exp} | TG: {tg}\n"
-        )
-    await send_or_edit(query, "\n".join(parts), reply_markup=kb_back_admin())
-
+# ─── Admin Issue Flow ────────────────────────────────────────────────────────
+# Порядок: Выбор плана → Telegram ID получателя → HWID → Заметка → Создать
 
 @dp.callback_query(F.data == "admin_issue")
 async def cb_admin_issue(query: CallbackQuery, state: FSMContext):
@@ -517,14 +484,33 @@ async def cb_admin_plan_selected(query: CallbackQuery, state: FSMContext):
         return
     plan_id = query.data.split(":", 1)[1]
     await state.update_data(plan_id=plan_id)
-    await state.set_state(AdminFlow.issue_hwid)
+    await state.set_state(AdminFlow.issue_telegram_id)
     plan = PLANS.get(plan_id, {})
     await send_or_edit(
         query,
         f"🎟 Тариф: <b>{plan.get('name', plan_id)}</b>\n\n"
-        f"Отправь HWID получателя (или <code>-</code> пропустить):",
+        f"📨 Отправь <b>Telegram ID</b> получателя (числовой ID)\n"
+        f"или <code>-</code> чтобы пропустить:",
         reply_markup=kb_back_admin(),
     )
+
+
+@dp.message(AdminFlow.issue_telegram_id)
+async def msg_admin_telegram_id(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    raw = message.text.strip() if message.text else ""
+    if raw == "-":
+        telegram_id = 0
+    else:
+        try:
+            telegram_id = int(raw)
+        except ValueError:
+            await message.answer("❌ Telegram ID должен быть числом (или <code>-</code> чтобы пропустить).")
+            return
+    await state.update_data(telegram_id=telegram_id)
+    await state.set_state(AdminFlow.issue_hwid)
+    await message.answer("💻 Отправь HWID получателя (или <code>-</code> пропустить):")
 
 
 @dp.message(AdminFlow.issue_hwid)
@@ -545,21 +531,43 @@ async def msg_admin_note(message: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
 
+    telegram_id = data.get("telegram_id", 0)
     license_data = await db.create_license(
         plan=data["plan_id"],
         hwid=data.get("hwid", ""),
+        telegram_id=telegram_id,
         note=note,
     )
     plan = PLANS.get(data["plan_id"], {})
+    key = license_data["key"]
+
     text = (
         f"✅ <b>Ключ создан!</b>\n\n"
         f"📦 Тариф: <b>{plan.get('name', data['plan_id'])}</b>\n"
         f"💻 HWID: <code>{data.get('hwid') or 'не задан'}</code>\n"
         f"📅 Истекает: <b>{license_data['expires_at'][:10]}</b>\n"
         f"📝 Заметка: {note or '—'}\n\n"
-        f"🔑 <b>Ключ:</b>\n<code>{license_data['key']}</code>"
+        f"🔑 <b>Ключ:</b>\n<code>{key}</code>"
     )
     await message.answer(text, reply_markup=kb_admin())
+
+    # FIX: Отправляем ключ получателю в Telegram если указан ID
+    if telegram_id:
+        try:
+            recipient_text = (
+                f"🎉 <b>Ваш лицензионный ключ FMail Sender Pro</b>\n\n"
+                f"📦 Тариф: <b>{plan.get('name', data['plan_id'])}</b>\n"
+                f"📅 Действует до: <b>{license_data['expires_at'][:10]}</b>\n\n"
+                f"🔑 <b>Ключ:</b>\n<code>{key}</code>\n\n"
+                f"Введите его в программе на экране активации."
+            )
+            await bot.send_message(telegram_id, recipient_text)
+            await message.answer(f"✅ Ключ отправлен получателю (ID: <code>{telegram_id}</code>)")
+        except Exception as e:
+            await message.answer(
+                f"⚠️ Не удалось отправить ключ получателю: {e}\n"
+                f"Отправьте вручную: <code>{key}</code>"
+            )
 
 
 @dp.callback_query(F.data == "admin_revoke")
@@ -703,21 +711,6 @@ async def activate(req: ActivateRequest):
     key = req.key.strip().upper()
     hwid = req.hwid.strip().upper()
 
-    if key == DEMO_KEY:
-        import jwt
-        from datetime import datetime, timedelta
-        payload = {
-            "plan": "DEMO",
-            "max_threads": 3,
-            "max_recipients": 50,
-            "exp": int((datetime.utcnow() + timedelta(days=7)).timestamp()),
-            "email": "demo@fmailsender.pro",
-            "hwid": hwid,
-            "is_demo": True,
-        }
-        token = jwt.encode(payload, "demo_secret", algorithm="HS256")
-        return {"token": token}
-
     lic = await db.get_license(key)
     if not lic:
         raise HTTPException(status_code=404, detail="License not found")
@@ -735,9 +728,7 @@ async def activate(req: ActivateRequest):
     if not existing_hwid:
         await db.bind_hwid_to_license(key, hwid)
 
-    import jwt
-    import os
-    secret = os.environ.get("JWT_SECRET", "fmsnd-jwt-secret-change-me")
+    # FIX: JWT_SECRET импортирован из config — согласован с клиентом (core/license.py)
     payload = {
         "plan": lic["plan"],
         "max_threads": lic["max_threads"],
@@ -745,9 +736,8 @@ async def activate(req: ActivateRequest):
         "exp": int(expires_at.timestamp()),
         "email": lic.get("email", ""),
         "hwid": hwid,
-        "is_demo": bool(lic.get("is_demo")),
     }
-    token = jwt.encode(payload, secret, algorithm="HS256")
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
     return {"token": token}
 
 
