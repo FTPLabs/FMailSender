@@ -173,6 +173,11 @@ def _get_fernet_key() -> bytes:
     return base64.urlsafe_b64encode(key_material)
 
 
+def get_storage_key() -> bytes:
+    """Публичная обёртка для получения ключа шифрования хранимых учётных данных."""
+    return _get_fernet_key()
+
+
 def _save_license_data(data: dict) -> None:
     LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
     f = Fernet(_get_fernet_key())
