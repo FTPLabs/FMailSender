@@ -24,7 +24,7 @@ from core.sender import SendResult
 from gui.theme import Colors, Spacing
 
 # FIX: use absolute APPDATA path — relative path fails when app is launched from shortcut/different CWD
-  ANALYTICS_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "analytics.json"
+ANALYTICS_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "analytics.json"
 
 
 def _load_analytics() -> dict:

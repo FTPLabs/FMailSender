@@ -199,9 +199,9 @@ class BounceMonitor:
         self.use_ssl = use_ssl
 
         # FIX: use absolute APPDATA path — relative path creates file in wrong location when launched via shortcut
-          self.blacklist_path = blacklist_path or (
-              Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "blacklist.json"
-          )
+        self.blacklist_path = blacklist_path or (
+            Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "blacklist.json"
+        )
         self.bounce_log_path = bounce_log_path or Path("data/bounces.json")
 
         self._blacklist: Set[str] = self._load_blacklist()

@@ -31,7 +31,7 @@ except ImportError:
 
 
 # FIX: unified data folder — was "EmailSenderPro", now "FMailSender" to match license.py path
-  ACCOUNTS_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "accounts.dat"
+ACCOUNTS_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "accounts.dat"
 
 # ──────────────────────────────────────────────
 # Encryption helpers
@@ -62,7 +62,7 @@ def _decrypt_password(encrypted: str) -> str:
 # ──────────────────────────────────────────────
 
 def save_accounts(accounts: list[SmtpAccount]) -> None:
-  ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
   data = []
   for a in accounts:
       entry = {
@@ -81,7 +81,7 @@ def save_accounts(accounts: list[SmtpAccount]) -> None:
       if hasattr(a, "proxy") and a.proxy:
           entry["proxy"] = a.proxy
       data.append(entry)
-  ACCOUNTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+ACCOUNTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_accounts() -> list[SmtpAccount]:
