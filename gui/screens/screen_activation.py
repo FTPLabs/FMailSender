@@ -86,24 +86,24 @@ class ActivationScreen(QWidget):
         demo_title.setObjectName("label_muted")
         demo_layout.addWidget(demo_title)
         # key label takes full width so it never overflows or gets clipped
-          self.demo_key_label = QLabel(DEMO_KEY)
-          self.demo_key_label.setStyleSheet(
-              f"color:{Colors.ACCENT};font-family:monospace;font-weight:bold;font-size:14px;"
-          )
-          self.demo_key_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-          demo_layout.addWidget(self.demo_key_label)
-          # buttons on a separate row below the key
-          demo_btn_row = QHBoxLayout()
-          copy_btn = QPushButton("Копировать")
-          copy_btn.setObjectName("btn_icon")
-          copy_btn.clicked.connect(self._copy_demo_key)
-          demo_btn_row.addWidget(copy_btn)
-          fill_btn = QPushButton("Заполнить")
-          fill_btn.setObjectName("btn_primary")
-          fill_btn.clicked.connect(lambda: self.key_input.setText(DEMO_KEY))
-          demo_btn_row.addWidget(fill_btn)
-          demo_btn_row.addStretch()
-          demo_layout.addLayout(demo_btn_row)
+        self.demo_key_label = QLabel(DEMO_KEY)
+        self.demo_key_label.setStyleSheet(
+            f"color:{Colors.ACCENT};font-family:monospace;font-weight:bold;font-size:14px;"
+        )
+        self.demo_key_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        demo_layout.addWidget(self.demo_key_label)
+        # buttons on a separate row below the key
+        demo_btn_row = QHBoxLayout()
+        copy_btn = QPushButton("Копировать")
+        copy_btn.setObjectName("btn_icon")
+        copy_btn.clicked.connect(self._copy_demo_key)
+        demo_btn_row.addWidget(copy_btn)
+        fill_btn = QPushButton("Заполнить")
+        fill_btn.setObjectName("btn_primary")
+        fill_btn.clicked.connect(lambda: self.key_input.setText(DEMO_KEY))
+        demo_btn_row.addWidget(fill_btn)
+        demo_btn_row.addStretch()
+        demo_layout.addLayout(demo_btn_row)
         layout.addWidget(demo_frame)
 
         # HWID row
