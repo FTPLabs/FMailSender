@@ -8,23 +8,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core._version import APP_NAME, APP_VERSION
 
 
-def _run_update_check(app, parent_window):
-    """Check for updates in background; show dialog on main thread if found."""
-    try:
-        from core.updater import check_for_updates
-        info = check_for_updates(current_version=APP_VERSION)
-        if info:
-            from PyQt6.QtCore import QTimer
-            from gui.dialogs.dialog_update import UpdateDialog
-
-            def show_dialog():
-                dlg = UpdateDialog(info, parent=parent_window)
-                dlg.exec()
-
-            QTimer.singleShot(2000, show_dialog)
-    except Exception as e:
-        import logging
-        logging.getLogger("updater").debug(f"Update check error: {e}")
+def _run_update_check_disabled():
+    """
+    Автоматическое обновление отключено согласно правилам площадки (п. 1.8).
+    Новые версии публикуются отдельно для свободного скачивания.
+    """
+    pass
 
 
 def main():
@@ -53,9 +42,6 @@ def main():
         from gui.app import MainWindow
         window = MainWindow(license_info)
         window.show()
-        threading.Thread(
-            target=_run_update_check, args=(app, window), daemon=True
-        ).start()
     else:
         _show_activation_screen(app, message)
 
@@ -69,8 +55,8 @@ def _show_activation_screen(app, message: str = ""):
 
     container = QMainWindow()
     container.setWindowTitle(f"{APP_NAME} — Активация")
-    container.setMinimumSize(620, 580)
-    container.resize(720, 640)
+    container.setMinimumSize(560, 520)
+    container.resize(680, 620)
     container.setStyleSheet(f"background-color: {Colors.BG_BASE};")
 
     activation = ActivationScreen(hint_message=message)
@@ -80,9 +66,6 @@ def _show_activation_screen(app, message: str = ""):
         from gui.app import MainWindow
         window = MainWindow(license_info)
         window.show()
-        threading.Thread(
-            target=_run_update_check, args=(app, window), daemon=True
-        ).start()
 
     activation.activation_success.connect(on_success)
     container.setCentralWidget(activation)
