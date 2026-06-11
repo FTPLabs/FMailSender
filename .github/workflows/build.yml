@@ -93,6 +93,14 @@ jobs:
             Write-Host "Inno Setup already present"
           }
 
+
+      - name: Install Pillow (for installer bitmaps)
+        shell: pwsh
+        run: pip install Pillow --quiet
+
+      - name: Generate Aether Dark wizard bitmaps
+        shell: pwsh
+        run: python installer/create_wizard_bitmaps.py ${{ steps.ver.outputs.ver }}
       - name: Patch version in setup.iss
         shell: pwsh
         run: |
