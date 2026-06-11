@@ -124,9 +124,12 @@ def build(onefile: bool = False):
         else:
             print(f"WARNING: skipping missing dir {src_dir}")
 
-    # Collect all submodules for our own packages
-    cmd += ["--collect-submodules", "core"]
-    cmd += ["--collect-submodules", "gui"]
+    # Add project root to PyInstaller analysis path so core/gui packages are found
+    cmd += ["--paths", str(ROOT)]
+
+    # --collect-all is more thorough than --collect-submodules for local packages
+    cmd += ["--collect-all", "core"]
+    cmd += ["--collect-all", "gui"]
 
     cmd += [
         # BUG FIX: explicitly include core._version so PyInstaller bundles it
