@@ -26,7 +26,7 @@
   # ──────────────────────────────────────────────
   # Константы
   # ──────────────────────────────────────────────
-  HWID_SALT = "ESP-HWID-SALT-8f4e2a1c-9b3d-4f7e-8a2b-1c5d9e3f7a0b"
+  HWID_SALT = os.environ.get("ESP_HWID_SALT", "ESP-HWID-SALT-8f4e2a1c-9b3d-4f7e-8a2b-1c5d9e3f7a0b")
   LICENSE_API_URL = "https://api.emailsenderpro.io/v1/activate"
   OFFLINE_GRACE_HOURS = 72
   LICENSE_FILE = Path(os.environ.get("APPDATA", ".")) / "EmailSenderPro" / "license.dat"
@@ -34,7 +34,7 @@
   # ── ДЕМО-РЕЖИМ ───────────────────────────────
   # True  = приложение запускается без лицензии (для тестирования)
   # False = требуется действующий лицензионный ключ
-  DEMO_MODE = True
+  DEMO_MODE = False
   DEMO_KEY = "ESP-DEMO0-DEMO0-DEMO0-DEMO0"
 
 
@@ -230,12 +230,12 @@
 
 
   def _make_demo_license() -> LicenseInfo:
-      """Создаёт демо-лицензию с полным доступом."""
+      """Создаёт демо-лицензию с ограниченным доступом (3 потока, 50 получателей, 7 дней)."""
       return LicenseInfo({
-          "plan": "UNLIMITED",
-          "max_threads": 50,
-          "max_recipients": 999999,
-          "exp": int(datetime(2099, 12, 31).timestamp()),
+          "plan": "DEMO",
+          "max_threads": 3,
+          "max_recipients": 50,
+          "exp": int((datetime.now() + timedelta(days=7)).timestamp()),
           "email": "demo@emailsenderpro.io",
           "hwid": "DEMO",
           "is_demo": True,
