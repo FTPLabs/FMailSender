@@ -1,11 +1,11 @@
-"""Entry point for Email Sender Pro."""
+"""Entry point for FMail Sender."""
 import sys
 import os
 import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core._version import APP_VERSION
+from core._version import APP_NAME, APP_VERSION
 
 
 def _run_update_check(app, parent_window):
@@ -35,9 +35,9 @@ def main():
     from PyQt6.QtGui import QFont
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Email Sender Pro")
+    app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
-    app.setOrganizationName("EmailSenderPro")
+    app.setOrganizationName("FTPLabs")
 
     from gui.theme import load_fonts, get_stylesheet, Typography
     load_fonts()
@@ -68,7 +68,7 @@ def _show_activation_screen(app, message: str = ""):
     from gui.theme import Colors
 
     container = QMainWindow()
-    container.setWindowTitle("Email Sender Pro — Активация")
+    container.setWindowTitle(f"{APP_NAME} — Активация")
     container.setMinimumSize(620, 580)
     container.resize(720, 640)
     container.setStyleSheet(f"background-color: {Colors.BG_BASE};")
