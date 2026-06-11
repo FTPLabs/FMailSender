@@ -272,8 +272,10 @@ class DashboardScreen(QWidget):
         layout.addWidget(events_card)
         layout.addStretch()
 
+    # ── Публичное API ─────────────────────────────────────────────────────────
+
     def update_stats(self, stats: dict) -> None:
-        """Обновляет KPI-карточки."""
+        """Обновляет KPI-карточки из словаря статистики."""
         self._stats = stats
         self.kpi_sent.set_value(stats.get("sent_today", 0))
         self.kpi_success.set_value(stats.get("success", 0))
@@ -297,13 +299,8 @@ class DashboardScreen(QWidget):
             new_text = current + f'<br><span style="color:#A1A1AA">[{ts}]</span> {event_text}'
         self.events_label.setText(new_text)
 
-    def start_demo_mode(self) -> None:
-        """Запускает демо-режим с тестовыми данными."""
-        self._refresh_timer.start()
-        self._refresh_demo()
-
-    def update_stats(self, results: list) -> None:
-        """Получает реальные данные кампании и обновляет KPI + график."""
+    def update_campaign_results(self, results: list) -> None:
+        """Обновляет KPI и график по итогам кампании."""
         total = len(results)
         success = sum(1 for r in results if getattr(r, "success", False))
         self._stats["sent_today"] += total
@@ -316,5 +313,25 @@ class DashboardScreen(QWidget):
         self.kpi_queued.set_value(0)
         hour = datetime.now().hour
         self._activity_data[hour] += success
-        self.chart.set_data(self._activity_data)
+        self.activity_chart.set_data(self._activity_data)
+        self.chart_stat_label.setText(f"{self._stats['sent_today']} писем сегодня")
+
+    def start_demo_mode(self) -> None:
+        """Запускает демо-режим с тестовыми данными."""
+        self._refresh_timer.start()
+        self._refresh_demo()
+
+    def _refresh_demo(self) -> None:
+        """Обновляет дашборд случайными демо-данными."""
+        self._stats["sent_today"] += random.randint(5, 25)
+        self._stats["success"] += random.randint(4, 22)
+        self._stats["errors"] = max(0, self._stats["sent_today"] - self._stats["success"])
+        self._stats["queued"] = random.randint(0, 50)
+        self.kpi_sent.set_value(self._stats["sent_today"])
+        self.kpi_success.set_value(self._stats["success"])
+        self.kpi_errors.set_value(self._stats["errors"])
+        self.kpi_queued.set_value(self._stats["queued"])
+        hour = datetime.now().hour
+        self._activity_data[hour] += random.randint(1, 10)
+        self.activity_chart.set_data(self._activity_data)
         self.chart_stat_label.setText(f"{self._stats['sent_today']} писем сегодня")
