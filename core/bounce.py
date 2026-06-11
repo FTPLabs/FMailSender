@@ -1,6 +1,8 @@
 """
 IMAP bounce-парсер. Мониторит входящие, определяет hard/soft bounces,
 добавляет hard bounce в blacklist.
+FIX: добавлен вызов _parse_dsn_message(raw) — ранее переменная bounce не определялась (NameError).
+FIX: письмо помечается прочитанным только после успешного распознавания bounce.
 """
 import email
 import imaplib
@@ -18,8 +20,8 @@ logger = logging.getLogger("bounce")
 
 
 class BounceType(Enum):
-    HARD = "hard"       # Постоянная ошибка (5xx), адрес недействителен
-    SOFT = "soft"       # Временная ошибка (4xx), попробуй позже
+    HARD = "hard"
+    SOFT = "soft"
     UNKNOWN = "unknown"
 
 
@@ -27,9 +29,9 @@ class BounceType(Enum):
 class BounceRecord:
     email: str
     bounce_type: BounceType
-    code: str           # SMTP-код: 550, 421 и т.д.
-    message: str        # Текст ошибки DSN
-    received_at: str    # ISO datetime
+    code: str
+    message: str
+    received_at: str
     original_subject: str = ""
 
     def to_dict(self) -> dict:
@@ -54,11 +56,6 @@ class BounceRecord:
         )
 
 
-# ──────────────────────────────────────────────
-# Парсинг DSN (Delivery Status Notification)
-# ──────────────────────────────────────────────
-
-# Паттерны для определения hard/soft bounce по SMTP-коду
 HARD_BOUNCE_CODES = re.compile(
     r"\b(5[0-9]{2})\b.*"
     r"(user.?unknown|no.?such.?user|invalid.?address|does.?not.?exist|"
@@ -73,7 +70,6 @@ SOFT_BOUNCE_CODES = re.compile(
     re.IGNORECASE,
 )
 
-# Email в теле DSN
 EMAIL_PATTERN = re.compile(
     r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"
 )
@@ -89,7 +85,6 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
     except Exception:
         return None
 
-    # Ищем заголовки DSN
     subject = msg.get("Subject", "")
     is_bounce_subject = any(keyword in subject.lower() for keyword in [
         "delivery", "undelivered", "failure", "returned", "bounce",
@@ -102,7 +97,6 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
     if not (is_bounce_subject or is_mailer_daemon):
         return None
 
-    # Ищем delivery-status часть
     status_text = ""
     original_recipient = ""
     smtp_code = ""
@@ -113,8 +107,6 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
 
         if content_type == "message/delivery-status":
             try:
-                # BUG FIX: message/delivery-status is a list of sub-messages, not bytes.
-                # get_payload(decode=True) returns None for message/* types.
                 payload = part.get_payload()
                 if isinstance(payload, list):
                     status_text = "\n".join(
@@ -137,15 +129,12 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
             except Exception:
                 pass
 
-    # Объединяем для поиска
     combined = (status_text + "\n" + dsn_message).lower()
 
-    # Извлекаем email получателя
     final_recipient = re.search(r"final-recipient[:\s]+rfc822[;\s]+([^\s\n]+)", combined, re.IGNORECASE)
     if final_recipient:
         original_recipient = final_recipient.group(1).strip("<>").strip()
     else:
-        # Fallback: ищем email в тексте
         emails = EMAIL_PATTERN.findall(dsn_message + status_text)
         for e in emails:
             if "mailer-daemon" not in e.lower() and "postmaster" not in e.lower():
@@ -155,18 +144,14 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
     if not original_recipient:
         return None
 
-    # Извлекаем SMTP-код и тип bounce
     status_code_match = re.search(r"status[:\s]+(\d\.\d+\.\d+)", combined, re.IGNORECASE)
     if status_code_match:
-        status_digits = status_code_match.group(1)
-        smtp_code = status_digits
+        smtp_code = status_code_match.group(1)
 
-    # Ищем числовой код ответа
     numeric_code = re.search(r"\b([45]\d{2})\b", combined)
     if numeric_code:
         smtp_code = smtp_code or numeric_code.group(1)
 
-    # Определяем тип bounce
     bounce_type = BounceType.UNKNOWN
     if smtp_code:
         if smtp_code.startswith("5"):
@@ -189,10 +174,6 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
         original_subject=subject,
     )
 
-
-# ──────────────────────────────────────────────
-# IMAP-монитор
-# ──────────────────────────────────────────────
 
 class BounceMonitor:
     """
@@ -275,10 +256,8 @@ class BounceMonitor:
             conn.login(self.email_addr, self.password)
             conn.select("INBOX")
 
-            # Ищем непрочитанные письма от MAILER-DAEMON
             _, msg_ids = conn.search(None, 'UNSEEN FROM "MAILER-DAEMON"')
             if not msg_ids[0]:
-                # Альтернативный поиск по теме
                 _, msg_ids = conn.search(None, 'UNSEEN SUBJECT "Delivery Status Notification"')
 
             if msg_ids[0]:
@@ -286,9 +265,10 @@ class BounceMonitor:
                     try:
                         _, data = conn.fetch(msg_id, "(RFC822)")
                         raw = data[0][1]
-                        # BUG FIX: mark message as read to prevent duplicate processing on next run
+                        # BUGFIX: вызываем парсер — ранее строка отсутствовала (NameError)
+                        bounce = _parse_dsn_message(raw)
                         if bounce:
-                            # Помечаем как прочитанное только после успешного распознавания bounce
+                            # Помечаем прочитанным только после успешного распознавания
                             conn.store(msg_id, '+FLAGS', '\\Seen')
                             new_bounces.append(bounce)
                             self._bounce_records.append(bounce)
@@ -312,10 +292,7 @@ class BounceMonitor:
         return new_bounces
 
     def filter_recipients(self, emails: List[str]) -> tuple:
-        """
-        Фильтрует список получателей, убирая blacklist.
-        Возвращает (allowed, blocked).
-        """
+        """Фильтрует список получателей, убирая blacklist."""
         allowed = []
         blocked = []
         for e in emails:
