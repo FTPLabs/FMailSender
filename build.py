@@ -52,11 +52,14 @@ PYINSTALLER_CMD = [
     "--hidden-import", "email.mime.base",
     "--collect-all", "PyQt6",
     "--collect-all", "cryptography",
-    "--add-data", f"{ROOT / 'assets'}:assets",
-    "--add-data", f"{ROOT / 'data'}:data",
-    "--add-data", f"{ROOT / 'templates'}:templates",
-    "--add-data", f"{ROOT / 'i18n'}:i18n",
+    "--add-data", str(ROOT / "assets") + os.pathsep + "assets",
+    "--add-data", str(ROOT / "data") + os.pathsep + "data",
+    "--add-data", str(ROOT / "templates") + os.pathsep + "templates",
+    "--add-data", str(ROOT / "i18n") + os.pathsep + "i18n",
 ]
+
+# Entry point — must be last positional argument
+PYINSTALLER_CMD.append(str(ROOT / "main.py"))
 
 if ICON_ARG:
     PYINSTALLER_CMD.append(ICON_ARG)
