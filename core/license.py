@@ -26,7 +26,11 @@ logger = logging.getLogger("license")
 # ──────────────────────────────────────────────
 # Константы
 # ──────────────────────────────────────────────
-HWID_SALT = os.environ.get("ESP_HWID_SALT", "ESP-HWID-SALT-8f4e2a1c-9b3d-4f7e-8a2b-1c5d9e3f7a0b")
+_env_salt = os.environ.get("ESP_HWID_SALT", "")
+  if not _env_salt:
+      logger.debug("ESP_HWID_SALT env var not set — using built-in fallback. Set in production.")
+      _env_salt = "ESP-HWID-SALT-8f4e2a1c-9b3d-4f7e-8a2b-1c5d9e3f7a0b"
+  HWID_SALT: str = _env_salt
 LICENSE_API_URL = "https://api.emailsenderpro.io/v1/activate"
 OFFLINE_GRACE_HOURS = 72
 LICENSE_FILE = Path(os.environ.get("APPDATA", ".")) / "EmailSenderPro" / "license.dat"
@@ -303,6 +307,9 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
         if not token_val:
             return False, "Сервер не вернул токен. Проверьте ключ."
 
+        import hmac as _hmac_mod
+        _seal = _hmac_mod.new(_get_fernet_key(), token_val.encode("utf-8"), "sha256").hexdigest()
+
         license_data = {
             "token": token_val,
             "hwid": hwid,
@@ -310,6 +317,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
             "activated_at": time.time(),
             "last_online": time.time(),
             "is_demo": False,
+            "seal": _seal,
         }
         _save_license_data(license_data)
 
@@ -366,7 +374,15 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
     if not token_str:
         return False, None, "Повреждённый файл лицензии. Активируйте снова."
 
-    # Offline grace period: не обращаемся к серверу, доверяем сохранённому токену
+    # Verify HMAC integrity seal (written at activation) to detect tampering
+    stored_seal = data.get("seal", "")
+    if stored_seal:
+        import hmac as _hmac_mod
+        expected_seal = _hmac_mod.new(_get_fernet_key(), token_str.encode("utf-8"), "sha256").hexdigest()
+        if not _hmac_mod.compare_digest(stored_seal, expected_seal):
+            logger.warning("License seal mismatch — possible tampering")
+            return False, None, "Файл лицензии повреждён. Активируйте снова."
+
     try:
         payload = jwt.decode(
             token_str,
@@ -374,6 +390,9 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
             algorithms=["RS256", "HS256"]
         )
         info = LicenseInfo(payload)
+        # Verify HWID embedded in JWT matches current device
+        if info.hwid and info.hwid not in ("DEMO", "") and info.hwid != hwid:
+            return False, None, "Токен лицензии привязан к другому устройству."
         if info.is_expired:
             return False, None, f"Лицензия истекла {info.expires_at.date()}. Обновите лицензию."
         return True, info, f"Лицензия активна до {info.expires_at.date()}"
