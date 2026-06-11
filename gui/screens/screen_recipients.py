@@ -336,7 +336,10 @@ class RecipientsScreen(QWidget):
         for line in lines:
             for sep in (':', ';', '|'):
                 parts = line.split(sep, 1)
-                if len(parts) == 2 and re.match(r'^[^@]+@[^@]+\.[^@]+
+                if len(parts) == 2 and re.match(r'^[^@]+@[^@]+\.[^@]+$', parts[0].strip()):
+                    cred_count += 1
+                    break
+        return cred_count / max(len(lines), 1) >= 0.5
 
     def _import_csv(self, path: str):
         # Автодетект разделителя
