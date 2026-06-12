@@ -31,7 +31,7 @@ HWID_SALT: str = os.environ.get("HWID_SALT", "")
 # LICENSE_API_URL — всегда берётся из env на сервере; клиент тоже может переопределить
 LICENSE_API_URL = os.environ.get(
     "LICENSE_API_URL",
-    "https://31.76.100.190:8000/v1/activate",
+    "http://31.76.100.190:8000/v1/activate",
 )
 OFFLINE_GRACE_HOURS = 72
 LICENSE_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "license.dat"
@@ -242,8 +242,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
             LICENSE_API_URL,
             json=payload_data,
             timeout=15,
-            verify=False,  # self-signed cert на VPS
-            headers={"Content-Type": "application/json", "User-Agent": f"FMailSender/{APP_VERSION}"},
+                headers={"Content-Type": "application/json", "User-Agent": f"FMailSender/{APP_VERSION}"},
         )
         response.raise_for_status()
         data = response.json()
@@ -285,8 +284,11 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
 
         return True, f"Активация успешна!\n\nВаш ключ: {key_upper}"
 
-    except requests.ConnectionError:
-        return False, "Нет подключения к интернету. Проверьте сеть."
+    except requests.ConnectionError as e:
+        err_detail = str(e)
+        if "refused" in err_detail.lower() or "actively refused" in err_detail.lower():
+            return False, "Сервер лицензирования недоступен. Попробуйте позже."
+        return False, f"Ошибка сети: проверьте подключение к интернету."
     except requests.Timeout:
         return False, "Сервер не отвечает. Попробуйте позже."
     except requests.HTTPError as e:

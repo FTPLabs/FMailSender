@@ -30,7 +30,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import database as db
-from config import ADMIN_IDS, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS
+from config import ADMIN_IDS, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL
 from crypto_pay import crypto_client
 
 logging.basicConfig(
@@ -61,6 +61,8 @@ class AdminFlow(StatesGroup):
     set_price_value = State()
     revoke_key = State()
     broadcast_text = State()
+    confirm_clear = State()
+    set_download_url = State()
 
 
 # ─── Keyboards ──────────────────────────────────────────────────────────────
@@ -71,6 +73,7 @@ def kb_main(is_admin: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔑 Мои лицензии", callback_data="menu_my_licenses")],
         [InlineKeyboardButton(text="📋 Привязать HWID", callback_data="menu_set_hwid")],
         [InlineKeyboardButton(text="ℹ️ Помощь", callback_data="menu_help")],
+        [InlineKeyboardButton(text="📥 Скачать FMail Sender", callback_data="menu_download")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin_panel")])
@@ -106,6 +109,8 @@ def kb_admin() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💲 Изменить цены", callback_data="admin_prices")],
         [InlineKeyboardButton(text="🚫 Отозвать ключ", callback_data="admin_revoke")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="🔗 Обновить ссылку скачивания", callback_data="admin_set_download")],
+        [InlineKeyboardButton(text="🗑 Сброс всех ключей", callback_data="admin_clear_keys")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
     ])
 
@@ -187,7 +192,7 @@ async def cmd_start(message: Message):
     admin = is_admin(user.id)
     text = (
         f"👋 Привет, <b>{user.first_name}</b>!\n\n"
-        f"🚀 <b>FMail Sender Pro</b> — профессиональный инструмент для email-рассылок.\n\n"
+        f"🚀 <b>FMail Sender</b> — профессиональный инструмент для email-рассылок.\n\n"
         f"Выбери действие:"
     )
     await message.answer(text, reply_markup=kb_main(admin))
@@ -346,7 +351,7 @@ async def _proceed_to_payment(event, state: FSMContext, hwid: str, plan_id: str)
         invoice = await crypto_client.create_invoice(
             amount=price,
             asset="USDT",
-            description=f"FMail Sender Pro — {plan['name']}",
+            description=f"FMail Sender — {plan['name']}",
         )
         pay_url = invoice.get("pay_url", "")
         invoice_id = str(invoice.get("invoice_id", ""))
@@ -569,7 +574,7 @@ async def msg_admin_note(message: Message, state: FSMContext):
     if telegram_id:
         try:
             recipient_text = (
-                f"🎉 <b>Ваш лицензионный ключ FMail Sender Pro</b>\n\n"
+                f"🎉 <b>Ваш лицензионный ключ FMail Sender</b>\n\n"
                 f"📦 Тариф: <b>{plan.get('name', data['plan_id'])}</b>\n"
                 f"📅 Действует до: <b>{license_data['expires_at'][:10]}</b>\n\n"
                 f"🔑 <b>Ключ:</b>\n<code>{key}</code>\n\n"
@@ -709,7 +714,133 @@ async def cmd_admin(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=kb_admin())
 
 
-# ─── FastAPI License Validation ──────────────────────────────────────────────
+# ─── Download Handler ───────────────────────────────────────────────────────
+
+  @dp.callback_query(F.data == "menu_download")
+  async def cb_menu_download(query: CallbackQuery):
+      user_id = query.from_user.id
+      licenses = await db.get_license_by_telegram(user_id)
+      # Получаем актуальный URL из настроек БД (или из config)
+      try:
+          dl_url = await db.get_setting("download_url") or DOWNLOAD_URL
+      except Exception:
+          dl_url = DOWNLOAD_URL
+
+      has_active = any(
+          lic.get("is_active") and not (
+              __import__("datetime").datetime.utcnow()
+              > __import__("datetime").datetime.fromisoformat(lic.get("expires_at", "2000-01-01"))
+          )
+          for lic in licenses
+      ) if licenses else False
+
+      if not has_active:
+          await send_or_edit(
+              query,
+              "❌ <b>Скачивание недоступно</b>
+
+У тебя нет активной подписки.
+"
+              "Нажми «Купить лицензию» чтобы получить доступ к программе.",
+              reply_markup=kb_main(is_admin(user_id)),
+          )
+          return
+
+      text = (
+          f"📥 <b>Скачать FMail Sender</b>
+
+"
+          f"✅ Активная подписка подтверждена.
+
+"
+          f"Нажми кнопку ниже чтобы загрузить установочный файл:"
+      )
+      kb = InlineKeyboardMarkup(inline_keyboard=[
+          [InlineKeyboardButton(text="⬇️ Скачать FMailSenderPro.exe", url=dl_url)],
+          [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
+      ])
+      await send_or_edit(query, text, reply_markup=kb)
+
+
+  # ─── Admin: Обновить ссылку скачивания ─────────────────────────────────────
+
+  @dp.callback_query(F.data == "admin_set_download")
+  async def cb_admin_set_download(query: CallbackQuery, state: FSMContext):
+      if not is_admin(query.from_user.id):
+          return
+      try:
+          current = await db.get_setting("download_url") or DOWNLOAD_URL
+      except Exception:
+          current = DOWNLOAD_URL
+      await state.set_state(AdminFlow.set_download_url)
+      await send_or_edit(
+          query,
+          f"🔗 <b>Обновить ссылку для скачивания</b>
+
+"
+          f"Текущая:
+<code>{current}</code>
+
+"
+          f"Отправь новую прямую ссылку на EXE-файл:",
+          reply_markup=kb_back_admin(),
+      )
+
+
+  @dp.message(AdminFlow.set_download_url)
+  async def msg_admin_set_download(message: Message, state: FSMContext):
+      if not is_admin(message.from_user.id):
+          return
+      url = message.text.strip() if message.text else ""
+      if not url.startswith("http"):
+          await message.answer("❌ Введи корректную ссылку (должна начинаться с http)")
+          return
+      await db.set_setting("download_url", url)
+      await state.clear()
+      await message.answer(
+          f"✅ Ссылка обновлена:
+<code>{url}</code>",
+          reply_markup=kb_admin(),
+      )
+
+
+  # ─── Admin: Сброс всех ключей ───────────────────────────────────────────────
+
+  @dp.callback_query(F.data == "admin_clear_keys")
+  async def cb_admin_clear_keys(query: CallbackQuery, state: FSMContext):
+      if not is_admin(query.from_user.id):
+          return
+      await state.set_state(AdminFlow.confirm_clear)
+      await send_or_edit(
+          query,
+          "⚠️ <b>УДАЛЕНИЕ ВСЕХ КЛЮЧЕЙ</b>
+
+"
+          "Это действие необратимо — все лицензии в базе данных будут удалены.
+
+"
+          "Напиши <b>ПОДТВЕРЖДАЮ</b> для подтверждения или /cancel для отмены:",
+          reply_markup=kb_back_admin(),
+      )
+
+
+  @dp.message(AdminFlow.confirm_clear)
+  async def msg_admin_confirm_clear(message: Message, state: FSMContext):
+      if not is_admin(message.from_user.id):
+          return
+      if message.text and message.text.strip().upper() == "ПОДТВЕРЖДАЮ":
+          count = await db.delete_all_licenses()
+          await state.clear()
+          await message.answer(
+              f"🗑 <b>Готово.</b> Удалено {count} лицензий из базы данных.",
+              reply_markup=kb_admin(),
+          )
+      else:
+          await state.clear()
+          await message.answer("❌ Операция отменена.", reply_markup=kb_admin())
+
+
+  # ─── FastAPI License Validation ──────────────────────────────────────────────
 
 api_app = FastAPI(title="FMail Sender License API", docs_url=None, redoc_url=None)
 
