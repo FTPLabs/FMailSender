@@ -48,6 +48,8 @@ def _make_svg_icon(name: str, color: str = Colors.TEXT_SECONDARY) -> QSvgWidget:
     svg_data = ICONS.get(name, b"")
     colored = svg_data.replace(b"COLOR", color.encode("utf-8"))
     svg = QSvgWidget()
+    svg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    svg.setStyleSheet("background: transparent;")
     svg.load(QByteArray(colored))
     svg.setFixedSize(20, 20)
     return svg
@@ -106,6 +108,8 @@ class MainWindow(QMainWindow):
         logo_row = QHBoxLayout()
         logo_row.setContentsMargins(8, 0, 8, 12)
         logo_svg = QSvgWidget()
+        logo_svg.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        logo_svg.setStyleSheet("background: transparent;")
         logo_svg.load(QByteArray(LOGO_SVG))
         logo_svg.setFixedSize(28, 28)
         logo_row.addWidget(logo_svg)
