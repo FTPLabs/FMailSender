@@ -11,6 +11,7 @@ from typing import Optional
 
 import jwt
 import uvicorn
+import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
@@ -64,6 +65,7 @@ class AdminFlow(StatesGroup):
     broadcast_text = State()
     confirm_clear = State()
     set_download_url = State()
+    upload_file = State()
 
 
 # ─── Keyboards ──────────────────────────────────────────────────────────────
@@ -118,6 +120,7 @@ def kb_admin() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🚫 Отозвать ключ", callback_data="admin_revoke")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="🔗 Ссылка скачивания", callback_data="admin_set_download")],
+        [InlineKeyboardButton(text="📤 Загрузить файл (.exe)", callback_data="admin_upload_file")],
         [InlineKeyboardButton(text="🗑 Удалить все ключи", callback_data="admin_clear_keys")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
     ])
@@ -809,7 +812,79 @@ async def cmd_admin(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=kb_admin())
 
 
-# ─── FastAPI License Validation ──────────────────────────────────────────────
+
+  # ─── Admin: Upload File ───────────────────────────────────────────────────────
+
+  @dp.callback_query(F.data == "admin_upload_file")
+  async def cb_admin_upload_file(query: CallbackQuery, state: FSMContext):
+      if not is_admin(query.from_user.id):
+          return
+      await state.set_state(AdminFlow.upload_file)
+      await send_or_edit(
+          query,
+          "📤 <b>Загрузка файла</b>\n\n"
+          "Отправь файл (.exe или .zip) прямо в этот чат.\n"
+          "Файл сохранится на сервере и ссылка скачивания обновится автоматически.",
+          reply_markup=kb_back_admin(),
+      )
+
+
+  @dp.message(AdminFlow.upload_file)
+  async def msg_upload_file(message: Message, state: FSMContext):
+      if not is_admin(message.from_user.id):
+          return
+
+      doc = message.document
+      if not doc:
+          await message.answer("❌ Отправь файл документом (не фото/видео).", reply_markup=kb_back_admin())
+          return
+
+      fname = doc.file_name or "FMailSender.exe"
+      fname = "".join(c for c in fname if c.isalnum() or c in "._-")
+      if not fname:
+          fname = "FMailSender.exe"
+
+      await message.answer(f"⏳ Загружаю <b>{fname}</b>... Подождите.")
+
+      try:
+          import os
+          os.makedirs("downloads", exist_ok=True)
+          save_path = os.path.join("downloads", fname)
+
+          file_info = await bot.get_file(doc.file_id)
+          file_url = f"https://api.telegram.org/file/bot{bot.token}/{file_info.file_path}"
+
+          async with aiohttp.ClientSession() as session:
+              async with session.get(file_url) as resp:
+                  if resp.status != 200:
+                      await message.answer("❌ Не удалось скачать файл с Telegram.", reply_markup=kb_back_admin())
+                      return
+                  with open(save_path, "wb") as f:
+                      f.write(await resp.read())
+
+          server_host = os.environ.get("SERVER_HOST", "")
+          if not server_host:
+              server_host = f"{API_HOST}:{API_PORT}" if API_HOST != "0.0.0.0" else f"localhost:{API_PORT}"
+          download_url = f"http://{server_host}/v1/download/{fname}"
+
+          await db.set_setting("download_url", download_url)
+
+          await state.clear()
+          await message.answer(
+              f"✅ <b>Файл загружен!</b>\n\n"
+              f"📁 Файл: <code>{fname}</code>\n"
+              f"🔗 Ссылка: <code>{download_url}</code>\n\n"
+              f"Ссылка скачивания обновлена автоматически.",
+              reply_markup=kb_back_admin(),
+          )
+          logger.info("Admin %d uploaded: %s → %s", message.from_user.id, fname, save_path)
+
+      except Exception as e:
+          logger.error("File upload error: %s", e)
+          await state.clear()
+          await message.answer(f"❌ Ошибка при загрузке: {e}", reply_markup=kb_back_admin())
+
+  # ─── FastAPI License Validation ──────────────────────────────────────────────
 
 api_app = FastAPI(title="FMail Sender License API", docs_url=None, redoc_url=None)
 
@@ -925,7 +1000,28 @@ async def admin_revoke(req: AdminRevokeRequest):
     return {"revoked": True, "key": req.key.upper()}
 
 
-@api_app.get("/health")
+
+  from fastapi.responses import FileResponse
+
+
+  @api_app.get("/v1/download/{filename}")
+  async def download_file(filename: str):
+      """Выдаёт загруженный файл пользователю с активной лицензией."""
+      import os
+      safe = "".join(c for c in filename if c.isalnum() or c in "._-")
+      if not safe or ".." in safe:
+          raise HTTPException(status_code=400, detail="Invalid filename")
+      allowed = {".exe", ".zip", ".msi"}
+      ext = os.path.splitext(safe)[1].lower()
+      if ext not in allowed:
+          raise HTTPException(status_code=403, detail="File type not allowed")
+      path = os.path.join("downloads", safe)
+      if not os.path.exists(path):
+          raise HTTPException(status_code=404, detail="File not found")
+      return FileResponse(path, filename=safe, media_type="application/octet-stream")
+
+
+  @api_app.get("/health")
 async def health():
     stats = await db.get_stats()
     return {
