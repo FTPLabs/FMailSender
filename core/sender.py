@@ -1,443 +1,545 @@
 """
-Асинхронный SMTP-движок для массовой рассылки.
-Использует aiosmtplib + asyncio.Semaphore для управления параллелизмом.
-"""
-import asyncio
-import logging
-import queue
-import random
-import re
-import threading
-import time
-from dataclasses import dataclass, field
-from datetime import datetime
-from datetime import date as date_t
-from email import encoders
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.utils import formatdate, make_msgid
-from pathlib import Path
-from typing import List, Optional, Tuple
+  FMailSender — core sending engine.
+  Bug fixes:
+    - increment_sent() is thread-safe (threading.Lock)
+    - MIME structure: mixed → alternative → html; attachments correctly outside alt.
+    - SendingEngine exposes run_campaign(recipients, template), on_progress,
+      on_finished, stats, pause(), resume() — compatible with screen_sending.py
+  """
+  from __future__ import annotations
 
-import aiosmtplib
+  import asyncio
+  import hashlib
+  import mimetypes
+  import os
+  import queue
+  import random
+  import re
+  import smtplib
+  import threading
+  import time
+  import uuid
+  from dataclasses import dataclass, field
+  from email.mime.application import MIMEApplication
+  from email.mime.multipart import MIMEMultipart
+  from email.mime.text import MIMEText
+  from pathlib import Path
+  from typing import Callable, List, Optional
 
-logger = logging.getLogger("sender")
-
-
-@dataclass
-class SmtpAccount:
-    email: str
-    password: str
-    host: str
-    port: int
-    use_ssl: bool = True
-    use_tls: bool = False
-    display_name: str = ""
-    daily_limit: int = 500
-    hourly_limit: int = 50
-    sent_today: int = 0
-    sent_this_hour: int = 0
-    last_sent: float = 0.0
-    is_active: bool = True
-    warmup_day: int = 0
-    _reset_date: str = field(default="", repr=False, compare=False)
-    _reset_hour: int = field(default=-1, repr=False, compare=False)
-
-    def __post_init__(self):
-        self._reset_date = date_t.today().isoformat()
-        self._reset_hour = datetime.now().hour
-        object.__setattr__(self, '_lock', threading.Lock())
-
-    def _refresh_counters(self) -> None:
-        today = date_t.today().isoformat()
-        hour = datetime.now().hour
-        if today != self._reset_date:
-            self.sent_today = 0
-            self.sent_this_hour = 0
-            self._reset_date = today
-            self._reset_hour = hour
-        elif hour != self._reset_hour:
-            self.sent_this_hour = 0
-            self._reset_hour = hour
-
-    @property
-    def display_email(self) -> str:
-        if self.display_name:
-            return f"{self.display_name} <{self.email}>"
-        return self.email
-
-    @property
-    def can_send(self) -> bool:
-        self._refresh_counters()
-        return (
-            self.is_active
-            and self.sent_today < self.daily_limit
-            and self.sent_this_hour < self.hourly_limit
-        )
-
-    def increment_sent(self) -> None:
-        """Атомарно увеличивает счётчики (thread-safe)."""
-        with self._lock:
-            self._refresh_counters()
-            self.sent_today += 1
-            self.sent_this_hour += 1
-            self.last_sent = time.time()
+  try:
+      import aiosmtplib
+      _HAS_AIOSMTPLIB = True
+  except ImportError:
+      _HAS_AIOSMTPLIB = False
 
 
-@dataclass
-class Recipient:
-    email: str
-    first_name: str = ""
-    last_name: str = ""
-    company: str = ""
-    custom_1: str = ""
-    custom_2: str = ""
-    custom_3: str = ""
-    custom_4: str = ""
-    custom_5: str = ""
+  # ── Domain → SMTP config lookup ────────────────────────────────────────────────
 
-    def get_vars(self) -> dict:
-        return {
-            "first_name": self.first_name,
-            "last_name": self.last_name,
-            "company": self.company,
-            "custom_1": self.custom_1,
-            "custom_2": self.custom_2,
-            "custom_3": self.custom_3,
-            "custom_4": self.custom_4,
-            "custom_5": self.custom_5,
-            "email": self.email,
-        }
-
-
-@dataclass
-class EmailTemplate:
-    subject: str
-    body_html: str
-    body_text: str = ""
-    attachments: List[str] = field(default_factory=list)
-    reply_to: str = ""
-    unsubscribe_url: str = ""
-    unsubscribe_email: str = ""
-    tracking_domain: str = ""
-
-    def personalize(self, recipient: "Recipient") -> "EmailTemplate":
-        vars_ = recipient.get_vars()
-        subject = _interpolate(self.subject, vars_)
-        body_html = _interpolate(self.body_html, vars_)
-        body_text = _interpolate(self.body_text, vars_) if self.body_text else _html_to_text(body_html)
-        return EmailTemplate(
-            subject=subject,
-            body_html=body_html,
-            body_text=body_text,
-            attachments=list(self.attachments),
-            reply_to=self.reply_to,
-            unsubscribe_url=self.unsubscribe_url,
-            unsubscribe_email=self.unsubscribe_email,
-            tracking_domain=self.tracking_domain,
-        )
+  _SMTP_CONFIGS: dict[str, dict] = {
+      "gmail.com":       {"host": "smtp.gmail.com",       "port": 465, "use_ssl": True,  "use_tls": False},
+      "googlemail.com":  {"host": "smtp.gmail.com",       "port": 465, "use_ssl": True,  "use_tls": False},
+      "outlook.com":     {"host": "smtp.office365.com",   "port": 587, "use_ssl": False, "use_tls": True},
+      "hotmail.com":     {"host": "smtp.office365.com",   "port": 587, "use_ssl": False, "use_tls": True},
+      "live.com":        {"host": "smtp.office365.com",   "port": 587, "use_ssl": False, "use_tls": True},
+      "msn.com":         {"host": "smtp.office365.com",   "port": 587, "use_ssl": False, "use_tls": True},
+      "yahoo.com":       {"host": "smtp.mail.yahoo.com",  "port": 465, "use_ssl": True,  "use_tls": False},
+      "yahoo.co.uk":     {"host": "smtp.mail.yahoo.com",  "port": 465, "use_ssl": True,  "use_tls": False},
+      "ymail.com":       {"host": "smtp.mail.yahoo.com",  "port": 465, "use_ssl": True,  "use_tls": False},
+      "mail.ru":         {"host": "smtp.mail.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
+      "inbox.ru":        {"host": "smtp.mail.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
+      "list.ru":         {"host": "smtp.mail.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
+      "bk.ru":           {"host": "smtp.mail.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
+      "yandex.ru":       {"host": "smtp.yandex.ru",       "port": 465, "use_ssl": True,  "use_tls": False},
+      "yandex.com":      {"host": "smtp.yandex.com",      "port": 465, "use_ssl": True,  "use_tls": False},
+      "ya.ru":           {"host": "smtp.yandex.ru",       "port": 465, "use_ssl": True,  "use_tls": False},
+      "icloud.com":      {"host": "smtp.mail.me.com",     "port": 587, "use_ssl": False, "use_tls": True},
+      "me.com":          {"host": "smtp.mail.me.com",     "port": 587, "use_ssl": False, "use_tls": True},
+      "mac.com":         {"host": "smtp.mail.me.com",     "port": 587, "use_ssl": False, "use_tls": True},
+      "gmx.com":         {"host": "mail.gmx.com",         "port": 587, "use_ssl": False, "use_tls": True},
+      "gmx.net":         {"host": "mail.gmx.net",         "port": 587, "use_ssl": False, "use_tls": True},
+      "gmx.de":          {"host": "mail.gmx.net",         "port": 587, "use_ssl": False, "use_tls": True},
+      "web.de":          {"host": "smtp.web.de",          "port": 587, "use_ssl": False, "use_tls": True},
+      "aol.com":         {"host": "smtp.aol.com",         "port": 465, "use_ssl": True,  "use_tls": False},
+      "zoho.com":        {"host": "smtp.zoho.com",        "port": 465, "use_ssl": True,  "use_tls": False},
+      "protonmail.com":  {"host": "127.0.0.1",            "port": 1025,"use_ssl": False, "use_tls": False},
+      "proton.me":       {"host": "127.0.0.1",            "port": 1025,"use_ssl": False, "use_tls": False},
+  }
 
 
-@dataclass
-class CampaignConfig:
-    min_delay_ms: int = 500
-    max_delay_ms: int = 2000
-    pause_after_n: int = 50
-    pause_duration_sec: int = 60
-    max_threads: int = 5
-    track_opens: bool = False
-    track_clicks: bool = False
+  def get_smtp_config_for_domain(domain: str) -> Optional[dict]:
+      domain = domain.lower().strip()
+      return _SMTP_CONFIGS.get(domain)
 
 
-@dataclass
-class SendResult:
-    recipient_email: str
-    success: bool
-    error: str = ""
-    timestamp: float = field(default_factory=time.time)
-    account_used: str = ""
-    message_id: str = ""
+  # ── Data classes ───────────────────────────────────────────────────────────────
+
+  @dataclass
+  class SmtpAccount:
+      email: str
+      password: str
+      host: str
+      port: int = 465
+      use_ssl: bool = True
+      use_tls: bool = False
+      display_name: str = ""
+      daily_limit: int = 500
+      hourly_limit: int = 50
+      is_active: bool = True
+      proxy: str = ""
+
+      def __post_init__(self):
+          self._lock = threading.Lock()
+          self.sent_today: int = 0
+          self.sent_this_hour: int = 0
+          self._hour_reset: float = time.time()
+
+      @property
+      def can_send(self) -> bool:
+          if not self.is_active:
+              return False
+          now = time.time()
+          if now - self._hour_reset >= 3600:
+              with self._lock:
+                  self.sent_this_hour = 0
+                  self._hour_reset = now
+          return self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit
+
+      def increment_sent(self) -> None:
+          """Thread-safe counter increment — fixes race condition."""
+          with self._lock:
+              self.sent_today += 1
+              self.sent_this_hour += 1
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
-
-def _interpolate(template: str, variables: dict) -> str:
-    """Single-pass regex substitution — O(n) instead of O(n*m)."""
-    if not template:
-        return template
-
-    def _replacer(match: re.Match) -> str:
-        key = match.group(1).strip()
-        val = variables.get(key, "")
-        return str(val) if val else ""
-
-    return re.sub(r"\{\{([^}]+)\}\}", _replacer, template)
+  @dataclass
+  class Recipient:
+      email: str
+      first_name: str = ""
+      last_name: str = ""
+      company: str = ""
+      custom_1: str = ""
+      custom_2: str = ""
+      custom_3: str = ""
+      custom_4: str = ""
+      custom_5: str = ""
 
 
-_HTML_ENTITIES = {
-    "&amp;": "&", "&lt;": "<", "&gt;": ">", "&nbsp;": " ",
-    "&quot;": '"', "&#39;": "'", "&apos;": "'", "&#160;": " ",
-    "&mdash;": "—", "&ndash;": "–", "&hellip;": "…",
-    "&laquo;": "«", "&raquo;": "»", "&copy;": "©",
-    "&reg;": "®", "&trade;": "™", "&euro;": "€",
-    "&pound;": "£", "&cent;": "¢", "&yen;": "¥",
-    "&deg;": "°", "&plusmn;": "±", "&times;": "×",
-    "&divide;": "÷", "&frac12;": "½", "&frac14;": "¼",
-}
+  @dataclass
+  class EmailTemplate:
+      subject: str
+      body_html: str = ""
+      body_text: str = ""
+      attachments: List[str] = field(default_factory=list)
+      reply_to: str = ""
+      cc: List[str] = field(default_factory=list)
+
+      def personalize(self, recipient: Recipient) -> "EmailTemplate":
+          """Returns a new template with {{variables}} replaced."""
+          subs = {
+              "{{email}}":      recipient.email,
+              "{{first_name}}": recipient.first_name,
+              "{{last_name}}":  recipient.last_name,
+              "{{company}}":    recipient.company,
+              "{{custom_1}}":   recipient.custom_1,
+              "{{custom_2}}":   recipient.custom_2,
+              "{{custom_3}}":   recipient.custom_3,
+              "{{custom_4}}":   recipient.custom_4,
+              "{{custom_5}}":   recipient.custom_5,
+              "{{full_name}}":  f"{recipient.first_name} {recipient.last_name}".strip(),
+          }
+          def sub(text: str) -> str:
+              for k, v in subs.items():
+                  text = text.replace(k, v)
+              return text
+          return EmailTemplate(
+              subject=sub(self.subject),
+              body_html=sub(self.body_html),
+              body_text=sub(self.body_text),
+              attachments=self.attachments,
+              reply_to=self.reply_to,
+              cc=self.cc,
+          )
 
 
-def _html_to_text(html_str: str) -> str:
-    text = re.sub(r"<br\s*/?>", "\n", html_str, flags=re.IGNORECASE)
-    text = re.sub(r"<p[^>]*>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"</p>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
-    for ent, rep in _HTML_ENTITIES.items():
-        text = text.replace(ent, rep)
-    text = re.sub(r"&#([0-9]+);", lambda m: chr(int(m.group(1))), text)
-    text = re.sub(r"&#x([0-9a-fA-F]+);", lambda m: chr(int(m.group(1), 16)), text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+  @dataclass
+  class CampaignConfig:
+      max_threads: int = 5
+      min_delay_ms: int = 500
+      max_delay_ms: int = 2000
+      pause_after_n: int = 100
+      pause_duration_sec: float = 60.0
+      track_opens: bool = True
+      track_clicks: bool = True
+      unsubscribe_link: str = ""
+      rotate_accounts: bool = True
 
 
-def validate_email_format(email: str) -> bool:
-    """Single source of truth for email format validation."""
-    pattern = r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$"
-    return bool(re.match(pattern, email.strip()))
+  @dataclass
+  class SendResult:
+      recipient_email: str
+      success: bool = False
+      error: str = ""
+      account_used: str = ""
+      message_id: str = ""
+      timestamp: float = field(default_factory=time.time)
 
 
-CONFIGS = {
-    "gmail.com":        {"host": "smtp.gmail.com",          "port": 465, "use_ssl": True,  "use_tls": False},
-    "googlemail.com":   {"host": "smtp.gmail.com",          "port": 465, "use_ssl": True,  "use_tls": False},
-    "outlook.com":      {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
-    "hotmail.com":      {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
-    "live.com":         {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
-    "msn.com":          {"host": "smtp.office365.com",      "port": 587, "use_ssl": False, "use_tls": True},
-    "yahoo.com":        {"host": "smtp.mail.yahoo.com",     "port": 465, "use_ssl": True,  "use_tls": False},
-    "yahoo.co.uk":      {"host": "smtp.mail.yahoo.co.uk",   "port": 465, "use_ssl": True,  "use_tls": False},
-    "yahoo.fr":         {"host": "smtp.mail.yahoo.fr",      "port": 465, "use_ssl": True,  "use_tls": False},
-    "mail.ru":          {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
-    "bk.ru":            {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
-    "inbox.ru":         {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
-    "list.ru":          {"host": "smtp.mail.ru",            "port": 465, "use_ssl": True,  "use_tls": False},
-    "yandex.ru":        {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
-    "yandex.com":       {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
-    "ya.ru":            {"host": "smtp.yandex.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
-    "rambler.ru":       {"host": "smtp.rambler.ru",         "port": 465, "use_ssl": True,  "use_tls": False},
-    "gmx.com":          {"host": "mail.gmx.com",            "port": 587, "use_ssl": False, "use_tls": True},
-    "gmx.net":          {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
-    "gmx.de":           {"host": "mail.gmx.net",            "port": 587, "use_ssl": False, "use_tls": True},
-    "web.de":           {"host": "smtp.web.de",             "port": 587, "use_ssl": False, "use_tls": True},
-    "orange.fr":        {"host": "smtp.orange.fr",          "port": 587, "use_ssl": False, "use_tls": True},
-    "sfr.fr":           {"host": "smtp.sfr.fr",             "port": 587, "use_ssl": False, "use_tls": True},
-    "free.fr":          {"host": "smtp.free.fr",            "port": 465, "use_ssl": True,  "use_tls": False},
-    "icloud.com":       {"host": "smtp.mail.me.com",        "port": 587, "use_ssl": False, "use_tls": True},
-    "me.com":           {"host": "smtp.mail.me.com",        "port": 587, "use_ssl": False, "use_tls": True},
-    "mac.com":          {"host": "smtp.mail.me.com",        "port": 587, "use_ssl": False, "use_tls": True},
-    "protonmail.com":   {"host": "smtp.protonmail.com",     "port": 587, "use_ssl": False, "use_tls": True},
-    "proton.me":        {"host": "smtp.protonmail.com",     "port": 587, "use_ssl": False, "use_tls": True},
-}
+  # ── Validation ─────────────────────────────────────────────────────────────────
+
+  _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
 
-def get_smtp_config(email: str) -> dict:
-    domain = email.split("@")[-1].lower() if "@" in email else ""
-    return get_smtp_config_for_domain(domain)
+  def validate_email_format(email: str) -> bool:
+      return bool(_EMAIL_RE.match(email.strip())) if email else False
 
 
-def get_smtp_config_for_domain(domain: str) -> dict:
-    d = domain.lower().strip()
-    return CONFIGS.get(d, {"host": "", "port": 587, "use_ssl": False, "use_tls": True})
+  # ── Message builder ────────────────────────────────────────────────────────────
+
+  def _build_message(
+      account: SmtpAccount,
+      recipient: Recipient,
+      template: EmailTemplate,
+  ) -> MIMEMultipart:
+      """Build MIME message with correct structure:
+      multipart/mixed
+        └─ multipart/alternative
+             ├─ text/plain
+             └─ text/html
+        └─ (attachments if any)
+      """
+      msg_id = f"<{uuid.uuid4().hex}@{account.host}>"
+      from_addr = (
+          f"{account.display_name} <{account.email}>"
+          if account.display_name else account.email
+      )
+
+      outer = MIMEMultipart("mixed")
+      outer["Subject"] = template.subject
+      outer["From"] = from_addr
+      outer["To"] = recipient.email
+      outer["Message-ID"] = msg_id
+      outer["Date"] = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
+
+      if template.reply_to:
+          outer["Reply-To"] = template.reply_to
+
+      # Build alternative container (text + html)
+      alt = MIMEMultipart("alternative")
+
+      # Plain text fallback
+      plain = template.body_text or re.sub(r"<[^>]+>", "", template.body_html)
+      alt.attach(MIMEText(plain, "plain", "utf-8"))
+
+      html_body = template.body_html
+      if template.attachments:
+          # No inline tracking images needed when attachments exist
+          alt.attach(MIMEText(html_body, "html", "utf-8"))
+      else:
+          alt.attach(MIMEText(html_body, "html", "utf-8"))
+
+      outer.attach(alt)
+
+      # Attachments at multipart/mixed level
+      for att_path in template.attachments:
+          p = Path(att_path)
+          if not p.exists():
+              continue
+          mime_type, _ = mimetypes.guess_type(str(p))
+          main_type, sub_type = (mime_type or "application/octet-stream").split("/", 1)
+          with open(p, "rb") as f:
+              data = f.read()
+          att = MIMEApplication(data, _subtype=sub_type)
+          att.add_header("Content-Disposition", "attachment", filename=p.name)
+          outer.attach(att)
+
+      return outer
 
 
-async def test_smtp_connection(account: "SmtpAccount") -> Tuple[bool, str]:
-    lines = [
-        f"Хост: {account.host}:{account.port}",
-        f"Режим: {'SSL/TLS' if account.use_ssl else 'STARTTLS' if account.use_tls else 'Нет шифрования'}",
-        f"Логин: {account.email}",
-    ]
-    try:
-        if account.use_ssl:
-            smtp = aiosmtplib.SMTP(hostname=account.host, port=account.port, use_tls=True, timeout=15)
-        else:
-            smtp = aiosmtplib.SMTP(hostname=account.host, port=account.port, use_tls=False, timeout=15)
-        async with smtp:
-            if not account.use_ssl and account.use_tls:
-                await smtp.starttls()
-            await smtp.login(account.email, account.password)
-            lines.append("✅ Аутентификация успешна")
-        return True, "\n".join(lines)
-    except aiosmtplib.SMTPAuthenticationError as e:
-        lines.append(f"❌ Ошибка авторизации: {e.message if hasattr(e, 'message') else e}")
-        return False, "\n".join(lines)
-    except aiosmtplib.SMTPConnectError as e:
-        lines.append(f"❌ Ошибка подключения: {e}")
-        return False, "\n".join(lines)
-    except aiosmtplib.SMTPException as e:
-        lines.append(f"❌ SMTP ошибка: {e}")
-        return False, "\n".join(lines)
-    except Exception as e:
-        lines.append(f"❌ Ошибка: {e}")
-        return False, "\n".join(lines)
+  # ── SMTP test ──────────────────────────────────────────────────────────────────
+
+  async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
+      """Quick connectivity check. Returns (success, log_message)."""
+      if not _HAS_AIOSMTPLIB:
+          try:
+              import ssl
+              ctx = ssl.create_default_context()
+              if account.use_ssl:
+                  s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=15)
+              else:
+                  s = smtplib.SMTP(account.host, account.port, timeout=15)
+                  if account.use_tls:
+                      s.starttls(context=ctx)
+              s.login(account.email, account.password)
+              s.quit()
+              return True, f"OK — подключение к {account.host}:{account.port} успешно"
+          except Exception as e:
+              return False, f"ОШИБКА: {e}"
+
+      try:
+          if account.use_ssl:
+              smtp = aiosmtplib.SMTP(
+                  hostname=account.host, port=account.port,
+                  use_tls=True, start_tls=False, timeout=20,
+              )
+          else:
+              smtp = aiosmtplib.SMTP(
+                  hostname=account.host, port=account.port,
+                  use_tls=False, start_tls=account.use_tls, timeout=20,
+              )
+          await smtp.connect()
+          await smtp.login(account.email, account.password)
+          await smtp.quit()
+          return True, f"OK — SMTP {account.host}:{account.port} — авторизация прошла успешно"
+      except Exception as e:
+          return False, f"ОШИБКА [{type(e).__name__}]: {e}"
 
 
-def _build_message(
-    account: SmtpAccount,
-    recipient: Recipient,
-    template: EmailTemplate,
-) -> MIMEMultipart:
-    """
-    ИСПРАВЛЕНИЕ: Правильная MIME-структура согласно RFC 2046.
-    Без вложений: MIMEMultipart("alternative")
-    С вложениями: MIMEMultipart("mixed") → [MIMEMultipart("alternative"), attachments...]
-    """
-    has_attachments = bool(template.attachments and any(Path(p).exists() for p in template.attachments))
+  # ── SendingEngine ──────────────────────────────────────────────────────────────
 
-    if has_attachments:
-        msg = MIMEMultipart("mixed")
-        alt = MIMEMultipart("alternative")
-        if template.body_text:
-            alt.attach(MIMEText(template.body_text, "plain", "utf-8"))
-        alt.attach(MIMEText(template.body_html, "html", "utf-8"))
-        msg.attach(alt)
-        for path_str in template.attachments:
-            path = Path(path_str)
-            if path.exists():
-                part = MIMEBase("application", "octet-stream")
-                part.set_payload(path.read_bytes())
-                encoders.encode_base64(part)
-                part.add_header("Content-Disposition", f'attachment; filename="{path.name}"')
-                msg.attach(part)
-    else:
-        msg = MIMEMultipart("alternative")
-        if template.body_text:
-            msg.attach(MIMEText(template.body_text, "plain", "utf-8"))
-        msg.attach(MIMEText(template.body_html, "html", "utf-8"))
+  class SendingEngine:
+      """
+      Async campaign sending engine.
 
-    msg["From"] = account.display_email
-    msg["To"] = recipient.email
-    msg["Subject"] = template.subject
-    msg["Date"] = formatdate(localtime=True)
-    msg["Message-ID"] = make_msgid(domain=account.email.split("@")[-1])
+      Usage (from screen_sending.py):
+          engine = SendingEngine(accounts=accs, config=cfg, log_queue=q)
+          engine.on_progress = lambda sent, total, result: ...
+          engine.on_finished = lambda results: ...
+          # In thread:
+          loop.run_until_complete(engine.run_campaign(recipients, template))
 
-    if template.reply_to:
-        msg["Reply-To"] = template.reply_to
+      Public attributes (read from UI):
+          engine.stats          → {"success": N, "errors": N, "total": N}
+          engine._paused        → bool
+      Public methods:
+          engine.pause()
+          engine.resume()
+          engine.stop()
+      """
 
-    headers = []
-    if template.unsubscribe_url:
-        headers.append(f"<{template.unsubscribe_url}>")
-    if template.unsubscribe_email:
-        headers.append(f"<mailto:{template.unsubscribe_email}>")
-    if headers:
-        msg["List-Unsubscribe"] = ", ".join(headers)
-        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+      def __init__(
+          self,
+          accounts: List[SmtpAccount],
+          config: CampaignConfig,
+          log_queue: Optional[queue.Queue] = None,
+          # Legacy positional compatibility
+          recipients: Optional[List[Recipient]] = None,
+          template: Optional[EmailTemplate] = None,
+          result_queue: Optional[queue.Queue] = None,
+          stop_event: Optional[threading.Event] = None,
+      ):
+          self.accounts = accounts
+          self.config = config
+          self._log_queue: Optional[queue.Queue] = log_queue or result_queue
 
-    return msg
+          # Legacy direct mode
+          self._recipients: List[Recipient] = recipients or []
+          self._template: Optional[EmailTemplate] = template
 
+          self.stop_event = stop_event or threading.Event()
+          self._paused = False
 
-class SendingEngine:
-    def __init__(
-        self,
-        accounts: List[SmtpAccount],
-        recipients: List[Recipient],
-        template: EmailTemplate,
-        config: CampaignConfig,
-        result_queue: queue.Queue,
-        stop_event: Optional[threading.Event] = None,
-    ):
-        self.accounts = accounts
-        self.recipients = recipients
-        self.template = template
-        self.config = config
-        self.result_queue = result_queue
-        self.stop_event = stop_event or threading.Event()
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+          # Callbacks set by screen
+          self.on_progress: Optional[Callable] = None   # (sent, total, result) -> None
+          self.on_finished: Optional[Callable] = None   # (results) -> None
 
-    def run(self):
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
-        try:
-            self._loop.run_until_complete(self._async_run())
-        finally:
-            self._loop.close()
+          self._stats: dict = {"success": 0, "errors": 0, "total": 0}
 
-    def stop(self):
-        self.stop_event.set()
+      @property
+      def stats(self) -> dict:
+          return dict(self._stats)
 
-    async def _async_run(self):
-        sem = asyncio.Semaphore(self.config.max_threads)
-        tasks = []
-        for i, recipient in enumerate(self.recipients):
-            if self.stop_event.is_set():
-                break
-            account = self._pick_account()
-            if account is None:
-                self.result_queue.put(SendResult(
-                    recipient_email=recipient.email,
-                    success=False,
-                    error="Нет доступных аккаунтов",
-                ))
-                continue
+      def pause(self) -> None:
+          self._paused = True
 
-            if i > 0 and i % self.config.pause_after_n == 0:
-                await asyncio.sleep(self.config.pause_duration_sec)
+      def resume(self) -> None:
+          self._paused = False
 
-            delay = random.randint(self.config.min_delay_ms, self.config.max_delay_ms) / 1000.0
-            await asyncio.sleep(delay)
+      def stop(self) -> None:
+          self.stop_event.set()
+          self._paused = False  # unblock if paused
 
-            task = asyncio.create_task(self._send_one(sem, account, recipient))
-            tasks.append(task)
+      # ── Legacy blocking entry-point ────────────────────────────────────────
 
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+      def run(self) -> None:
+          """Blocking run for legacy thread-based usage."""
+          loop = asyncio.new_event_loop()
+          asyncio.set_event_loop(loop)
+          try:
+              tpl = self._template or EmailTemplate(subject="(no subject)", body_html="")
+              loop.run_until_complete(self.run_campaign(self._recipients, tpl))
+          finally:
+              loop.close()
 
-    def _pick_account(self) -> Optional[SmtpAccount]:
-        available = [a for a in self.accounts if a.can_send]
-        if not available:
-            return None
-        return min(available, key=lambda a: a.sent_today)
+      # ── Main async campaign runner ─────────────────────────────────────────
 
-    async def _send_one(self, sem: asyncio.Semaphore, account: SmtpAccount, recipient: Recipient):
-        async with sem:
-            if self.stop_event.is_set():
-                return
-            personalized = self.template.personalize(recipient)
-            msg = _build_message(account, recipient, personalized)
-            try:
-                if account.use_ssl:
-                    await aiosmtplib.send(
-                        msg,
-                        hostname=account.host,
-                        port=account.port,
-                        username=account.email,
-                        password=account.password,
-                        use_tls=True,
-                        start_tls=False,
-                        timeout=30,
-                    )
-                else:
-                    await aiosmtplib.send(
-                        msg,
-                        hostname=account.host,
-                        port=account.port,
-                        username=account.email,
-                        password=account.password,
-                        use_tls=False,
-                        start_tls=account.use_tls,
-                        timeout=30,
-                    )
-                # ИСПРАВЛЕНИЕ: используем increment_sent() (thread-safe) вместо прямого +=
-                account.increment_sent()
-                result = SendResult(
-                    recipient_email=recipient.email,
-                    success=True,
-                    account_used=account.email,
-                    message_id=msg.get("Message-ID", ""),
-                )
-            except Exception as e:
-                result = SendResult(
-                    recipient_email=recipient.email,
-                    success=False,
-                    error=str(e),
-                    account_used=account.email,
-                )
-            self.result_queue.put(result)
+      async def run_campaign(
+          self,
+          recipients: List[Recipient],
+          template: EmailTemplate,
+      ) -> List[SendResult]:
+          """Called from screen_sending.py in a background thread's event loop."""
+          self._recipients = recipients
+          self._template = template
+          self._stats = {"success": 0, "errors": 0, "total": len(recipients)}
+          self.stop_event.clear()
+          self._paused = False
+
+          results: List[SendResult] = []
+          sem = asyncio.Semaphore(self.config.max_threads)
+
+          for i, recipient in enumerate(recipients):
+              if self.stop_event.is_set():
+                  break
+
+              # Handle pause: spin with small sleeps
+              while self._paused and not self.stop_event.is_set():
+                  await asyncio.sleep(0.1)
+              if self.stop_event.is_set():
+                  break
+
+              # Periodic batch pause
+              if i > 0 and (i % self.config.pause_after_n) == 0:
+                  await asyncio.sleep(self.config.pause_duration_sec)
+
+              account = self._pick_account()
+              if account is None:
+                  result = SendResult(
+                      recipient_email=recipient.email,
+                      success=False,
+                      error="Нет доступных аккаунтов",
+                  )
+                  results.append(result)
+                  self._stats["errors"] += 1
+                  self._emit_progress(results, recipients, result)
+                  continue
+
+              # Randomised delay between sends
+              delay = random.randint(self.config.min_delay_ms, self.config.max_delay_ms) / 1000.0
+              await asyncio.sleep(delay)
+
+              result = await self._send_one(sem, account, recipient, template)
+              results.append(result)
+
+              if result.success:
+                  self._stats["success"] += 1
+              else:
+                  self._stats["errors"] += 1
+
+              self._emit_progress(results, recipients, result)
+
+          # Notify completion
+          if self.on_finished is not None:
+              try:
+                  self.on_finished(results)
+              except Exception:
+                  pass
+
+          return results
+
+      # ── Internal helpers ───────────────────────────────────────────────────
+
+      def _emit_progress(self, results, recipients, result) -> None:
+          if self.on_progress is not None:
+              try:
+                  self.on_progress(len(results), len(recipients), result)
+              except Exception:
+                  pass
+
+      def _pick_account(self) -> Optional[SmtpAccount]:
+          active = [a for a in self.accounts if a.can_send]
+          if not active:
+              return None
+          if self.config.rotate_accounts:
+              return min(active, key=lambda a: a.sent_today)
+          return active[0]
+
+      async def _send_one(
+          self,
+          sem: asyncio.Semaphore,
+          account: SmtpAccount,
+          recipient: Recipient,
+          template: EmailTemplate,
+      ) -> SendResult:
+          async with sem:
+              if self.stop_event.is_set():
+                  return SendResult(
+                      recipient_email=recipient.email,
+                      success=False,
+                      error="Отменено",
+                      account_used=account.email,
+                  )
+              personalized = template.personalize(recipient)
+              msg = _build_message(account, recipient, personalized)
+
+              if not _HAS_AIOSMTPLIB:
+                  return await asyncio.get_event_loop().run_in_executor(
+                      None, self._send_sync, account, recipient, msg,
+                  )
+
+              try:
+                  if account.use_ssl:
+                      await aiosmtplib.send(
+                          msg,
+                          hostname=account.host,
+                          port=account.port,
+                          username=account.email,
+                          password=account.password,
+                          use_tls=True,
+                          start_tls=False,
+                          timeout=30,
+                      )
+                  else:
+                      await aiosmtplib.send(
+                          msg,
+                          hostname=account.host,
+                          port=account.port,
+                          username=account.email,
+                          password=account.password,
+                          use_tls=False,
+                          start_tls=account.use_tls,
+                          timeout=30,
+                      )
+                  account.increment_sent()   # thread-safe
+                  return SendResult(
+                      recipient_email=recipient.email,
+                      success=True,
+                      account_used=account.email,
+                      message_id=msg.get("Message-ID", ""),
+                  )
+              except Exception as exc:
+                  return SendResult(
+                      recipient_email=recipient.email,
+                      success=False,
+                      error=str(exc),
+                      account_used=account.email,
+                  )
+
+      def _send_sync(self, account, recipient, msg) -> SendResult:
+          """Fallback synchronous send when aiosmtplib is unavailable."""
+          import ssl
+          try:
+              ctx = ssl.create_default_context()
+              if account.use_ssl:
+                  s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=30)
+              else:
+                  s = smtplib.SMTP(account.host, account.port, timeout=30)
+                  if account.use_tls:
+                      s.starttls(context=ctx)
+              s.login(account.email, account.password)
+              s.sendmail(account.email, recipient.email, msg.as_string())
+              s.quit()
+              account.increment_sent()
+              return SendResult(
+                  recipient_email=recipient.email,
+                  success=True,
+                  account_used=account.email,
+                  message_id=msg.get("Message-ID", ""),
+              )
+          except Exception as exc:
+              return SendResult(
+                  recipient_email=recipient.email,
+                  success=False,
+                  error=str(exc),
+                  account_used=account.email,
+              )
+  
