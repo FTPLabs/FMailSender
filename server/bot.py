@@ -1,14 +1,12 @@
 """
-FMail Sender — Telegram Bot + FastAPI License Server
-Запуск: python bot.py
+FMail Sender — Telegram Bot + FastAPI License Server v2.5.0
+Минималистичный интерфейс: Личный кабинет, Купить, Скачать, Поддержка.
 """
 import asyncio
 import logging
 import os
 import sys
-import time
-from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 
 import jwt
@@ -25,8 +23,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 import database as db
@@ -52,9 +49,13 @@ class BuyFlow(StatesGroup):
     waiting_payment = State()
 
 
+class SupportFlow(StatesGroup):
+    waiting_message = State()
+
+
 class AdminFlow(StatesGroup):
     issue_plan = State()
-    issue_telegram_id = State()   # FIX: новый шаг — Telegram ID получателя
+    issue_telegram_id = State()
     issue_hwid = State()
     issue_note = State()
     set_price_plan = State()
@@ -67,16 +68,17 @@ class AdminFlow(StatesGroup):
 
 # ─── Keyboards ──────────────────────────────────────────────────────────────
 
-def kb_main(is_admin: bool = False) -> InlineKeyboardMarkup:
+def kb_main(is_admin_user: bool = False) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="💳 Купить лицензию", callback_data="menu_buy")],
-        [InlineKeyboardButton(text="🔑 Мои лицензии", callback_data="menu_my_licenses")],
-        [InlineKeyboardButton(text="📋 Привязать HWID", callback_data="menu_set_hwid")],
-        [InlineKeyboardButton(text="ℹ️ Помощь", callback_data="menu_help")],
-        [InlineKeyboardButton(text="📥 Скачать FMail Sender", callback_data="menu_download")],
+        [InlineKeyboardButton(text="👤 Личный кабинет", callback_data="menu_cabinet")],
+        [
+            InlineKeyboardButton(text="💳 Купить лицензию", callback_data="menu_buy"),
+            InlineKeyboardButton(text="📥 Скачать", callback_data="menu_download"),
+        ],
+        [InlineKeyboardButton(text="🎫 Поддержка", callback_data="menu_support")],
     ]
-    if is_admin:
-        rows.append([InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin_panel")])
+    if is_admin_user:
+        rows.append([InlineKeyboardButton(text="⚙️ Панель администратора", callback_data="admin_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -101,6 +103,12 @@ def kb_payment(pay_url: str, invoice_id: str) -> InlineKeyboardMarkup:
     ])
 
 
+def kb_back_main() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")]
+    ])
+
+
 def kb_admin() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎟 Выдать ключ", callback_data="admin_issue")],
@@ -109,8 +117,8 @@ def kb_admin() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💲 Изменить цены", callback_data="admin_prices")],
         [InlineKeyboardButton(text="🚫 Отозвать ключ", callback_data="admin_revoke")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text="🔗 Обновить ссылку скачивания", callback_data="admin_set_download")],
-        [InlineKeyboardButton(text="🗑 Сброс всех ключей", callback_data="admin_clear_keys")],
+        [InlineKeyboardButton(text="🔗 Ссылка скачивания", callback_data="admin_set_download")],
+        [InlineKeyboardButton(text="🗑 Удалить все ключи", callback_data="admin_clear_keys")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
     ])
 
@@ -118,9 +126,7 @@ def kb_admin() -> InlineKeyboardMarkup:
 def kb_admin_plans() -> InlineKeyboardMarkup:
     rows = []
     for plan_id, plan in PLANS.items():
-        label = plan["name"]
-        if plan.get("admin_only"):
-            label = f"[ПРОБНЫЙ] {label}"
+        label = f"[ПРОБНЫЙ] {plan['name']}" if plan.get("admin_only") else plan["name"]
         rows.append([InlineKeyboardButton(text=label, callback_data=f"admin_plan:{plan_id}")])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -132,45 +138,29 @@ def kb_back_admin() -> InlineKeyboardMarkup:
     ])
 
 
-def kb_back_main() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")]
-    ])
-
-
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 
-def fmt_license(lic: dict) -> str:
-    from datetime import datetime, timezone
-    exp_str = lic.get("expires_at", "")
-    exp = exp_str[:10]
-    # Реальная проверка истечения срока лицензии
-    try:
-        exp_dt = datetime.fromisoformat(exp_str.replace("Z", "+00:00"))
-        if exp_dt.tzinfo is None:
-            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
-        is_expired = datetime.now(timezone.utc) > exp_dt
-    except Exception:
-        is_expired = False
-    if not lic.get("is_active"):
-        active = "❌ Отозвана"
-    elif is_expired:
-        active = "⏰ Истекла"
-    else:
-        active = "✅ Активна"
-    hwid = lic.get("hwid") or "не привязан"
-    plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", ""))
-    return (
-        f"🔑 <code>{lic['key']}</code>\n"
-        f"📦 План: <b>{plan_name}</b>\n"
-        f"📅 Истекает: <b>{exp}</b>\n"
-        f"💻 HWID: <code>{hwid}</code>\n"
-        f"🔒 Статус: {active}"
-    )
+def _get_active_license(licenses: list) -> Optional[dict]:
+    """Возвращает первую активную не истёкшую лицензию."""
+    now = datetime.now(timezone.utc)
+    for lic in licenses:
+        if not lic.get("is_active"):
+            continue
+        try:
+            exp_str = lic.get("expires_at", "")
+            exp_dt = datetime.fromisoformat(exp_str.replace("Z", "+00:00"))
+            if exp_dt.tzinfo is None:
+                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+            if now <= exp_dt:
+                return lic
+        except Exception:
+            pass
+    return None
+
 
 async def send_or_edit(message_or_query, text: str, reply_markup=None, **kwargs):
     if isinstance(message_or_query, CallbackQuery):
@@ -189,74 +179,144 @@ async def send_or_edit(message_or_query, text: str, reply_markup=None, **kwargs)
 async def cmd_start(message: Message):
     user = message.from_user
     await db.upsert_user(user.id, user.username or "", user.first_name or "")
-    admin = is_admin(user.id)
     text = (
         f"👋 Привет, <b>{user.first_name}</b>!\n\n"
-        f"🚀 <b>FMail Sender</b> — профессиональный инструмент для email-рассылок.\n\n"
+        f"<b>FMail Sender</b> — профессиональный инструмент для email-рассылок.\n\n"
         f"Выбери действие:"
     )
-    await message.answer(text, reply_markup=kb_main(admin))
+    await message.answer(text, reply_markup=kb_main(is_admin(user.id)))
 
 
 @dp.callback_query(F.data == "menu_main")
 async def cb_menu_main(query: CallbackQuery, state: FSMContext):
     await state.clear()
+    await send_or_edit(query, "🏠 <b>Главное меню</b>", reply_markup=kb_main(is_admin(query.from_user.id)))
+
+
+# ─── Личный кабинет ─────────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "menu_cabinet")
+async def cb_cabinet(query: CallbackQuery):
     user = query.from_user
-    admin = is_admin(user.id)
-    text = (
-        f"🏠 <b>Главное меню</b>\n\n"
-        f"👤 {user.first_name} | ID: <code>{user.id}</code>"
-    )
-    await send_or_edit(query, text, reply_markup=kb_main(admin))
+    licenses = await db.get_license_by_telegram(user.id)
+    hwid = await db.get_user_hwid(user.id)
+    active_lic = _get_active_license(licenses)
+
+    lines = [f"👤 <b>Личный кабинет</b>\n"]
+    lines.append(f"🆔 ID: <code>{user.id}</code>")
+    lines.append(f"💻 HWID: <code>{hwid or 'не привязан'}</code>")
+    lines.append("")
+
+    if active_lic:
+        plan_name = PLANS.get(active_lic.get("plan", ""), {}).get("name", active_lic.get("plan", "—"))
+        exp_str = active_lic.get("expires_at", "")
+        try:
+            exp_dt = datetime.fromisoformat(exp_str.replace("Z", "+00:00"))
+            if exp_dt.tzinfo is None:
+                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+            days_left = max(0, (exp_dt - datetime.now(timezone.utc)).days)
+            exp_display = exp_dt.strftime("%d.%m.%Y")
+        except Exception:
+            days_left = 0
+            exp_display = exp_str[:10]
+
+        lines.append(f"📦 Подписка: <b>{plan_name}</b>")
+        lines.append(f"📅 Истекает: <b>{exp_display}</b> ({days_left} дн.)")
+        lines.append(f"✅ Статус: <b>Активна</b>")
+    else:
+        lines.append("📦 Подписка: <b>нет активной</b>")
+        lines.append("💡 Нажми «Купить лицензию» для покупки")
+
+    await send_or_edit(query, "\n".join(lines), reply_markup=kb_back_main())
 
 
-# ─── Help ───────────────────────────────────────────────────────────────────
+# ─── Скачать приложение ──────────────────────────────────────────────────────
 
-@dp.callback_query(F.data == "menu_help")
-async def cb_help(query: CallbackQuery):
-    text = (
-        "📖 <b>Как начать работу:</b>\n\n"
-        "1️⃣ Нажми <b>«Купить лицензию»</b> и выбери тарифный план\n"
-        "2️⃣ Укажи свой <b>HWID</b> (отображается при открытии программы)\n"
-        "3️⃣ Оплати через <b>CryptoBot</b> в USDT\n"
-        "4️⃣ Получи лицензионный ключ и введи его в программе\n\n"
-        "⚠️ <b>Важно:</b> Лицензия привязывается к HWID твоего компьютера.\n\n"
-        "❓ Вопросы? Пиши в поддержку."
-    )
-    await send_or_edit(query, text, reply_markup=kb_back_main())
+@dp.callback_query(F.data == "menu_download")
+async def cb_menu_download(query: CallbackQuery):
+    user_id = query.from_user.id
+    licenses = await db.get_license_by_telegram(user_id)
+    active_lic = _get_active_license(licenses)
 
+    try:
+        dl_url = await db.get_setting("download_url") or DOWNLOAD_URL
+    except Exception:
+        dl_url = DOWNLOAD_URL
 
-# ─── Set HWID ───────────────────────────────────────────────────────────────
-
-@dp.callback_query(F.data == "menu_set_hwid")
-async def cb_set_hwid(query: CallbackQuery, state: FSMContext):
-    await state.set_state(BuyFlow.waiting_hwid)
-    await state.update_data(hwid_only=True)
-    text = (
-        "💻 <b>Привязать HWID</b>\n\n"
-        "Отправь свой HWID компьютера.\n"
-        "Его можно скопировать прямо из программы на экране активации."
-    )
-    await send_or_edit(query, text, reply_markup=kb_back_main())
-
-
-# ─── My Licenses ────────────────────────────────────────────────────────────
-
-@dp.callback_query(F.data == "menu_my_licenses")
-async def cb_my_licenses(query: CallbackQuery):
-    licenses = await db.get_license_by_telegram(query.from_user.id)
-    if not licenses:
+    if not active_lic:
         await send_or_edit(
             query,
-            "❌ У тебя пока нет лицензий.\n\nНажми «Купить лицензию» чтобы приобрести.",
-            reply_markup=kb_main(is_admin(query.from_user.id)),
+            "❌ <b>Скачивание недоступно</b>\n\n"
+            "У тебя нет активной подписки.\n"
+            "Нажми «Купить лицензию» чтобы получить доступ.",
+            reply_markup=kb_main(is_admin(user_id)),
         )
         return
-    parts = [f"🗂 <b>Твои лицензии ({len(licenses)} шт.):</b>\n"]
-    for lic in licenses[:5]:
-        parts.append(fmt_license(lic))
-        parts.append("")
-    await send_or_edit(query, "\n".join(parts), reply_markup=kb_back_main())
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬇️ Скачать FMailSender.exe", url=dl_url)],
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
+    ])
+    await send_or_edit(
+        query,
+        "📥 <b>Скачать FMail Sender</b>\n\n✅ Подписка активна. Нажми кнопку ниже:",
+        reply_markup=kb,
+    )
+
+
+# ─── Поддержка (тикет) ───────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "menu_support")
+async def cb_support(query: CallbackQuery, state: FSMContext):
+    await state.set_state(SupportFlow.waiting_message)
+    text = (
+        "🎫 <b>Поддержка</b>\n\n"
+        "Опиши свою проблему подробно. Мы ответим в личные сообщения.\n\n"
+        "📝 Напиши сообщение:"
+    )
+    await send_or_edit(query, text, reply_markup=kb_back_main())
+
+
+@dp.message(SupportFlow.waiting_message)
+async def msg_support(message: Message, state: FSMContext):
+    await state.clear()
+    user = message.from_user
+    hwid = await db.get_user_hwid(user.id)
+    licenses = await db.get_license_by_telegram(user.id)
+    active_lic = _get_active_license(licenses)
+    plan_info = ""
+    if active_lic:
+        plan_name = PLANS.get(active_lic.get("plan", ""), {}).get("name", "—")
+        plan_info = f"\n📦 Подписка: {plan_name}"
+
+    ticket_text = (
+        f"🎫 <b>Новый тикет поддержки</b>\n\n"
+        f"👤 {user.first_name}"
+        f"{(' (@' + user.username + ')') if user.username else ''}\n"
+        f"🆔 ID: <code>{user.id}</code>\n"
+        f"💻 HWID: <code>{hwid or 'не привязан'}</code>"
+        f"{plan_info}\n\n"
+        f"📝 <b>Сообщение:</b>\n{message.text or '(медиа-файл)'}"
+    )
+
+    sent = False
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, ticket_text)
+            sent = True
+        except Exception as e:
+            logger.warning("Cannot send ticket to admin %d: %s", admin_id, e)
+
+    if sent:
+        await message.answer(
+            "✅ <b>Тикет отправлен!</b>\n\nОтветим в личные сообщения. Обычно в течение 24 часов.",
+            reply_markup=kb_main(is_admin(user.id)),
+        )
+    else:
+        await message.answer(
+            "⚠️ Не удалось отправить тикет. Попробуй позже.",
+            reply_markup=kb_main(is_admin(user.id)),
+        )
 
 
 # ─── Buy Flow ───────────────────────────────────────────────────────────────
@@ -268,10 +328,7 @@ async def cb_menu_buy(query: CallbackQuery):
         if plan.get("admin_only"):
             continue
         price = await db.get_plan_price(plan_id)
-        lines.append(
-            f"<b>{plan['name']}</b> — <b>${price:.2f} USDT</b>\n"
-            f"   {plan['description']}\n"
-        )
+        lines.append(f"<b>{plan['name']}</b> — <b>${price:.2f} USDT</b>\n   {plan['description']}\n")
     await send_or_edit(query, "\n".join(lines), reply_markup=kb_plans())
 
 
@@ -291,24 +348,26 @@ async def cb_buy_plan(query: CallbackQuery, state: FSMContext):
         await state.set_state(BuyFlow.waiting_hwid)
         plan = PLANS[plan_id]
         price = await db.get_plan_price(plan_id)
-        text = (
-            f"📦 <b>{plan['name']}</b> — ${price:.2f} USDT\n\n"
-            f"💻 Текущий HWID: <code>{current_hwid}</code>\n\n"
-            "Использовать этот HWID или отправь новый:"
-        )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Использовать текущий", callback_data=f"use_hwid:{current_hwid}")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_buy")],
         ])
-        await send_or_edit(query, text, reply_markup=kb)
+        await send_or_edit(
+            query,
+            f"📦 <b>{plan['name']}</b> — ${price:.2f} USDT\n\n"
+            f"💻 Текущий HWID: <code>{current_hwid}</code>\n\n"
+            f"Использовать этот HWID или отправь новый:",
+            reply_markup=kb,
+        )
     else:
         await state.set_state(BuyFlow.waiting_hwid)
-        text = (
+        await send_or_edit(
+            query,
             f"📦 <b>{PLANS[plan_id]['name']}</b>\n\n"
             "💻 Отправь свой <b>HWID</b> компьютера.\n"
-            "Его можно скопировать на экране активации программы."
+            "Его можно скопировать на экране активации программы.",
+            reply_markup=kb_back_main(),
         )
-        await send_or_edit(query, text, reply_markup=kb_back_main())
 
 
 @dp.callback_query(F.data.startswith("use_hwid:"))
@@ -320,24 +379,20 @@ async def cb_use_hwid(query: CallbackQuery, state: FSMContext):
 
 @dp.message(BuyFlow.waiting_hwid)
 async def msg_hwid(message: Message, state: FSMContext):
-    hwid = message.text.strip().upper() if message.text else ""
+    hwid = (message.text or "").strip().upper()
     data = await state.get_data()
-
     if len(hwid) < 8 or " " in hwid:
         await message.answer("❌ Неверный формат HWID. Скопируй его из программы.")
         return
-
     await db.set_user_hwid(message.from_user.id, hwid)
     await db.upsert_user(message.from_user.id, message.from_user.username or "", message.from_user.first_name or "")
-
     if data.get("hwid_only"):
         await state.clear()
         await message.answer(
-            f"✅ HWID привязан: <code>{hwid}</code>",
+            f"✅ HWID сохранён: <code>{hwid}</code>",
             reply_markup=kb_main(is_admin(message.from_user.id)),
         )
         return
-
     plan_id = data.get("plan_id", "week")
     await _proceed_to_payment(message, state, hwid, plan_id)
 
@@ -346,7 +401,6 @@ async def _proceed_to_payment(event, state: FSMContext, hwid: str, plan_id: str)
     plan = PLANS[plan_id]
     price = await db.get_plan_price(plan_id)
     user_id = event.from_user.id if hasattr(event, "from_user") else event.message.from_user.id
-
     try:
         invoice = await crypto_client.create_invoice(
             amount=price,
@@ -365,22 +419,15 @@ async def _proceed_to_payment(event, state: FSMContext, hwid: str, plan_id: str)
         await state.clear()
         return
 
-    await db.save_payment(
-        telegram_id=user_id,
-        invoice_id=invoice_id,
-        plan=plan_id,
-        hwid=hwid,
-        amount=price,
-    )
+    await db.save_payment(telegram_id=user_id, invoice_id=invoice_id, plan=plan_id, hwid=hwid, amount=price)
     await state.update_data(invoice_id=invoice_id, hwid=hwid)
     await state.set_state(BuyFlow.waiting_payment)
-
     text = (
         f"💳 <b>Оплата</b>\n\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
         f"💰 Сумма: <b>${price:.2f} USDT</b>\n"
         f"💻 HWID: <code>{hwid}</code>\n\n"
-        f"Нажми <b>«Оплатить»</b> и после оплаты проверь статус."
+        f"Нажми <b>«Оплатить»</b> и после оплаты нажми «Проверить»."
     )
     if isinstance(event, CallbackQuery):
         await send_or_edit(event, text, reply_markup=kb_payment(pay_url, invoice_id))
@@ -396,16 +443,13 @@ async def cb_check_pay(query: CallbackQuery, state: FSMContext):
     except Exception as e:
         await query.answer(f"Ошибка проверки: {e}", show_alert=True)
         return
-
     if not paid:
         await query.answer("⏳ Оплата ещё не поступила. Попробуй через минуту.", show_alert=True)
         return
-
     payment = await db.get_payment(invoice_id)
     if not payment:
         await query.answer("❌ Платёж не найден.", show_alert=True)
         return
-
     existing_license = await db.get_payment_license(invoice_id)
     if existing_license:
         await send_or_edit(
@@ -416,7 +460,6 @@ async def cb_check_pay(query: CallbackQuery, state: FSMContext):
         )
         await state.clear()
         return
-
     license_data = await db.create_license(
         plan=payment["plan"],
         hwid=payment.get("hwid", ""),
@@ -424,13 +467,12 @@ async def cb_check_pay(query: CallbackQuery, state: FSMContext):
     )
     await db.mark_payment_paid(invoice_id, license_data["key"])
     await state.clear()
-
     text = (
         f"✅ <b>Оплата подтверждена!</b>\n\n"
         f"📦 Тариф: <b>{PLANS.get(payment['plan'], {}).get('name', payment['plan'])}</b>\n\n"
         f"🔑 <b>Ваш лицензионный ключ:</b>\n<code>{license_data['key']}</code>\n\n"
         f"Введите его в программе на экране активации.\n"
-        f"💻 Привязан к HWID: <code>{payment.get('hwid') or 'при первой активации'}</code>"
+        f"💻 HWID: <code>{payment.get('hwid') or 'привязывается при первой активации'}</code>"
     )
     await send_or_edit(query, text, reply_markup=kb_main(is_admin(query.from_user.id)))
 
@@ -444,8 +486,9 @@ async def cb_admin_panel(query: CallbackQuery, state: FSMContext):
     await state.clear()
     stats = await db.get_stats()
     text = (
-        f"⚙️ <b>Админ-панель</b>\n\n"
-        f"📊 Активных лицензий: <b>{stats['active_licenses']}</b>\n"
+        f"⚙️ <b>Панель администратора</b>\n\n"
+        f"✅ Активных лицензий: <b>{stats['active_licenses']}</b>\n"
+        f"📦 Всего лицензий: <b>{stats['total_licenses']}</b>\n"
         f"💰 Выручка: <b>${stats['total_revenue_usdt']:.2f} USDT</b>\n"
         f"👥 Пользователей: <b>{stats['total_users']}</b>"
     )
@@ -462,7 +505,11 @@ async def cb_admin_list(query: CallbackQuery):
         return
     parts = [f"📋 <b>Последние {len(licenses)} лицензий:</b>\n"]
     for lic in licenses:
-        parts.append(fmt_license(lic))
+        plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", "—"))
+        exp = lic.get("expires_at", "")[:10]
+        hwid = lic.get("hwid") or "—"
+        status = "✅" if lic.get("is_active") else "❌"
+        parts.append(f"{status} <code>{lic['key']}</code>\n   {plan_name} | до {exp} | HWID: {hwid}")
         parts.append("")
     await send_or_edit(query, "\n".join(parts), reply_markup=kb_back_admin())
 
@@ -476,6 +523,7 @@ async def cb_admin_stats(query: CallbackQuery):
         f"📊 <b>Статистика</b>\n\n"
         f"✅ Активных лицензий: <b>{stats['active_licenses']}</b>\n"
         f"📦 Всего лицензий: <b>{stats['total_licenses']}</b>\n"
+        f"💳 Оплаченных заказов: <b>{stats['paid_orders']}</b>\n"
         f"👥 Пользователей: <b>{stats['total_users']}</b>\n"
         f"💰 Выручка: <b>${stats['total_revenue_usdt']:.2f} USDT</b>"
     )
@@ -483,18 +531,13 @@ async def cb_admin_stats(query: CallbackQuery):
 
 
 # ─── Admin Issue Flow ────────────────────────────────────────────────────────
-# Порядок: Выбор плана → Telegram ID получателя → HWID → Заметка → Создать
 
 @dp.callback_query(F.data == "admin_issue")
 async def cb_admin_issue(query: CallbackQuery, state: FSMContext):
     if not is_admin(query.from_user.id):
         return
     await state.set_state(AdminFlow.issue_plan)
-    await send_or_edit(
-        query,
-        "🎟 <b>Выдача ключа</b>\n\nВыбери тарифный план:",
-        reply_markup=kb_admin_plans(),
-    )
+    await send_or_edit(query, "🎟 <b>Выдача ключа</b>\n\nВыбери тарифный план:", reply_markup=kb_admin_plans())
 
 
 @dp.callback_query(F.data.startswith("admin_plan:"), AdminFlow.issue_plan)
@@ -508,8 +551,7 @@ async def cb_admin_plan_selected(query: CallbackQuery, state: FSMContext):
     await send_or_edit(
         query,
         f"🎟 Тариф: <b>{plan.get('name', plan_id)}</b>\n\n"
-        f"📨 Отправь <b>Telegram ID</b> получателя (числовой ID)\n"
-        f"или <code>-</code> чтобы пропустить:",
+        f"Отправь Telegram ID получателя (числовой) или <code>-</code> пропустить:",
         reply_markup=kb_back_admin(),
     )
 
@@ -518,38 +560,38 @@ async def cb_admin_plan_selected(query: CallbackQuery, state: FSMContext):
 async def msg_admin_telegram_id(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    raw = message.text.strip() if message.text else ""
-    if raw == "-":
-        telegram_id = 0
-    else:
+    raw = (message.text or "").strip()
+    telegram_id = 0
+    if raw != "-":
         try:
             telegram_id = int(raw)
         except ValueError:
-            await message.answer("❌ Telegram ID должен быть числом (или <code>-</code> чтобы пропустить).")
+            await message.answer("❌ Telegram ID должен быть числом или <code>-</code>")
             return
     await state.update_data(telegram_id=telegram_id)
     await state.set_state(AdminFlow.issue_hwid)
-    await message.answer("💻 Отправь HWID получателя (или <code>-</code> пропустить):")
+    await message.answer("💻 Отправь HWID получателя или <code>-</code> пропустить:")
 
 
 @dp.message(AdminFlow.issue_hwid)
 async def msg_admin_hwid(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    hwid = "" if message.text.strip() == "-" else message.text.strip().upper()
+    raw = (message.text or "").strip()
+    hwid = "" if raw == "-" else raw.upper()
     await state.update_data(hwid=hwid)
     await state.set_state(AdminFlow.issue_note)
-    await message.answer("📝 Добавь примечание (или <code>-</code> пропустить):")
+    await message.answer("📝 Добавь примечание или <code>-</code> пропустить:")
 
 
 @dp.message(AdminFlow.issue_note)
 async def msg_admin_note(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    note = "" if message.text.strip() == "-" else message.text.strip()
+    raw = (message.text or "").strip()
+    note = "" if raw == "-" else raw
     data = await state.get_data()
     await state.clear()
-
     telegram_id = data.get("telegram_id", 0)
     license_data = await db.create_license(
         plan=data["plan_id"],
@@ -559,60 +601,49 @@ async def msg_admin_note(message: Message, state: FSMContext):
     )
     plan = PLANS.get(data["plan_id"], {})
     key = license_data["key"]
-
-    text = (
+    await message.answer(
         f"✅ <b>Ключ создан!</b>\n\n"
-        f"📦 Тариф: <b>{plan.get('name', data['plan_id'])}</b>\n"
+        f"📦 {plan.get('name', data['plan_id'])} | до {license_data['expires_at'][:10]}\n"
         f"💻 HWID: <code>{data.get('hwid') or 'не задан'}</code>\n"
-        f"📅 Истекает: <b>{license_data['expires_at'][:10]}</b>\n"
-        f"📝 Заметка: {note or '—'}\n\n"
-        f"🔑 <b>Ключ:</b>\n<code>{key}</code>"
+        f"📝 {note or '—'}\n\n"
+        f"🔑 <code>{key}</code>",
+        reply_markup=kb_admin(),
     )
-    await message.answer(text, reply_markup=kb_admin())
-
-    # FIX: Отправляем ключ получателю в Telegram если указан ID
     if telegram_id:
         try:
-            recipient_text = (
+            await bot.send_message(
+                telegram_id,
                 f"🎉 <b>Ваш лицензионный ключ FMail Sender</b>\n\n"
-                f"📦 Тариф: <b>{plan.get('name', data['plan_id'])}</b>\n"
-                f"📅 Действует до: <b>{license_data['expires_at'][:10]}</b>\n\n"
-                f"🔑 <b>Ключ:</b>\n<code>{key}</code>\n\n"
-                f"Введите его в программе на экране активации."
+                f"📦 {plan.get('name', data['plan_id'])} | до {license_data['expires_at'][:10]}\n\n"
+                f"🔑 <code>{key}</code>\n\nВведите в программе на экране активации."
             )
-            await bot.send_message(telegram_id, recipient_text)
             await message.answer(f"✅ Ключ отправлен получателю (ID: <code>{telegram_id}</code>)")
         except Exception as e:
-            await message.answer(
-                f"⚠️ Не удалось отправить ключ получателю: {e}\n"
-                f"Отправьте вручную: <code>{key}</code>"
-            )
+            await message.answer(f"⚠️ Не удалось отправить: {e}\nОтправьте вручную: <code>{key}</code>")
 
+
+# ─── Admin Revoke ────────────────────────────────────────────────────────────
 
 @dp.callback_query(F.data == "admin_revoke")
 async def cb_admin_revoke(query: CallbackQuery, state: FSMContext):
     if not is_admin(query.from_user.id):
         return
     await state.set_state(AdminFlow.revoke_key)
-    await send_or_edit(
-        query,
-        "🚫 <b>Отзыв ключа</b>\n\nОтправь лицензионный ключ для отзыва:",
-        reply_markup=kb_back_admin(),
-    )
+    await send_or_edit(query, "🚫 <b>Отзыв ключа</b>\n\nОтправь лицензионный ключ для отзыва:", reply_markup=kb_back_admin())
 
 
 @dp.message(AdminFlow.revoke_key)
 async def msg_admin_revoke(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    key = message.text.strip().upper()
+    key = (message.text or "").strip().upper()
     await state.clear()
     success = await db.revoke_license(key)
-    if success:
-        await message.answer(f"✅ Ключ <code>{key}</code> отозван.", reply_markup=kb_admin())
-    else:
-        await message.answer(f"❌ Ключ не найден: <code>{key}</code>", reply_markup=kb_admin())
+    text = f"✅ Ключ <code>{key}</code> отозван." if success else f"❌ Ключ не найден: <code>{key}</code>"
+    await message.answer(text, reply_markup=kb_admin())
 
+
+# ─── Admin Prices ────────────────────────────────────────────────────────────
 
 @dp.callback_query(F.data == "admin_prices")
 async def cb_admin_prices(query: CallbackQuery, state: FSMContext):
@@ -637,7 +668,7 @@ async def cb_admin_price_plan(query: CallbackQuery, state: FSMContext):
     await state.set_state(AdminFlow.set_price_value)
     await send_or_edit(
         query,
-        f"💲 Текущая цена {PLANS[plan_id]['name']}: <b>${current:.2f}</b>\n\nОтправь новую цену в USDT:",
+        f"💲 {PLANS[plan_id]['name']}: <b>${current:.2f}</b>\n\nОтправь новую цену в USDT:",
         reply_markup=kb_back_admin(),
     )
 
@@ -647,7 +678,7 @@ async def msg_admin_price_value(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     try:
-        new_price = float(message.text.strip().replace(",", "."))
+        new_price = float((message.text or "").strip().replace(",", "."))
         if new_price <= 0:
             raise ValueError
     except ValueError:
@@ -657,12 +688,13 @@ async def msg_admin_price_value(message: Message, state: FSMContext):
     plan_id = data["price_plan_id"]
     await db.set_setting(f"price_{plan_id}", str(new_price))
     await state.clear()
-    plan = PLANS.get(plan_id, {})
     await message.answer(
-        f"✅ Цена <b>{plan.get('name', plan_id)}</b> изменена на <b>${new_price:.2f} USDT</b>",
+        f"✅ Цена <b>{PLANS.get(plan_id, {}).get('name', plan_id)}</b> → <b>${new_price:.2f} USDT</b>",
         reply_markup=kb_admin(),
     )
 
+
+# ─── Admin Broadcast ─────────────────────────────────────────────────────────
 
 @dp.callback_query(F.data == "admin_broadcast")
 async def cb_admin_broadcast(query: CallbackQuery, state: FSMContext):
@@ -682,7 +714,8 @@ async def msg_admin_broadcast(message: Message, state: FSMContext):
         return
     text = message.text or ""
     await state.clear()
-    licenses = await db.get_all_licenses(limit=1000)
+    # Собираем уникальные ID из всех пользователей с лицензиями
+    licenses = await db.get_all_licenses(limit=5000)
     user_ids = list({lic["telegram_id"] for lic in licenses if lic.get("telegram_id")})
     sent = 0
     failed = 0
@@ -690,7 +723,7 @@ async def msg_admin_broadcast(message: Message, state: FSMContext):
         try:
             await bot.send_message(uid, text)
             sent += 1
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.05)  # Telegram rate limit
         except Exception:
             failed += 1
     await message.answer(
@@ -699,6 +732,68 @@ async def msg_admin_broadcast(message: Message, state: FSMContext):
     )
 
 
+# ─── Admin Download URL ───────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "admin_set_download")
+async def cb_admin_set_download(query: CallbackQuery, state: FSMContext):
+    if not is_admin(query.from_user.id):
+        return
+    try:
+        current = await db.get_setting("download_url") or DOWNLOAD_URL
+    except Exception:
+        current = DOWNLOAD_URL
+    await state.set_state(AdminFlow.set_download_url)
+    await send_or_edit(
+        query,
+        f"🔗 <b>Ссылка скачивания</b>\n\nТекущая:\n<code>{current}</code>\n\nОтправь новую прямую ссылку:",
+        reply_markup=kb_back_admin(),
+    )
+
+
+@dp.message(AdminFlow.set_download_url)
+async def msg_admin_set_download(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    url = (message.text or "").strip()
+    if not url.startswith("http"):
+        await message.answer("❌ Ссылка должна начинаться с http")
+        return
+    await db.set_setting("download_url", url)
+    await state.clear()
+    await message.answer(f"✅ Ссылка обновлена:\n<code>{url}</code>", reply_markup=kb_admin())
+
+
+# ─── Admin Clear Keys ────────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "admin_clear_keys")
+async def cb_admin_clear_keys(query: CallbackQuery, state: FSMContext):
+    if not is_admin(query.from_user.id):
+        return
+    await state.set_state(AdminFlow.confirm_clear)
+    await send_or_edit(
+        query,
+        "⚠️ <b>УДАЛЕНИЕ ВСЕХ КЛЮЧЕЙ</b>\n\n"
+        "Это действие необратимо — все лицензии и платежи будут удалены.\n\n"
+        "Напиши <b>ПОДТВЕРЖДАЮ</b> для подтверждения:",
+        reply_markup=kb_back_admin(),
+    )
+
+
+@dp.message(AdminFlow.confirm_clear)
+async def msg_admin_confirm_clear(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if (message.text or "").strip().upper() == "ПОДТВЕРЖДАЮ":
+        count = await db.delete_all_licenses()
+        await state.clear()
+        await message.answer(f"🗑 <b>Готово.</b> Удалено {count} записей из базы данных.", reply_markup=kb_admin())
+    else:
+        await state.clear()
+        await message.answer("❌ Операция отменена.", reply_markup=kb_admin())
+
+
+# ─── Admin Command ────────────────────────────────────────────────────────────
+
 @dp.message(Command("admin"))
 async def cmd_admin(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
@@ -706,141 +801,15 @@ async def cmd_admin(message: Message, state: FSMContext):
     await state.clear()
     stats = await db.get_stats()
     text = (
-        f"⚙️ <b>Админ-панель</b>\n\n"
-        f"📊 Активных лицензий: <b>{stats['active_licenses']}</b>\n"
+        f"⚙️ <b>Панель администратора</b>\n\n"
+        f"✅ Активных: <b>{stats['active_licenses']}</b>\n"
         f"💰 Выручка: <b>${stats['total_revenue_usdt']:.2f} USDT</b>\n"
         f"👥 Пользователей: <b>{stats['total_users']}</b>"
     )
     await message.answer(text, reply_markup=kb_admin())
 
 
-# ─── Download Handler ───────────────────────────────────────────────────────
-
-  @dp.callback_query(F.data == "menu_download")
-  async def cb_menu_download(query: CallbackQuery):
-      user_id = query.from_user.id
-      licenses = await db.get_license_by_telegram(user_id)
-      # Получаем актуальный URL из настроек БД (или из config)
-      try:
-          dl_url = await db.get_setting("download_url") or DOWNLOAD_URL
-      except Exception:
-          dl_url = DOWNLOAD_URL
-
-      has_active = any(
-          lic.get("is_active") and not (
-              __import__("datetime").datetime.utcnow()
-              > __import__("datetime").datetime.fromisoformat(lic.get("expires_at", "2000-01-01"))
-          )
-          for lic in licenses
-      ) if licenses else False
-
-      if not has_active:
-          await send_or_edit(
-              query,
-              "❌ <b>Скачивание недоступно</b>
-
-У тебя нет активной подписки.
-"
-              "Нажми «Купить лицензию» чтобы получить доступ к программе.",
-              reply_markup=kb_main(is_admin(user_id)),
-          )
-          return
-
-      text = (
-          f"📥 <b>Скачать FMail Sender</b>
-
-"
-          f"✅ Активная подписка подтверждена.
-
-"
-          f"Нажми кнопку ниже чтобы загрузить установочный файл:"
-      )
-      kb = InlineKeyboardMarkup(inline_keyboard=[
-          [InlineKeyboardButton(text="⬇️ Скачать FMailSenderPro.exe", url=dl_url)],
-          [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
-      ])
-      await send_or_edit(query, text, reply_markup=kb)
-
-
-  # ─── Admin: Обновить ссылку скачивания ─────────────────────────────────────
-
-  @dp.callback_query(F.data == "admin_set_download")
-  async def cb_admin_set_download(query: CallbackQuery, state: FSMContext):
-      if not is_admin(query.from_user.id):
-          return
-      try:
-          current = await db.get_setting("download_url") or DOWNLOAD_URL
-      except Exception:
-          current = DOWNLOAD_URL
-      await state.set_state(AdminFlow.set_download_url)
-      await send_or_edit(
-          query,
-          f"🔗 <b>Обновить ссылку для скачивания</b>
-
-"
-          f"Текущая:
-<code>{current}</code>
-
-"
-          f"Отправь новую прямую ссылку на EXE-файл:",
-          reply_markup=kb_back_admin(),
-      )
-
-
-  @dp.message(AdminFlow.set_download_url)
-  async def msg_admin_set_download(message: Message, state: FSMContext):
-      if not is_admin(message.from_user.id):
-          return
-      url = message.text.strip() if message.text else ""
-      if not url.startswith("http"):
-          await message.answer("❌ Введи корректную ссылку (должна начинаться с http)")
-          return
-      await db.set_setting("download_url", url)
-      await state.clear()
-      await message.answer(
-          f"✅ Ссылка обновлена:
-<code>{url}</code>",
-          reply_markup=kb_admin(),
-      )
-
-
-  # ─── Admin: Сброс всех ключей ───────────────────────────────────────────────
-
-  @dp.callback_query(F.data == "admin_clear_keys")
-  async def cb_admin_clear_keys(query: CallbackQuery, state: FSMContext):
-      if not is_admin(query.from_user.id):
-          return
-      await state.set_state(AdminFlow.confirm_clear)
-      await send_or_edit(
-          query,
-          "⚠️ <b>УДАЛЕНИЕ ВСЕХ КЛЮЧЕЙ</b>
-
-"
-          "Это действие необратимо — все лицензии в базе данных будут удалены.
-
-"
-          "Напиши <b>ПОДТВЕРЖДАЮ</b> для подтверждения или /cancel для отмены:",
-          reply_markup=kb_back_admin(),
-      )
-
-
-  @dp.message(AdminFlow.confirm_clear)
-  async def msg_admin_confirm_clear(message: Message, state: FSMContext):
-      if not is_admin(message.from_user.id):
-          return
-      if message.text and message.text.strip().upper() == "ПОДТВЕРЖДАЮ":
-          count = await db.delete_all_licenses()
-          await state.clear()
-          await message.answer(
-              f"🗑 <b>Готово.</b> Удалено {count} лицензий из базы данных.",
-              reply_markup=kb_admin(),
-          )
-      else:
-          await state.clear()
-          await message.answer("❌ Операция отменена.", reply_markup=kb_admin())
-
-
-  # ─── FastAPI License Validation ──────────────────────────────────────────────
+# ─── FastAPI License Validation ──────────────────────────────────────────────
 
 api_app = FastAPI(title="FMail Sender License API", docs_url=None, redoc_url=None)
 
@@ -862,8 +831,16 @@ async def activate(req: ActivateRequest):
     if not lic.get("is_active"):
         raise HTTPException(status_code=403, detail="License revoked")
 
-    expires_at = datetime.fromisoformat(lic["expires_at"])
-    if datetime.utcnow() > expires_at:
+    # ИСПРАВЛЕНИЕ: единая timezone-aware проверка срока
+    expires_at_str = lic["expires_at"]
+    try:
+        expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Invalid expiry date in database")
+
+    if datetime.now(timezone.utc) > expires_at:
         raise HTTPException(status_code=403, detail="License expired")
 
     existing_hwid = lic.get("hwid", "")
@@ -873,7 +850,6 @@ async def activate(req: ActivateRequest):
     if not existing_hwid:
         await db.bind_hwid_to_license(key, hwid)
 
-    # FIX: JWT_SECRET импортирован из config — согласован с клиентом (core/license.py)
     payload = {
         "plan": lic["plan"],
         "max_threads": lic["max_threads"],
@@ -888,14 +864,14 @@ async def activate(req: ActivateRequest):
 
 @api_app.get("/health")
 async def health():
-    return {"status": "ok", "service": "FMail Sender License API"}
+    return {"status": "ok", "service": "FMail Sender License API", "version": "2.5.0"}
 
 
 # ─── Entry Point ─────────────────────────────────────────────────────────────
 
 async def main():
     await db.init_db()
-    logger.info("Starting FMail Sender Bot + API...")
+    logger.info("Starting FMail Sender Bot + API v2.5.0...")
 
     config = uvicorn.Config(
         api_app, host="0.0.0.0", port=8000,
