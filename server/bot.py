@@ -181,7 +181,10 @@ async def send_or_edit(message_or_query, text: str, reply_markup=None, **kwargs)
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
     user = message.from_user
-    await db.upsert_user(user.id, user.username or "", user.first_name or "")
+    try:
+        await db.upsert_user(user.id, user.username or "", user.first_name or "")
+    except Exception as e:
+        logger.error("DB error in cmd_start: %s", e)
     text = (
         f"👋 Привет, <b>{user.first_name}</b>!\n\n"
         f"<b>FMail Sender</b> — профессиональный инструмент для email-рассылок.\n\n"
@@ -201,8 +204,13 @@ async def cb_menu_main(query: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "menu_cabinet")
 async def cb_cabinet(query: CallbackQuery):
     user = query.from_user
-    licenses = await db.get_license_by_telegram(user.id)
-    hwid = await db.get_user_hwid(user.id)
+    try:
+        licenses = await db.get_license_by_telegram(user.id)
+        hwid = await db.get_user_hwid(user.id)
+    except Exception as e:
+        logger.error("DB error in cb_cabinet: %s", e)
+        await send_or_edit(query, "⚠️ Ошибка БД. Попробуй позже.", reply_markup=kb_back_main())
+        return
     active_lic = _get_active_license(licenses)
 
     lines = [f"👤 <b>Личный кабинет</b>\n"]
@@ -284,8 +292,13 @@ async def cb_support(query: CallbackQuery, state: FSMContext):
 async def msg_support(message: Message, state: FSMContext):
     await state.clear()
     user = message.from_user
-    hwid = await db.get_user_hwid(user.id)
-    licenses = await db.get_license_by_telegram(user.id)
+    try:
+        hwid = await db.get_user_hwid(user.id)
+        licenses = await db.get_license_by_telegram(user.id)
+    except Exception as e:
+        logger.error("DB error in msg_support: %s", e)
+        hwid = None
+        licenses = []
     active_lic = _get_active_license(licenses)
     plan_info = ""
     if active_lic:
