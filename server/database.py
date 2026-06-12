@@ -130,7 +130,6 @@ async def save_payment(
     amount: float,
     currency: str = "USDT",
 ) -> int:
-    """Insert a new pending payment. Returns rowid."""
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             """INSERT OR IGNORE INTO payments
@@ -142,12 +141,10 @@ async def save_payment(
         return cur.lastrowid
 
 
-# Keep old name as alias for backwards compatibility
 create_payment = save_payment
 
 
 async def get_payment(invoice_id: str) -> Optional[dict]:
-    """Get payment record by invoice_id."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -157,12 +154,10 @@ async def get_payment(invoice_id: str) -> Optional[dict]:
             return dict(row) if row else None
 
 
-# Keep old name as alias
 get_payment_by_invoice = get_payment
 
 
 async def get_payment_license(invoice_id: str) -> Optional[str]:
-    """Return license_key if payment already has one (duplicate check)."""
     payment = await get_payment(invoice_id)
     if not payment:
         return None
@@ -264,6 +259,18 @@ async def revoke_license(key: str) -> bool:
         )
         await db.commit()
         return cur.rowcount > 0
+
+
+async def delete_all_licenses() -> int:
+    """Удаляет все лицензии из БД. Возвращает количество удалённых записей."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT COUNT(*) FROM licenses")
+        count = (await cur.fetchone())[0]
+        await db.execute("DELETE FROM licenses")
+        await db.execute("DELETE FROM payments")
+        await db.commit()
+    logger.warning("All licenses and payments deleted. Count: %d", count)
+    return count
 
 
 async def get_all_licenses(limit: int = 50, offset: int = 0) -> list:
