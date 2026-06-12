@@ -1,5 +1,5 @@
 """
-FMailSender core sending engine v2.7.0.
+FMailSender core sending engine v2.8.0.
 Fixes: thread-safe can_send (full lock), asyncio.get_running_loop(),
        real async parallelism via gather, _hour_reset typo corrected.
 """
@@ -94,14 +94,29 @@ class SmtpAccount:
             return self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit
 
     def increment_sent(self) -> None:
-        """Thread-safe counter increment."""
-        with self._lock:
-            self.sent_today += 1
-            self.sent_this_hour += 1
+          """Thread-safe counter increment."""
+          with self._lock:
+              self.sent_today += 1
+              self.sent_this_hour += 1
+
+      def try_increment(self) -> bool:
+          """Atomically check limits AND increment. Eliminates race condition."""
+          if not self.is_active:
+              return False
+          with self._lock:
+              now = time.time()
+              if now - self._hour_reset >= 3600:
+                  self.sent_this_hour = 0
+                  self._hour_reset = now
+              if self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit:
+                  self.sent_today += 1
+                  self.sent_this_hour += 1
+                  return True
+              return False
 
 
-@dataclass
-class Recipient:
+  @dataclass
+  class Recipient:
     email: str
     first_name: str = ""
     last_name: str = ""
@@ -348,10 +363,11 @@ class SendingEngine:
                     with self._stats_lock:
                         self._stats["errors"] += 1
                     self._emit_progress(results, recipients, result)
-                    tasks.append(asyncio.coroutine(lambda r=result: r)())
+                    async def _noop(r=result): return r
+                    tasks.append(_noop())
                     continue
                 delay = random.randint(self.config.min_delay_ms, self.config.max_delay_ms) / 1000.0
-                await asyncio.sleep(delay / self.config.max_threads)
+                await asyncio.sleep(delay)
                 tasks.append(self._send_one(sem, account, recipient, template))
             return await asyncio.gather(*tasks, return_exceptions=False)
 

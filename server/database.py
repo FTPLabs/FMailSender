@@ -259,7 +259,8 @@ async def revoke_license(key: str) -> bool:
 
 
 async def delete_all_licenses() -> int:
-    """Удаляет все лицензии из БД. Возвращает количество удалённых записей."""
+    """Удаляет ВСЕ лицензии + платежи из БД.
+    WARNING: intentionally clears payments table too — documented."""
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT COUNT(*) FROM licenses")
         count = (await cur.fetchone())[0]

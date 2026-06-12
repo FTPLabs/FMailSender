@@ -228,6 +228,27 @@ class FormattingToolbar(QFrame):
 # Основной экран
 # ──────────────────────────────────────────────
 
+
+  class SpamCheckWorker(QThread):
+      """Runs spam check in background thread — prevents UI freeze/crash."""
+      finished = pyqtSignal(object)
+      error = pyqtSignal(str)
+
+      def __init__(self, subject: str, html: str, parent=None):
+          super().__init__(parent)
+          self.subject = subject
+          self.html = html
+
+      def run(self):
+          try:
+              from core.spam_checker import SpamChecker
+              checker = SpamChecker()
+              result = checker.check(self.subject, self.html)
+              self.finished.emit(result)
+          except Exception as e:
+              self.error.emit(str(e))
+
+  
 class ComposeScreen(QWidget):
     """Экран создания письма."""
 
@@ -242,6 +263,7 @@ class ComposeScreen(QWidget):
         self._preview_timer.setSingleShot(True)
         self._preview_timer.setInterval(800)
         self._preview_timer.timeout.connect(self._update_preview)
+        self._spam_worker = None  # Keep reference to prevent GC
         self._setup_ui()
 
     def _setup_ui(self):
@@ -463,58 +485,59 @@ a {{ color: #6366F1; }}
         self.ab_tabs.addTab(QWidget(), f"Вариант {letter}")
 
     def _check_spam(self):
-        """Проверяет спам-балл. FIX: запуск в QThread во избежание зависания UI."""
-        from core.spam_checker import SpamChecker
-        from PyQt6.QtWidgets import (
-            QDialog, QLabel, QVBoxLayout, QProgressBar,
-            QHBoxLayout, QDialogButtonBox, QScrollArea, QWidget,
-        )
-        from PyQt6.QtCore import QThread, pyqtSignal
+          """Run spam check in background thread to avoid UI freeze."""
+          self.spam_check_btn.setEnabled(False)
+          self.spam_check_btn.setText("⏳ Проверка...")
+          subject = self.subject_input.text().strip()
+          html = self.html_editor.toPlainText().strip() or self.rich_editor.toHtml()
+          if not subject and not html:
+              self.spam_check_btn.setEnabled(True)
+              self.spam_check_btn.setText("Проверить спам-балл")
+              QMessageBox.warning(self, "Предупреждение", "Заполните тему и тело письма перед проверкой.")
+              return
+          worker = SpamCheckWorker(subject, html, self)
+          worker.finished.connect(self._on_spam_result)
+          worker.error.connect(self._on_spam_error)
+          worker.finished.connect(worker.deleteLater)
+          worker.error.connect(worker.deleteLater)
+          self._spam_worker = worker
+          worker.start()
 
-        subject = self.subject_input.text().strip()
-        body_html = self.html_editor.toPlainText() or self.rich_editor.toHtml()
+      def _on_spam_result(self, result):
+          self.spam_check_btn.setEnabled(True)
+          self.spam_check_btn.setText("Проверить спам-балл")
+          score = getattr(result, 'score', 0)
+          verdict = getattr(result, 'verdict', '—')
+          issues = getattr(result, 'issues', [])
+          warnings = getattr(result, 'warnings', [])
+          passed = getattr(result, 'passed', [])
+          msg = f"<b>Оценка: {score}/100</b> — {verdict}<br><br>"
+          if issues:
+              msg += "<b>🚫 Проблемы:</b><br>" + "<br>".join(f"• {i}" for i in issues) + "<br><br>"
+          if warnings:
+              msg += "<b>⚠️ Предупреждения:</b><br>" + "<br>".join(f"• {w}" for w in warnings) + "<br><br>"
+          if passed:
+              msg += "<b>✅ Пройдено:</b><br>" + "<br>".join(f"• {p}" for p in passed[:5])
+          dlg = QDialog(self)
+          dlg.setWindowTitle("Проверка спам-балла")
+          dlg.setMinimumWidth(480)
+          lay = QVBoxLayout(dlg)
+          lbl = QLabel(msg)
+          lbl.setWordWrap(True)
+          lbl.setTextFormat(Qt.TextFormat.RichText)
+          lay.addWidget(lbl)
+          btn = QPushButton("ОК")
+          btn.clicked.connect(dlg.accept)
+          lay.addWidget(btn)
+          dlg.exec()
 
-        if not subject and not body_html.strip():
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Нет данных", "Введите тему и текст письма перед проверкой")
-            return
+      def _on_spam_error(self, error: str):
+          self.spam_check_btn.setEnabled(True)
+          self.spam_check_btn.setText("Проверить спам-балл")
+          QMessageBox.warning(self, "Ошибка проверки", f"Не удалось проверить:
+{error}")
 
-        # Run spam check in background thread to avoid UI freeze
-        class _Worker(QThread):
-            done = pyqtSignal(object)
-            error = pyqtSignal(str)
-
-            def __init__(self, subj, html):
-                super().__init__()
-                self._subject = subj
-                self._html = html
-
-            def run(self):
-                try:
-                    checker = SpamChecker()
-                    self.done.emit(checker.check(subject=self._subject, body_html=self._html))
-                except Exception as exc:
-                    self.error.emit(str(exc))
-
-        self._spam_worker = _Worker(subject, body_html)
-        self.spam_check_btn.setEnabled(False)
-        self.spam_check_btn.setText("Проверяю...")
-
-        def _on_done(result):
-            self.spam_check_btn.setEnabled(True)
-            self.spam_check_btn.setText("Проверить спам-балл")
-            self._show_spam_dialog(result)
-
-        def _on_error(msg):
-            self.spam_check_btn.setEnabled(True)
-            self.spam_check_btn.setText("Проверить спам-балл")
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Ошибка проверки", f"Не удалось проверить спам-балл:\n{msg}")
-
-        self._spam_worker.done.connect(_on_done)
-        self._spam_worker.error.connect(_on_error)
-        self._spam_worker.start()
-
+  
     def _show_spam_dialog(self, result):
         """Показывает диалог результата проверки спам-балла."""
         from PyQt6.QtWidgets import (

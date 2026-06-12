@@ -14,7 +14,7 @@ logger = logging.getLogger("recipients")
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
+    QAbstractItemView, QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
     QFrame, QProgressBar, QComboBox, QDialog, QFormLayout,
     QDialogButtonBox, QListWidget, QListWidgetItem, QCheckBox,
     QMessageBox, QLineEdit, QTabWidget, QSplitter, QTextEdit
@@ -190,6 +190,14 @@ class RecipientsScreen(QWidget):
         dedup_btn = QPushButton("Удалить дубликаты")
         dedup_btn.clicked.connect(self._deduplicate)
         filter_row.addWidget(dedup_btn)
+        del_sel_btn = QPushButton("🗑 Удалить выбранные")
+        del_sel_btn.setObjectName("btn_danger")
+        del_sel_btn.clicked.connect(self._delete_selected)
+        filter_row.addWidget(del_sel_btn)
+        sel_all_btn = QPushButton("☑ Выделить все")
+        sel_all_btn.setObjectName("btn_secondary")
+        sel_all_btn.clicked.connect(self.table.selectAll)
+        filter_row.addWidget(sel_all_btn)
 
         layout.addLayout(filter_row)
 
@@ -204,6 +212,8 @@ class RecipientsScreen(QWidget):
 
         # ── Таблица ───────────────────────────────
         self.table = QTableWidget()
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
             "#", "Email", "Имя", "Фамилия", "Компания", "Статус", "Действия"
@@ -875,3 +885,22 @@ def _stat_label(text: str, color: str = Colors.TEXT_SECONDARY) -> QLabel:
     lbl.setObjectName("card")
     lbl.setContentsMargins(8, 4, 8, 4)
     return lbl
+
+      def _delete_selected(self):
+          rows = sorted(set(idx.row() for idx in self.table.selectedIndexes()), reverse=True)
+          visible_rows = [r for r in rows if not self.table.isRowHidden(r)]
+          if not visible_rows:
+              QMessageBox.information(self, "Нет выделения", "Выделите строки для удаления.")
+              return
+          if QMessageBox.question(self, "Удалить", f"Удалить {len(visible_rows)} получателя(ей)?",
+              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+          ) != QMessageBox.StandardButton.Yes:
+              return
+          emails_to_remove = set()
+          for row in visible_rows:
+              item = self.table.item(row, 0)
+              if item:
+                  emails_to_remove.add(item.text().lower())
+          self._recipients = [r for r in self._recipients if r.email.lower() not in emails_to_remove]
+          self._refresh_table()
+  

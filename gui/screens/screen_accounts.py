@@ -12,7 +12,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
   QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
   QLineEdit, QComboBox, QSpinBox, QCheckBox, QTableWidget,
-  QTableWidgetItem, QHeaderView, QDialog, QFormLayout,
+  QTableWidgetItem, QAbstractItemView, QHeaderView, QDialog, QFormLayout,
   QMessageBox, QDialogButtonBox, QTextEdit, QFrame,
   QFileDialog, QProgressBar
 )
@@ -480,6 +480,8 @@ class BulkImportAccountsDialog(QDialog):
       layout.addWidget(self.preview_label)
 
       self.table = QTableWidget()
+      self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+      self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
       self.table.setColumnCount(7)
       self.table.setHorizontalHeaderLabels(["Email", "SMTP Сервер", "Порт", "Шифр.", "Прокси", "Статус", "Пароль"])
       self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -616,6 +618,32 @@ class AccountsScreen(QWidget):
       add_btn.clicked.connect(self._add_account)
       header_row.addWidget(add_btn)
       layout.addLayout(header_row)
+          # ── Массовые операции ────────────────────────────────
+          bulk_row = QHBoxLayout()
+          sel_all_btn = QPushButton("☑ Все")
+          sel_all_btn.setObjectName("btn_secondary")
+          sel_all_btn.clicked.connect(self._select_all)
+          sel_all_btn.setFixedWidth(70)
+          bulk_row.addWidget(sel_all_btn)
+          sel_none_btn = QPushButton("☐ Снять")
+          sel_none_btn.setObjectName("btn_secondary")
+          sel_none_btn.clicked.connect(self._select_none)
+          sel_none_btn.setFixedWidth(80)
+          bulk_row.addWidget(sel_none_btn)
+          del_sel_btn = QPushButton("🗑 Удалить выбранные")
+          del_sel_btn.setObjectName("btn_danger")
+          del_sel_btn.clicked.connect(self._delete_selected)
+          bulk_row.addWidget(del_sel_btn)
+          toggle_btn = QPushButton("⏯ Вкл/Выкл")
+          toggle_btn.setObjectName("btn_secondary")
+          toggle_btn.clicked.connect(self._toggle_selected_active)
+          bulk_row.addWidget(toggle_btn)
+          test_sel_btn = QPushButton("⚡ Проверить выбранные")
+          test_sel_btn.setObjectName("btn_secondary")
+          test_sel_btn.clicked.connect(self._test_selected)
+          bulk_row.addWidget(test_sel_btn)
+          bulk_row.addStretch()
+          layout.addLayout(bulk_row)
 
       stats_card = QFrame()
       stats_card.setObjectName("card")
@@ -760,3 +788,45 @@ class AccountsScreen(QWidget):
           self._accounts.pop(row)
           save_accounts(self._accounts)
           self._refresh_table()
+
+      def _select_all(self):
+          self.table.selectAll()
+
+      def _select_none(self):
+          self.table.clearSelection()
+
+      def _delete_selected(self):
+          rows = sorted(set(idx.row() for idx in self.table.selectedIndexes()), reverse=True)
+          if not rows:
+              QMessageBox.information(self, "Нет выделения", "Выделите аккаунты для удаления.")
+              return
+          if QMessageBox.question(self, "Удалить", f"Удалить {len(rows)} аккаунт(ов)?",
+              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+          ) != QMessageBox.StandardButton.Yes:
+              return
+          for row in rows:
+              if 0 <= row < len(self._accounts):
+                  self._accounts.pop(row)
+          save_accounts(self._accounts)
+          self._refresh_table()
+
+      def _toggle_selected_active(self):
+          rows = sorted(set(idx.row() for idx in self.table.selectedIndexes()))
+          if not rows:
+              return
+          new_state = not self._accounts[rows[0]].is_active
+          for row in rows:
+              if 0 <= row < len(self._accounts):
+                  self._accounts[row].is_active = new_state
+          save_accounts(self._accounts)
+          self._refresh_table()
+
+      def _test_selected(self):
+          rows = sorted(set(idx.row() for idx in self.table.selectedIndexes()))
+          if not rows:
+              QMessageBox.information(self, "Нет выделения", "Выделите аккаунты для проверки.")
+              return
+          for row in rows:
+              if 0 <= row < len(self._accounts):
+                  self._test_account(row)
+  

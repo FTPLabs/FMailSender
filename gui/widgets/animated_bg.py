@@ -93,11 +93,7 @@ class AnimatedBackground(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        bg = QLinearGradient(0, 0, w, h)
-        bg.setColorAt(0.0, QColor(5, 5, 16))
-        bg.setColorAt(0.4, QColor(7, 7, 20))
-        bg.setColorAt(1.0, QColor(4, 4, 14))
-        painter.fillRect(self.rect(), QBrush(bg))
+        # Transparent bg — parent handles dark surface; no fillRect to avoid black squares
 
         for ox, oy, radius, base_color in _ORBS:
             cx = int(ox * w)
