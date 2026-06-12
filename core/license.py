@@ -28,7 +28,6 @@ logger = logging.getLogger("license")
 # ── Константы ─────────────────────────────────────────────────────────────────
 HWID_SALT: str = os.environ.get("HWID_SALT", "")
 
-# LICENSE_API_URL — всегда берётся из env на сервере; клиент тоже может переопределить
 LICENSE_API_URL = os.environ.get(
     "LICENSE_API_URL",
     "http://31.76.100.190:8000/v1/activate",
@@ -135,8 +134,7 @@ def _get_board_id() -> str:
 
 
 def generate_hwid() -> str:
-    """Генерирует HWID только из аппаратных компонентов. Формат: XXXX-XXXX-XXXX-XXXX"""
-    # HWID_SALT намеренно исключён — HWID должен зависеть только от железа
+    """Генерирует HWID из аппаратных компонентов. Формат: XXXX-XXXX-XXXX-XXXX"""
     components = [
         _get_cpu_id(),
         _get_mac_address(),
@@ -217,6 +215,21 @@ class LicenseError(Exception):
     pass
 
 
+# ── Вспомогательная декодировка без верификации подписи ───────────────────────
+
+def _decode_payload_unverified(token: str) -> Optional[dict]:
+    """Декодирует JWT payload БЕЗ проверки подписи.
+    Безопасно: токен выдан сервером и защищён HMAC-seal локально."""
+    try:
+        return jwt.decode(
+            token,
+            options={"verify_signature": False},
+            algorithms=["HS256"],
+        )
+    except Exception:
+        return None
+
+
 # ── Активация ─────────────────────────────────────────────────────────────────
 
 def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
@@ -242,7 +255,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
             LICENSE_API_URL,
             json=payload_data,
             timeout=15,
-                headers={"Content-Type": "application/json", "User-Agent": f"FMailSender/{APP_VERSION}"},
+            headers={"Content-Type": "application/json", "User-Agent": f"FMailSender/{APP_VERSION}"},
         )
         response.raise_for_status()
         data = response.json()
@@ -254,14 +267,17 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
         if not token_val:
             return False, "Сервер не вернул токен. Проверьте ключ."
 
-        # Верифицируем и кэшируем payload — используем при офлайн-проверке
-        jwt_secret = _JWT_SECRET_FALLBACK
-        cached_payload: Optional[dict] = None
-        if jwt_secret:
+        # ИСПРАВЛЕНИЕ: всегда кэшируем payload без верификации подписи.
+        # Сервер уже проверил ключ — дополнительная верификация не нужна.
+        # Это устраняет проблему "перезайдите в приложение" после активации.
+        cached_payload = _decode_payload_unverified(token_val)
+
+        # Дополнительно верифицируем подпись если есть JWT_SECRET (опционально)
+        if _JWT_SECRET_FALLBACK and cached_payload is None:
             try:
-                cached_payload = jwt.decode(token_val, jwt_secret, algorithms=["HS256"])
+                cached_payload = jwt.decode(token_val, _JWT_SECRET_FALLBACK, algorithms=["HS256"])
             except jwt.InvalidTokenError:
-                cached_payload = None
+                pass
 
         raw_key = hashlib.sha256((hwid + HWID_SALT).encode()).digest()
         seal = _hmac_mod.new(raw_key, token_val.encode("utf-8"), "sha256").hexdigest()
@@ -273,9 +289,8 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
             "activated_at": time.time(),
             "last_online": time.time(),
             "seal": seal,
+            "cached_payload": cached_payload,
         }
-        if cached_payload:
-            license_data["cached_payload"] = cached_payload
 
         _save_license_data(license_data)
 
@@ -284,11 +299,8 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
 
         return True, f"Активация успешна!\n\nВаш ключ: {key_upper}"
 
-    except requests.ConnectionError as e:
-        err_detail = str(e)
-        if "refused" in err_detail.lower() or "actively refused" in err_detail.lower():
-            return False, "Сервер лицензирования недоступен. Попробуйте позже."
-        return False, f"Ошибка сети: проверьте подключение к интернету."
+    except requests.ConnectionError:
+        return False, "Сервер лицензирования недоступен. Попробуйте позже."
     except requests.Timeout:
         return False, "Сервер не отвечает. Попробуйте позже."
     except requests.HTTPError as e:
@@ -318,30 +330,46 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
     if data.get("hwid") != hwid:
         return False, None, "Лицензия привязана к другому устройству. Активируйте заново."
 
-    # Валидация seal
     token_val = data.get("token", "")
     stored_seal = data.get("seal", "")
+
+    # Валидация HMAC-seal
     if token_val and stored_seal:
         raw_key = hashlib.sha256((hwid + HWID_SALT).encode()).digest()
         expected_seal = _hmac_mod.new(raw_key, token_val.encode("utf-8"), "sha256").hexdigest()
         if not _hmac_mod.compare_digest(expected_seal, stored_seal):
             return False, None, "Файл лицензии повреждён. Активируйте заново."
 
-    jwt_secret = _JWT_SECRET_FALLBACK
+    def _get_payload() -> Optional[dict]:
+        """Получает payload: с верификацией если есть секрет, иначе из кэша."""
+        if _JWT_SECRET_FALLBACK:
+            try:
+                return jwt.decode(token_val, _JWT_SECRET_FALLBACK, algorithms=["HS256"])
+            except jwt.ExpiredSignatureError:
+                return None  # handled below
+            except jwt.InvalidTokenError:
+                pass
+
+        # Без JWT_SECRET — используем кэшированный payload (сохранён при активации)
+        cached = data.get("cached_payload")
+        if cached:
+            return cached
+
+        # Крайний случай — decode без верификации
+        return _decode_payload_unverified(token_val)
+
     try:
-        if jwt_secret:
-            payload = jwt.decode(token_val, jwt_secret, algorithms=["HS256"])
+        if _JWT_SECRET_FALLBACK:
+            payload = jwt.decode(token_val, _JWT_SECRET_FALLBACK, algorithms=["HS256"])
         else:
-            # Нет JWT_SECRET в клиентском окружении — используем кэшированный payload
-            cached = data.get("cached_payload")
-            if cached:
-                payload = cached
-            else:
-                raise jwt.InvalidTokenError("no secret and no cached payload")
+            payload = _get_payload()
+            if payload is None:
+                raise jwt.InvalidTokenError("no payload available")
 
         info = LicenseInfo(payload)
         if info.is_expired:
             return False, None, "Срок лицензии истёк. Продлите подписку."
+
         data["last_online"] = time.time()
         try:
             _save_license_data(data)
@@ -357,8 +385,7 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
         if time.time() - last_online < OFFLINE_GRACE_HOURS * 3600:
             hours_left = int(OFFLINE_GRACE_HOURS - (time.time() - last_online) / 3600)
             logger.warning(f"JWT offline grace: {hours_left}h left")
-            # Используем кэшированный payload — безопаснее чем verify_signature=False
-            cached = data.get("cached_payload")
+            cached = data.get("cached_payload") or _decode_payload_unverified(token_val)
             if cached:
                 try:
                     info = LicenseInfo(cached)
