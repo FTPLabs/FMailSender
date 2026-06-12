@@ -485,59 +485,59 @@ a {{ color: #6366F1; }}
         self.ab_tabs.addTab(QWidget(), f"Вариант {letter}")
 
     def _check_spam(self):
-          """Run spam check in background thread to avoid UI freeze."""
-          self.spam_check_btn.setEnabled(False)
-          self.spam_check_btn.setText("⏳ Проверка...")
-          subject = self.subject_input.text().strip()
-          html = self.html_editor.toPlainText().strip() or self.rich_editor.toHtml()
-          if not subject and not html:
-              self.spam_check_btn.setEnabled(True)
-              self.spam_check_btn.setText("Проверить спам-балл")
-              QMessageBox.warning(self, "Предупреждение", "Заполните тему и тело письма перед проверкой.")
-              return
-          worker = SpamCheckWorker(subject, html, self)
-          worker.finished.connect(self._on_spam_result)
-          worker.error.connect(self._on_spam_error)
-          worker.finished.connect(worker.deleteLater)
-          worker.error.connect(worker.deleteLater)
-          self._spam_worker = worker
-          worker.start()
+        """Run spam check in background thread to avoid UI freeze."""
+        self.spam_check_btn.setEnabled(False)
+        self.spam_check_btn.setText("⏳ Проверка...")
+        subject = self.subject_input.text().strip()
+        html = self.html_editor.toPlainText().strip() or self.rich_editor.toHtml()
+        if not subject and not html:
+            self.spam_check_btn.setEnabled(True)
+            self.spam_check_btn.setText("Проверить спам-балл")
+            QMessageBox.warning(self, "Предупреждение", "Заполните тему и тело письма перед проверкой.")
+            return
+        worker = SpamCheckWorker(subject, html, self)
+        worker.finished.connect(self._on_spam_result)
+        worker.error.connect(self._on_spam_error)
+        worker.finished.connect(worker.deleteLater)
+        worker.error.connect(worker.deleteLater)
+        self._spam_worker = worker
+        worker.start()
 
-      def _on_spam_result(self, result):
-          self.spam_check_btn.setEnabled(True)
-          self.spam_check_btn.setText("Проверить спам-балл")
-          score = getattr(result, 'score', 0)
-          verdict = getattr(result, 'verdict', '—')
-          issues = getattr(result, 'issues', [])
-          warnings = getattr(result, 'warnings', [])
-          passed = getattr(result, 'passed', [])
-          msg = f"<b>Оценка: {score}/100</b> — {verdict}<br><br>"
-          if issues:
-              msg += "<b>🚫 Проблемы:</b><br>" + "<br>".join(f"• {i}" for i in issues) + "<br><br>"
-          if warnings:
-              msg += "<b>⚠️ Предупреждения:</b><br>" + "<br>".join(f"• {w}" for w in warnings) + "<br><br>"
-          if passed:
-              msg += "<b>✅ Пройдено:</b><br>" + "<br>".join(f"• {p}" for p in passed[:5])
-          dlg = QDialog(self)
-          dlg.setWindowTitle("Проверка спам-балла")
-          dlg.setMinimumWidth(480)
-          lay = QVBoxLayout(dlg)
-          lbl = QLabel(msg)
-          lbl.setWordWrap(True)
-          lbl.setTextFormat(Qt.TextFormat.RichText)
-          lay.addWidget(lbl)
-          btn = QPushButton("ОК")
-          btn.clicked.connect(dlg.accept)
-          lay.addWidget(btn)
-          dlg.exec()
+    def _on_spam_result(self, result):
+        self.spam_check_btn.setEnabled(True)
+        self.spam_check_btn.setText("Проверить спам-балл")
+        score = getattr(result, 'score', 0)
+        verdict = getattr(result, 'verdict', '—')
+        issues = getattr(result, 'issues', [])
+        warnings = getattr(result, 'warnings', [])
+        passed = getattr(result, 'passed', [])
+        msg = f"<b>Оценка: {score}/100</b> — {verdict}<br><br>"
+        if issues:
+            msg += "<b>🚫 Проблемы:</b><br>" + "<br>".join(f"• {i}" for i in issues) + "<br><br>"
+        if warnings:
+            msg += "<b>⚠️ Предупреждения:</b><br>" + "<br>".join(f"• {w}" for w in warnings) + "<br><br>"
+        if passed:
+            msg += "<b>✅ Пройдено:</b><br>" + "<br>".join(f"• {p}" for p in passed[:5])
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Проверка спам-балла")
+        dlg.setMinimumWidth(480)
+        lay = QVBoxLayout(dlg)
+        lbl = QLabel(msg)
+        lbl.setWordWrap(True)
+        lbl.setTextFormat(Qt.TextFormat.RichText)
+        lay.addWidget(lbl)
+        btn = QPushButton("ОК")
+        btn.clicked.connect(dlg.accept)
+        lay.addWidget(btn)
+        dlg.exec()
 
-      def _on_spam_error(self, error: str):
-          self.spam_check_btn.setEnabled(True)
-          self.spam_check_btn.setText("Проверить спам-балл")
-          QMessageBox.warning(self, "Ошибка проверки", f"Не удалось проверить:
+    def _on_spam_error(self, error: str):
+        self.spam_check_btn.setEnabled(True)
+        self.spam_check_btn.setText("Проверить спам-балл")
+        QMessageBox.warning(self, "Ошибка проверки", f"Не удалось проверить:
 {error}")
 
-  
+
     def _show_spam_dialog(self, result):
         """Показывает диалог результата проверки спам-балла."""
         from PyQt6.QtWidgets import (
