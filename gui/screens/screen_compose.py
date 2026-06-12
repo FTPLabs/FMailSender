@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QToolBar, QFontComboBox, QSpinBox, QColorDialog, QDialog,
     QFormLayout, QDialogButtonBox, QMessageBox, QScrollArea
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QThread
 from PyQt6.QtGui import (
     QTextCharFormat, QFont, QColor, QSyntaxHighlighter,
     QTextDocument, QKeySequence, QIcon, QAction, QTextCursor
@@ -534,8 +534,7 @@ a {{ color: #6366F1; }}
     def _on_spam_error(self, error: str):
         self.spam_check_btn.setEnabled(True)
         self.spam_check_btn.setText("Проверить спам-балл")
-        QMessageBox.warning(self, "Ошибка проверки", f"Не удалось проверить:
-{error}")
+        QMessageBox.warning(self, "Ошибка проверки", f"Не удалось проверить:\n{error}")
 
 
     def _show_spam_dialog(self, result):
