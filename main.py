@@ -1,6 +1,7 @@
 """Entry point for FMail Sender Pro."""
 import sys
 import os
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -20,10 +21,11 @@ def _load_icon(target):
 
 
 def main():
+    # FIX: prewarm HWID cache + run security_check in background thread
+    # Eliminates 2s startup delay caused by blocking WMI calls
     from core.license import security_check, generate_hwid
-threading.Thread(target=generate_hwid, daemon=True).start()  # prewarm HWID cache
-import threading
-threading.Thread(target=security_check, daemon=True).start()  # FIX: non-blocking startup
+    threading.Thread(target=generate_hwid, daemon=True).start()
+    threading.Thread(target=security_check, daemon=True).start()
 
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QFont
