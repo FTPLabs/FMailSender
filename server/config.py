@@ -27,6 +27,8 @@ def _require(key: str) -> str:
 
 BOT_TOKEN = _require("BOT_TOKEN")
 ADMIN_IDS = [int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
+if not ADMIN_IDS:
+    print("[WARN] ADMIN_IDS env var is not set — admin panel will be inaccessible.", file=sys.stderr)
 CRYPTO_BOT_TOKEN = _require("CRYPTO_BOT_TOKEN")
 CRYPTO_BOT_API = "https://pay.crypt.bot/api"
 
@@ -135,4 +137,4 @@ PLANS = {
 }
 
 # URL для скачивания актуальной версии программы (обновляется через /setdownload)
-DOWNLOAD_URL: str = os.environ.get("DOWNLOAD_URL", "https://github.com/FTPLabs/EmailSenderPro/releases/download/v2.4.1/FMailSender.exe")
+DOWNLOAD_URL: str = os.environ.get("DOWNLOAD_URL", "https://github.com/FTPLabs/FMailSender/releases/latest/download/FMailSender.exe")
