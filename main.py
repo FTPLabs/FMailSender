@@ -62,10 +62,12 @@ def _show_activation_screen(app, message: str = ""):
     activation = ActivationScreen(hint_message=message)
 
     def on_success(license_info):
-        container.close()
         from gui.app import MainWindow
         window = MainWindow(license_info)
+        # Сохраняем ссылку до закрытия контейнера, иначе GC уничтожит окно
+        app._main_window = window
         window.show()
+        container.close()
 
     activation.activation_success.connect(on_success)
     container.setCentralWidget(activation)
