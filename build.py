@@ -18,7 +18,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 ROOT = Path(__file__).parent.resolve()
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
-SPEC_FILE = ROOT / "FMailSenderPro.spec"
+SPEC_FILE = ROOT / "FMailSender.spec"
 ICON_ICO = ROOT / "assets" / "images" / "fmail_logo.ico"
 ICON_PNG = ROOT / "assets" / "images" / "fmail_logo.png"
 
@@ -106,7 +106,7 @@ def build_spec() -> str:
         "    a.zipfiles,\n"
         "    a.datas,\n"
         "    [],\n"
-        "    name='FMailSenderPro',\n"
+        "    name='FMailSender',\n"
         "    debug=False,\n"
         "    bootloader_ignore_signals=False,\n"
         "    strip=False,\n"
@@ -125,7 +125,7 @@ def build_spec() -> str:
 
 def main():
     print("=" * 60)
-    print("  FMail Sender Pro — Build Script")
+    print("  FMail Sender — Build Script")
     print("=" * 60)
 
     for d in (DIST, BUILD):
@@ -156,7 +156,7 @@ def main():
         print("PyInstaller завершился с ошибкой!")
         sys.exit(1)
 
-    exe = DIST / "FMailSenderPro.exe"
+    exe = DIST / "FMailSender.exe"
     if not exe.exists():
         print(".exe не найден после сборки!")
         sys.exit(1)
