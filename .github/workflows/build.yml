@@ -73,12 +73,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "FMail Sender Pro ${{ steps.get_version.outputs.version }}"
+          name: "FMail Sender ${{ steps.get_version.outputs.version }}"
           draft: false
           prerelease: false
           files: dist/FMailSender.exe
           body: |
-            ## FMail Sender Pro ${{ steps.get_version.outputs.version }}
+            ## FMail Sender ${{ steps.get_version.outputs.version }}
 
             ### Установка
             1. Скачайте `FMailSender.exe`
