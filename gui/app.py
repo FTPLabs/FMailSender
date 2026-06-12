@@ -91,19 +91,19 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1100, 680)
         self.resize(1280, 780)
         self._setup_ui()
-          start_background_check(self._on_update_found, delay_sec=30.0)
+        start_background_check(self._on_update_found, delay_sec=30.0)
 
-      def _on_update_found(self, info: dict) -> None:
-          from PyQt6.QtWidgets import QMessageBox
-          tag = info.get("tag_name", "")
-          url = info.get("html_url", "")
-          QMessageBox.information(
-              self,
-              "Доступно обновление",
-              f"Новая версия {tag} доступна!\n\nСкачать: {url}",
-          )
+    def _on_update_found(self, info: dict) -> None:
+        from PyQt6.QtWidgets import QMessageBox
+        tag = info.get("tag_name", "")
+        url = info.get("html_url", "")
+        QMessageBox.information(
+            self,
+            "Доступно обновление",
+            f"Новая версия {tag} доступна!\n\nСкачать: {url}",
+        )
 
-      def _setup_ui(self):
+    def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
         root = QHBoxLayout(central)
