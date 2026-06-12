@@ -138,12 +138,13 @@ def _get_board_id() -> str:
 
 def generate_hwid() -> str:
     """Генерирует уникальный HWID устройства. Формат: XXXX-XXXX-XXXX-XXXX"""
+    # HWID_SALT намеренно исключён — HWID должен зависеть только от железа,
+    # иначе он меняется при обновлении приложения (при изменении константы соли).
     components = [
         _get_cpu_id(),
         _get_mac_address(),
         _get_disk_serial(),
         _get_board_id(),
-        HWID_SALT,
     ]
     raw = "|".join(components).encode("utf-8")
     digest = hashlib.sha256(raw).hexdigest().upper()
