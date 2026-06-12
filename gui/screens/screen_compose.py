@@ -229,26 +229,26 @@ class FormattingToolbar(QFrame):
 # ──────────────────────────────────────────────
 
 
-  class SpamCheckWorker(QThread):
-      """Runs spam check in background thread — prevents UI freeze/crash."""
-      finished = pyqtSignal(object)
-      error = pyqtSignal(str)
+class SpamCheckWorker(QThread):
+    """Runs spam check in background thread — prevents UI freeze/crash."""
+    finished = pyqtSignal(object)
+    error = pyqtSignal(str)
 
-      def __init__(self, subject: str, html: str, parent=None):
-          super().__init__(parent)
-          self.subject = subject
-          self.html = html
+    def __init__(self, subject: str, html: str, parent=None):
+        super().__init__(parent)
+        self.subject = subject
+        self.html = html
 
-      def run(self):
-          try:
-              from core.spam_checker import SpamChecker
-              checker = SpamChecker()
-              result = checker.check(self.subject, self.html)
-              self.finished.emit(result)
-          except Exception as e:
-              self.error.emit(str(e))
+    def run(self):
+        try:
+            from core.spam_checker import SpamChecker
+            checker = SpamChecker()
+            result = checker.check(self.subject, self.html)
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
 
-  
+
 class ComposeScreen(QWidget):
     """Экран создания письма."""
 
