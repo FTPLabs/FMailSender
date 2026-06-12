@@ -5,7 +5,7 @@ import random
 import secrets
 import string
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import aiosqlite
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 
 def _now() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _generate_key() -> str:
@@ -74,10 +74,7 @@ def _generate_key() -> str:
 
 async def init_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
-        for stmt in CREATE_SQL.strip().split(";"):
-            stmt = stmt.strip()
-            if stmt:
-                await db.execute(stmt)
+        await db.executescript(CREATE_SQL)
         for plan_id, plan in PLANS.items():
             await db.execute(
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
@@ -141,7 +138,6 @@ async def save_payment(
         return cur.lastrowid
 
 
-create_payment = save_payment
 
 
 async def get_payment(invoice_id: str) -> Optional[dict]:
@@ -154,7 +150,6 @@ async def get_payment(invoice_id: str) -> Optional[dict]:
             return dict(row) if row else None
 
 
-get_payment_by_invoice = get_payment
 
 
 async def get_payment_license(invoice_id: str) -> Optional[str]:
@@ -187,19 +182,19 @@ async def create_license(
     hours = plan_data.get("hours", 0)
     if override_days is not None:
         days = override_days
-        expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat()
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
     elif hours and not plan_data.get("days"):
         days = 0
-        expires_at = (datetime.utcnow() + timedelta(hours=hours)).isoformat()
+        expires_at = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
     else:
         days = plan_data["days"]
-        expires_at = (datetime.utcnow() + timedelta(days=days)).isoformat()
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
 
     key = _generate_key()
     now = _now()
 
     async with aiosqlite.connect(DB_PATH) as db:
-        for _ in range(10):
+        for _attempt in range(10):
             try:
                 await db.execute(
                     """INSERT INTO licenses
@@ -216,6 +211,8 @@ async def create_license(
                 break
             except aiosqlite.IntegrityError:
                 key = _generate_key()
+                if _attempt == 9:
+                    raise RuntimeError("Не удалось сгенерировать уникальный ключ после 10 попыток")
 
     return {
         "key": key,
