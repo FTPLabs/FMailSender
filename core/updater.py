@@ -73,15 +73,16 @@ def start_background_check(
     def _worker() -> None:
         import time
         time.sleep(delay_sec)
+        notified_tag: str = ""
         while True:
             info = check_for_update()
-            if info:
-                logger.info("New version available: %s", info["tag_name"])
+            if info and info.get("tag_name") != notified_tag:
+                notified_tag = info.get("tag_name", "")
+                logger.info("New version available: %s", notified_tag)
                 try:
                     on_update_found(info)
                 except Exception:
                     pass
-                return
             time.sleep(CHECK_INTERVAL_SEC)
 
     threading.Thread(target=_worker, daemon=True, name="updater").start()
