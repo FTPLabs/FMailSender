@@ -163,33 +163,6 @@ class ActivationScreen(QWidget):
         card_layout.addWidget(self.key_input)
         card_layout.addSpacing(6)
 
-        # ── Activated key display (hidden until success) ─────────────────
-        self.activated_key_frame = QFrame()
-        self.activated_key_frame.setVisible(False)
-        self.activated_key_frame.setStyleSheet(
-            "background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.30); border-radius: 8px;"
-        )
-        ak_lay = QHBoxLayout(self.activated_key_frame)
-        ak_lay.setContentsMargins(12, 8, 12, 8)
-        ak_lbl = QLabel("Ключ:")
-        ak_lbl.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 11px; background: transparent;")
-        self.activated_key_val = QLabel("")
-        self.activated_key_val.setTextFormat(Qt.TextFormat.RichText)
-        self.activated_key_val.setStyleSheet("background: transparent; font-family: 'Consolas', monospace;")
-        btn_copy_key = QPushButton("Скопировать")
-        btn_copy_key.setFixedHeight(26)
-        btn_copy_key.setStyleSheet(
-            f"font-size:11px; padding: 0 8px; border-radius: 5px; "
-            f"background: rgba(16,185,129,0.12); color: #10B981; border: 1px solid rgba(16,185,129,0.25);"
-        )
-        btn_copy_key.clicked.connect(self._copy_activated_key)
-        btn_copy_key.setCursor(Qt.CursorShape.PointingHandCursor)
-        ak_lay.addWidget(ak_lbl)
-        ak_lay.addWidget(self.activated_key_val, 1)
-        ak_lay.addWidget(btn_copy_key)
-        card_layout.addWidget(self.activated_key_frame)
-        card_layout.addSpacing(6)
-
         # ── Status / hint ────────────────────────────────────────────────
         self.status_label = QLabel(self._hint or "")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -231,12 +204,6 @@ class ActivationScreen(QWidget):
         self.status_label.setText("HWID скопирован!")
         self.status_label.setStyleSheet(f"color: {Colors.CYAN}; font-size: 12px; background: transparent;")
 
-    def _copy_activated_key(self):
-        key = self.key_input.text().strip().upper()
-        QApplication.clipboard().setText(key)
-        self.status_label.setText("Ключ скопирован в буфер!")
-        self.status_label.setStyleSheet(f"color: {Colors.CYAN}; font-size: 12px; background: transparent;")
-
     def _start_activation(self):
         key = self.key_input.text().strip()
         if not key:
@@ -247,7 +214,6 @@ class ActivationScreen(QWidget):
         self.btn_activate.setText("Активация...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-        self.activated_key_frame.setVisible(False)
         self.status_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 12px; background: transparent;")
         self.status_label.setText("Подключение к серверу...")
 
@@ -270,18 +236,12 @@ class ActivationScreen(QWidget):
                 f"color: #10B981; font-size: 12px; font-weight: 600; background: transparent;"
             )
             self.status_label.setText("✅ Лицензия активирована!")
+            self.btn_activate.setEnabled(False)
 
-            # Show the activated key prominently
-            key_upper = self.key_input.text().strip().upper()
-            self.activated_key_val.setText(
-                f"<b style='color:#10B981; font-size:12px;'>{key_upper}</b>"
-            )
-            self.activated_key_frame.setVisible(True)
-
-            # Proceed to main app after a short delay
+            # Открываем главное приложение через короткую задержку
             from PyQt6.QtCore import QTimer
             if license_info:
-                QTimer.singleShot(1500, lambda: self.activation_success.emit(license_info))
+                QTimer.singleShot(800, lambda: self.activation_success.emit(license_info))
         else:
             self._set_error(message)
 
