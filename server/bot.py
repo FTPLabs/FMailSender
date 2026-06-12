@@ -140,8 +140,23 @@ def is_admin(user_id: int) -> bool:
 
 
 def fmt_license(lic: dict) -> str:
-    exp = lic.get("expires_at", "")[:10]
-    active = "✅ Активна" if lic.get("is_active") else "❌ Отозвана"
+    from datetime import datetime, timezone
+    exp_str = lic.get("expires_at", "")
+    exp = exp_str[:10]
+    # Реальная проверка истечения срока лицензии
+    try:
+        exp_dt = datetime.fromisoformat(exp_str.replace("Z", "+00:00"))
+        if exp_dt.tzinfo is None:
+            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+        is_expired = datetime.now(timezone.utc) > exp_dt
+    except Exception:
+        is_expired = False
+    if not lic.get("is_active"):
+        active = "❌ Отозвана"
+    elif is_expired:
+        active = "⏰ Истекла"
+    else:
+        active = "✅ Активна"
     hwid = lic.get("hwid") or "не привязан"
     plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", ""))
     return (
@@ -151,7 +166,6 @@ def fmt_license(lic: dict) -> str:
         f"💻 HWID: <code>{hwid}</code>\n"
         f"🔒 Статус: {active}"
     )
-
 
 async def send_or_edit(message_or_query, text: str, reply_markup=None, **kwargs):
     if isinstance(message_or_query, CallbackQuery):
