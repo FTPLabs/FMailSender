@@ -3,11 +3,11 @@
 Использует aiosmtplib + asyncio.Semaphore для управления параллелизмом.
 """
 import asyncio
-import html
 import logging
 import queue
 import random
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -18,7 +18,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate, make_msgid
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import List, Optional, Tuple
 
 import aiosmtplib
 
@@ -184,20 +184,10 @@ def _html_to_text(html_str: str) -> str:
     text = re.sub(r"<p[^>]*>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</p>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
-    # Named entities
     for ent, rep in _HTML_ENTITIES.items():
         text = text.replace(ent, rep)
-    # Numeric entities &#NNN; and &#xHHH;
-    text = re.sub(
-        r"&#([0-9]+);",
-        lambda m: chr(int(m.group(1))),
-        text,
-    )
-    text = re.sub(
-        r"&#x([0-9a-fA-F]+);",
-        lambda m: chr(int(m.group(1), 16)),
-        text,
-    )
+    text = re.sub(r"&#([0-9]+);", lambda m: chr(int(m.group(1))), text)
+    text = re.sub(r"&#x([0-9a-fA-F]+);", lambda m: chr(int(m.group(1), 16)), text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -245,6 +235,57 @@ CONFIGS = {
 def get_smtp_config(email: str) -> dict:
     domain = email.split("@")[-1].lower() if "@" in email else ""
     return CONFIGS.get(domain, {"host": "", "port": 587, "use_ssl": False, "use_tls": True})
+
+
+def get_smtp_config_for_domain(domain: str) -> dict:
+    """Return SMTP preset config for a given domain string (no @ needed)."""
+    d = domain.lower().strip()
+    return CONFIGS.get(d, {"host": "", "port": 587, "use_ssl": False, "use_tls": True})
+
+
+async def test_smtp_connection(account: "SmtpAccount") -> Tuple[bool, str]:
+    """
+    Test SMTP authentication without sending any email.
+    Returns (success: bool, log: str).
+    """
+    lines = [
+        f"Хост: {account.host}:{account.port}",
+        f"Режим: {'SSL/TLS' if account.use_ssl else 'STARTTLS' if account.use_tls else 'Нет шифрования'}",
+        f"Логин: {account.email}",
+    ]
+    try:
+        if account.use_ssl:
+            smtp = aiosmtplib.SMTP(
+                hostname=account.host,
+                port=account.port,
+                use_tls=True,
+                timeout=15,
+            )
+        else:
+            smtp = aiosmtplib.SMTP(
+                hostname=account.host,
+                port=account.port,
+                use_tls=False,
+                timeout=15,
+            )
+        async with smtp:
+            if not account.use_ssl and account.use_tls:
+                await smtp.starttls()
+            await smtp.login(account.email, account.password)
+            lines.append("✅ Аутентификация успешна")
+        return True, "\n".join(lines)
+    except aiosmtplib.SMTPAuthenticationError as e:
+        lines.append(f"❌ Ошибка авторизации: {e.message if hasattr(e, 'message') else e}")
+        return False, "\n".join(lines)
+    except aiosmtplib.SMTPConnectError as e:
+        lines.append(f"❌ Ошибка подключения: {e}")
+        return False, "\n".join(lines)
+    except aiosmtplib.SMTPException as e:
+        lines.append(f"❌ SMTP ошибка: {e}")
+        return False, "\n".join(lines)
+    except Exception as e:
+        lines.append(f"❌ Ошибка: {e}")
+        return False, "\n".join(lines)
 
 
 def _build_message(
@@ -295,9 +336,8 @@ class SendingEngine:
         template: EmailTemplate,
         config: CampaignConfig,
         result_queue: queue.Queue,
-        stop_event: threading.Event = None,
+        stop_event: Optional[threading.Event] = None,
     ):
-        import threading
         self.accounts = accounts
         self.recipients = recipients
         self.template = template
@@ -307,7 +347,6 @@ class SendingEngine:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def run(self):
-        import threading as _threading
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         try:
@@ -326,12 +365,11 @@ class SendingEngine:
                 break
             account = self._pick_account()
             if account is None:
-                result = SendResult(
+                self.result_queue.put(SendResult(
                     recipient_email=recipient.email,
                     success=False,
                     error="Нет доступных аккаунтов",
-                )
-                self.result_queue.put(result)
+                ))
                 continue
 
             if i > 0 and i % self.config.pause_after_n == 0:
@@ -359,18 +397,30 @@ class SendingEngine:
             personalized = self.template.personalize(recipient)
             msg = _build_message(account, recipient, personalized)
             try:
-                kwargs = {
-                    "hostname": account.host,
-                    "port": account.port,
-                    "username": account.email,
-                    "password": account.password,
-                    "use_tls": account.use_tls,
-                }
                 if account.use_ssl:
-                    kwargs["use_tls"] = False
-                    await aiosmtplib.send(msg, **kwargs, start_tls=False, timeout=30)
+                    # SSL/TLS from the start (port 465) — use_tls=True
+                    await aiosmtplib.send(
+                        msg,
+                        hostname=account.host,
+                        port=account.port,
+                        username=account.email,
+                        password=account.password,
+                        use_tls=True,
+                        start_tls=False,
+                        timeout=30,
+                    )
                 else:
-                    await aiosmtplib.send(msg, **kwargs, start_tls=account.use_tls, timeout=30)
+                    # Plain or STARTTLS (port 587)
+                    await aiosmtplib.send(
+                        msg,
+                        hostname=account.host,
+                        port=account.port,
+                        username=account.email,
+                        password=account.password,
+                        use_tls=False,
+                        start_tls=account.use_tls,
+                        timeout=30,
+                    )
                 account.sent_today += 1
                 account.sent_this_hour += 1
                 account.last_sent = time.time()
@@ -388,6 +438,3 @@ class SendingEngine:
                     account_used=account.email,
                 )
             self.result_queue.put(result)
-
-
-import threading
