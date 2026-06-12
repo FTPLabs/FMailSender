@@ -1,6 +1,11 @@
 """
 Система лицензирования: HWID-генератор, проверка ключа, JWT-токен.
-Поддерживает offline grace period 72ч с кэшированным payload.
+v2.7.0 fixes:
+  - HWID кэшируется в памяти (генерируется один раз, не блокирует UI)
+  - WMI-вызовы параллельны через ThreadPoolExecutor, таймаут 2 с
+  - security_check() не блокирует запуск, прогревает кэш в фоне
+  - Онлайн-отзыв лицензии: сервер вернул 403/404 — файл удаляется
+  - Периодическая онлайн-проверка раз в 24 ч (в фоне)
 """
 import base64
 import ctypes
@@ -12,8 +17,10 @@ import os
 import platform
 import subprocess
 import time
+import threading
 import uuid
-from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -32,11 +39,20 @@ LICENSE_API_URL = os.environ.get(
     "LICENSE_API_URL",
     "http://31.76.100.190:8000/v1/activate",
 )
+LICENSE_VERIFY_URL = os.environ.get(
+    "LICENSE_VERIFY_URL",
+    "http://31.76.100.190:8000/v1/verify",
+)
 OFFLINE_GRACE_HOURS = 72
+ONLINE_CHECK_INTERVAL_H = 24
 LICENSE_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "license.dat"
 
 KEY_PREFIX = "FMSND"
 _JWT_SECRET_FALLBACK = os.environ.get("JWT_SECRET", "")
+
+# ── Внутренний кэш HWID ───────────────────────────────────────────────────────
+_hwid_cache: Optional[str] = None
+_hwid_lock = threading.Lock()
 
 
 # ── Анти-отладчик ─────────────────────────────────────────────────────────────
@@ -51,108 +67,18 @@ def _check_debugger() -> bool:
 
 
 def security_check() -> None:
+    """Быстрая проверка без блокировки UI. Прогревает HWID-кэш в фоне."""
     if _check_debugger():
         logger.warning("Debugger detected — running in debug mode")
+    threading.Thread(target=generate_hwid, daemon=True).start()
 
 
-# ── HWID-генератор ────────────────────────────────────────────────────────────
-
-def _get_cpu_id() -> str:
-    if platform.system() == "Windows":
-        try:
-            import wmi
-            c = wmi.WMI()
-            for proc in c.Win32_Processor():
-                return proc.ProcessorId.strip() if proc.ProcessorId else ""
-        except Exception:
-            pass
-        try:
-            result = subprocess.run(
-                ["wmic", "cpu", "get", "ProcessorId", "/value"],
-                capture_output=True, text=True, timeout=5
-            )
-            for line in result.stdout.splitlines():
-                if "ProcessorId=" in line:
-                    return line.split("=")[1].strip()
-        except Exception:
-            pass
-    return str(uuid.getnode())
-
-
-def _get_mac_address() -> str:
-    return hex(uuid.getnode())[2:].upper().zfill(12)
-
-
-def _get_disk_serial() -> str:
-    if platform.system() == "Windows":
-        try:
-            import wmi
-            c = wmi.WMI()
-            for disk in c.Win32_DiskDrive():
-                if disk.SerialNumber:
-                    return disk.SerialNumber.strip()
-        except Exception:
-            pass
-        try:
-            result = subprocess.run(
-                ["wmic", "diskdrive", "get", "SerialNumber", "/value"],
-                capture_output=True, text=True, timeout=5
-            )
-            for line in result.stdout.splitlines():
-                if "SerialNumber=" in line:
-                    val = line.split("=")[1].strip()
-                    if val:
-                        return val
-        except Exception:
-            pass
-    return "UNKNOWN_DISK"
-
-
-def _get_board_id() -> str:
-    if platform.system() == "Windows":
-        try:
-            import wmi
-            c = wmi.WMI()
-            for board in c.Win32_BaseBoard():
-                if board.SerialNumber:
-                    return board.SerialNumber.strip()
-        except Exception:
-            pass
-        try:
-            result = subprocess.run(
-                ["wmic", "baseboard", "get", "SerialNumber", "/value"],
-                capture_output=True, text=True, timeout=5
-            )
-            for line in result.stdout.splitlines():
-                if "SerialNumber=" in line:
-                    val = line.split("=")[1].strip()
-                    if val:
-                        return val
-        except Exception:
-            pass
-    return "UNKNOWN_BOARD"
-
-
-def generate_hwid() -> str:
-    """Генерирует HWID из аппаратных компонентов. Формат: XXXX-XXXX-XXXX-XXXX"""
-    components = [
-        _get_cpu_id(),
-        _get_mac_address(),
-        _get_disk_serial(),
-        _get_board_id(),
-    ]
-    raw = "|".join(components).encode("utf-8")
-    digest = hashlib.sha256(raw).hexdigest().upper()
-    groups = [digest[i:i+4] for i in range(0, 16, 4)]
-    return "-".join(groups)
-
-
-# ── Шифрование license.dat ────────────────────────────────────────────────────
+# ── Fernet-ключ ───────────────────────────────────────────────────────────────
 
 def _get_fernet_key() -> bytes:
-    hwid = generate_hwid()
-    key_material = hashlib.sha256((hwid + HWID_SALT).encode()).digest()
-    return base64.urlsafe_b64encode(key_material)
+    raw = HWID_SALT.encode() or b"fmail_default_fernet_salt_2024"
+    key = hashlib.sha256(raw).digest()
+    return base64.urlsafe_b64encode(key)
 
 
 def get_storage_key() -> bytes:
@@ -177,6 +103,123 @@ def _load_license_data() -> Optional[dict]:
         return None
 
 
+# ── HWID-генератор ────────────────────────────────────────────────────────────
+
+def _run_safe(fn, timeout: float = 2.0) -> str:
+    """Запускает fn() в потоке с таймаутом. Возвращает результат или ''."""
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        future = ex.submit(fn)
+        try:
+            return future.result(timeout=timeout) or ""
+        except Exception:
+            return ""
+
+
+def _get_cpu_id() -> str:
+    if platform.system() != "Windows":
+        return str(uuid.getnode())
+    try:
+        import wmi
+        c = wmi.WMI()
+        for proc in c.Win32_Processor():
+            pid = getattr(proc, "ProcessorId", "")
+            if pid:
+                return str(pid).strip()
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["wmic", "cpu", "get", "ProcessorId", "/value"],
+            capture_output=True, text=True, timeout=2,
+        )
+        for line in result.stdout.splitlines():
+            if "ProcessorId=" in line:
+                return line.split("=")[1].strip()
+    except Exception:
+        pass
+    return str(uuid.getnode())
+
+
+def _get_mac_address() -> str:
+    return hex(uuid.getnode())[2:].upper().zfill(12)
+
+
+def _get_disk_serial() -> str:
+    if platform.system() != "Windows":
+        return "UNKNOWN_DISK"
+    try:
+        import wmi
+        c = wmi.WMI()
+        for disk in c.Win32_DiskDrive():
+            s = getattr(disk, "SerialNumber", "")
+            if s and s.strip():
+                return s.strip()
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["wmic", "diskdrive", "get", "SerialNumber", "/value"],
+            capture_output=True, text=True, timeout=2,
+        )
+        for line in result.stdout.splitlines():
+            if "SerialNumber=" in line:
+                val = line.split("=")[1].strip()
+                if val:
+                    return val
+    except Exception:
+        pass
+    return "UNKNOWN_DISK"
+
+
+def _get_board_id() -> str:
+    if platform.system() != "Windows":
+        return "UNKNOWN_BOARD"
+    try:
+        import wmi
+        c = wmi.WMI()
+        for board in c.Win32_BaseBoard():
+            s = getattr(board, "SerialNumber", "")
+            if s and s.strip():
+                return s.strip()
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["wmic", "baseboard", "get", "SerialNumber", "/value"],
+            capture_output=True, text=True, timeout=2,
+        )
+        for line in result.stdout.splitlines():
+            if "SerialNumber=" in line:
+                val = line.split("=")[1].strip()
+                if val:
+                    return val
+    except Exception:
+        pass
+    return "UNKNOWN_BOARD"
+
+
+def generate_hwid() -> str:
+    """
+    Генерирует HWID. Кэшируется в памяти — повторные вызовы мгновенны.
+    Все медленные WMI/subprocess вызовы параллельны, таймаут 2 с каждый.
+    """
+    global _hwid_cache
+    with _hwid_lock:
+        if _hwid_cache is not None:
+            return _hwid_cache
+        mac = _get_mac_address()
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            f_cpu   = ex.submit(_run_safe, _get_cpu_id,    2.0)
+            f_disk  = ex.submit(_run_safe, _get_disk_serial, 2.0)
+            f_board = ex.submit(_run_safe, _get_board_id,  2.0)
+            cpu   = f_cpu.result()
+            disk  = f_disk.result()
+            board = f_board.result()
+        raw = f"{cpu}|{mac}|{disk}|{board}|{HWID_SALT}"
+        _hwid_cache = hashlib.sha256(raw.encode()).hexdigest()[:32].upper()
+        return _hwid_cache
+
+
 # ── Валидация формата ключа ───────────────────────────────────────────────────
 
 def validate_key_format(key: str) -> bool:
@@ -193,7 +236,9 @@ class LicenseInfo:
         self.max_threads: int = payload.get("max_threads", 999999)
         self.max_recipients: int = payload.get("max_recipients", 999999)
         exp = payload.get("exp", 0)
-        self.expires_at: datetime = datetime.fromtimestamp(exp) if exp else datetime(2099, 12, 31)
+        self.expires_at: datetime = (
+            datetime.fromtimestamp(exp) if exp else datetime(2099, 12, 31)
+        )
         self.email: str = payload.get("email", "")
         self.hwid: str = payload.get("hwid", "")
         self.is_valid: bool = True
@@ -208,18 +253,21 @@ class LicenseInfo:
         return datetime.now() > self.expires_at
 
     def __repr__(self) -> str:
-        return f"LicenseInfo(plan={self.plan}, expires={self.expires_at.date()}, threads={self.max_threads})"
+        return (
+            f"LicenseInfo(plan={self.plan}, "
+            f"expires={self.expires_at.date()}, "
+            f"threads={self.max_threads})"
+        )
 
 
 class LicenseError(Exception):
     pass
 
 
-# ── Вспомогательная декодировка без верификации подписи ───────────────────────
+# ── Декодировка payload без верификации подписи ───────────────────────────────
 
 def _decode_payload_unverified(token: str) -> Optional[dict]:
-    """Декодирует JWT payload БЕЗ проверки подписи.
-    Безопасно: токен выдан сервером и защищён HMAC-seal локально."""
+    """Декодирует JWT payload БЕЗ проверки подписи (только для кэша)."""
     try:
         return jwt.decode(
             token,
@@ -230,13 +278,73 @@ def _decode_payload_unverified(token: str) -> Optional[dict]:
         return None
 
 
+# ── Онлайн-проверка отзыва ────────────────────────────────────────────────────
+
+def _verify_key_online(key: str, hwid: str) -> Optional[bool]:
+    """
+    True  — ключ действителен.
+    False — ключ отозван или не найден.
+    None  — сервер недоступен.
+    """
+    try:
+        resp = requests.post(
+            LICENSE_VERIFY_URL,
+            json={"key": key, "hwid": hwid},
+            timeout=5,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": f"FMailSender/{APP_VERSION}",
+            },
+        )
+        if resp.status_code == 200:
+            return True
+        if resp.status_code in (403, 404):
+            return False
+        return None
+    except Exception:
+        return None
+
+
+def _schedule_background_verification() -> None:
+    """Раз в ONLINE_CHECK_INTERVAL_H часов проверяет ключ на сервере."""
+
+    def _worker() -> None:
+        time.sleep(30)
+        data = _load_license_data()
+        if not data:
+            return
+        key = data.get("key", "")
+        hwid = data.get("hwid", "")
+        last_verified = data.get("last_verified_online", 0)
+        if time.time() - last_verified < ONLINE_CHECK_INTERVAL_H * 3600:
+            return
+        result = _verify_key_online(key, hwid)
+        if result is False:
+            logger.warning(f"License key {key!r} revoked — clearing local license")
+            try:
+                LICENSE_FILE.unlink(missing_ok=True)
+            except Exception:
+                pass
+        elif result is True:
+            data["last_verified_online"] = time.time()
+            try:
+                _save_license_data(data)
+            except Exception:
+                pass
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
 # ── Активация ─────────────────────────────────────────────────────────────────
 
 def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
     key_upper = key.strip().upper()
 
     if not validate_key_format(key_upper):
-        return False, f"Неверный формат ключа.\nОжидается: {KEY_PREFIX}-XXXXXX-XXXXXX-XXXXXX-XXXXXX"
+        return False, (
+            f"Неверный формат ключа.\n"
+            f"Ожидается: {KEY_PREFIX}-XXXXXX-XXXXXX-XXXXXX-XXXXXX"
+        )
 
     hwid = generate_hwid()
     payload_data = {
@@ -255,7 +363,10 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
             LICENSE_API_URL,
             json=payload_data,
             timeout=15,
-            headers={"Content-Type": "application/json", "User-Agent": f"FMailSender/{APP_VERSION}"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": f"FMailSender/{APP_VERSION}",
+            },
         )
         response.raise_for_status()
         data = response.json()
@@ -267,15 +378,13 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
         if not token_val:
             return False, "Сервер не вернул токен. Проверьте ключ."
 
-        # ИСПРАВЛЕНИЕ: всегда кэшируем payload без верификации подписи.
-        # Сервер уже проверил ключ — дополнительная верификация не нужна.
-        # Это устраняет проблему "перезайдите в приложение" после активации.
         cached_payload = _decode_payload_unverified(token_val)
 
-        # Дополнительно верифицируем подпись если есть JWT_SECRET (опционально)
         if _JWT_SECRET_FALLBACK and cached_payload is None:
             try:
-                cached_payload = jwt.decode(token_val, _JWT_SECRET_FALLBACK, algorithms=["HS256"])
+                cached_payload = jwt.decode(
+                    token_val, _JWT_SECRET_FALLBACK, algorithms=["HS256"]
+                )
             except jwt.InvalidTokenError:
                 pass
 
@@ -288,6 +397,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
             "key": key_upper,
             "activated_at": time.time(),
             "last_online": time.time(),
+            "last_verified_online": time.time(),
             "seal": seal,
             "cached_payload": cached_payload,
         }
@@ -333,34 +443,34 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
     token_val = data.get("token", "")
     stored_seal = data.get("seal", "")
 
-    # Валидация HMAC-seal
     if token_val and stored_seal:
         raw_key = hashlib.sha256((hwid + HWID_SALT).encode()).digest()
-        expected_seal = _hmac_mod.new(raw_key, token_val.encode("utf-8"), "sha256").hexdigest()
+        expected_seal = _hmac_mod.new(
+            raw_key, token_val.encode("utf-8"), "sha256"
+        ).hexdigest()
         if not _hmac_mod.compare_digest(expected_seal, stored_seal):
             return False, None, "Файл лицензии повреждён. Активируйте заново."
 
     def _get_payload() -> Optional[dict]:
-        """Получает payload: с верификацией если есть секрет, иначе из кэша."""
         if _JWT_SECRET_FALLBACK:
             try:
-                return jwt.decode(token_val, _JWT_SECRET_FALLBACK, algorithms=["HS256"])
+                return jwt.decode(
+                    token_val, _JWT_SECRET_FALLBACK, algorithms=["HS256"]
+                )
             except jwt.ExpiredSignatureError:
-                return None  # handled below
+                return None
             except jwt.InvalidTokenError:
                 pass
-
-        # Без JWT_SECRET — используем кэшированный payload (сохранён при активации)
         cached = data.get("cached_payload")
         if cached:
             return cached
-
-        # Крайний случай — decode без верификации
         return _decode_payload_unverified(token_val)
 
     try:
         if _JWT_SECRET_FALLBACK:
-            payload = jwt.decode(token_val, _JWT_SECRET_FALLBACK, algorithms=["HS256"])
+            payload = jwt.decode(
+                token_val, _JWT_SECRET_FALLBACK, algorithms=["HS256"]
+            )
         else:
             payload = _get_payload()
             if payload is None:
@@ -375,6 +485,8 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
             _save_license_data(data)
         except Exception:
             pass
+
+        _schedule_background_verification()
         return True, info, "OK"
 
     except jwt.ExpiredSignatureError:
@@ -383,9 +495,13 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
     except jwt.InvalidTokenError:
         last_online = data.get("last_online", 0)
         if time.time() - last_online < OFFLINE_GRACE_HOURS * 3600:
-            hours_left = int(OFFLINE_GRACE_HOURS - (time.time() - last_online) / 3600)
+            hours_left = int(
+                OFFLINE_GRACE_HOURS - (time.time() - last_online) / 3600
+            )
             logger.warning(f"JWT offline grace: {hours_left}h left")
-            cached = data.get("cached_payload") or _decode_payload_unverified(token_val)
+            cached = (
+                data.get("cached_payload") or _decode_payload_unverified(token_val)
+            )
             if cached:
                 try:
                     info = LicenseInfo(cached)
