@@ -135,4 +135,4 @@ PLANS = {
 }
 
 # URL для скачивания актуальной версии программы (обновляется через /setdownload)
-DOWNLOAD_URL: str = os.environ.get("DOWNLOAD_URL", "https://github.com/FTPLabs/EmailSenderPro/releases/download/v2.4.0/FMailSenderPro.exe")
+DOWNLOAD_URL: str = os.environ.get("DOWNLOAD_URL", "https://github.com/FTPLabs/EmailSenderPro/releases/download/v2.4.1/FMailSender.exe")
