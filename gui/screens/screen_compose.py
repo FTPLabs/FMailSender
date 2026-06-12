@@ -463,36 +463,107 @@ a {{ color: #6366F1; }}
         self.ab_tabs.addTab(QWidget(), f"Вариант {letter}")
 
     def _check_spam(self):
+        """Проверяет спам-балл. FIX: запуск в QThread во избежание зависания UI."""
         from core.spam_checker import SpamChecker
-        from PyQt6.QtWidgets import QDialog, QLabel, QVBoxLayout, QProgressBar
+        from PyQt6.QtWidgets import (
+            QDialog, QLabel, QVBoxLayout, QProgressBar,
+            QHBoxLayout, QDialogButtonBox, QScrollArea, QWidget,
+        )
+        from PyQt6.QtCore import QThread, pyqtSignal
 
-        checker = SpamChecker()
-        subject = self.subject_input.text()
+        subject = self.subject_input.text().strip()
         body_html = self.html_editor.toPlainText() or self.rich_editor.toHtml()
 
-        result = checker.check(subject=subject, body_html=body_html)
+        if not subject and not body_html.strip():
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Нет данных", "Введите тему и текст письма перед проверкой")
+            return
+
+        # Run spam check in background thread to avoid UI freeze
+        class _Worker(QThread):
+            done = pyqtSignal(object)
+            error = pyqtSignal(str)
+
+            def __init__(self, subj, html):
+                super().__init__()
+                self._subject = subj
+                self._html = html
+
+            def run(self):
+                try:
+                    checker = SpamChecker()
+                    self.done.emit(checker.check(subject=self._subject, body_html=self._html))
+                except Exception as exc:
+                    self.error.emit(str(exc))
+
+        self._spam_worker = _Worker(subject, body_html)
+        self.spam_check_btn.setEnabled(False)
+        self.spam_check_btn.setText("Проверяю...")
+
+        def _on_done(result):
+            self.spam_check_btn.setEnabled(True)
+            self.spam_check_btn.setText("Проверить спам-балл")
+            self._show_spam_dialog(result)
+
+        def _on_error(msg):
+            self.spam_check_btn.setEnabled(True)
+            self.spam_check_btn.setText("Проверить спам-балл")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Ошибка проверки", f"Не удалось проверить спам-балл:\n{msg}")
+
+        self._spam_worker.done.connect(_on_done)
+        self._spam_worker.error.connect(_on_error)
+        self._spam_worker.start()
+
+    def _show_spam_dialog(self, result):
+        """Показывает диалог результата проверки спам-балла."""
+        from PyQt6.QtWidgets import (
+            QDialog, QLabel, QVBoxLayout, QProgressBar,
+            QHBoxLayout, QDialogButtonBox, QScrollArea, QWidget,
+        )
+
+        # FIX: grade_color не всегда присутствует в SpamCheckResult
+        score = getattr(result, "score", 0)
+        grade = getattr(result, "grade", "")
+        if hasattr(result, "grade_color"):
+            grade_color = result.grade_color
+        elif score < 30:
+            grade_color = "#22C55E"
+        elif score < 60:
+            grade_color = "#F59E0B"
+        else:
+            grade_color = "#EF4444"
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Проверка спам-балла")
-        dialog.setMinimumWidth(420)
+        dialog.setMinimumWidth(480)
+        dialog.setMinimumHeight(400)
         layout = QVBoxLayout(dialog)
         layout.setSpacing(Spacing.LG)
         layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
 
         # Общий балл
-        score_label = QLabel(f"Спам-балл: {result.score}/100 — {result.grade}")
-        score_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {result.grade_color};")
+        score_label = QLabel(f"Спам-балл: {score}/100" + (f" — {grade}" if grade else ""))
+        score_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {grade_color};")
         layout.addWidget(score_label)
 
         bar = QProgressBar()
         bar.setRange(0, 100)
-        bar.setValue(result.score)
-        bar.setStyleSheet(f"QProgressBar::chunk {{ background-color: {result.grade_color}; }}")
+        bar.setValue(score)
+        bar.setStyleSheet(f"QProgressBar::chunk {{ background-color: {grade_color}; }}")
         layout.addWidget(bar)
 
+        # Прокручиваемая область с деталями
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        inner = QWidget()
+        inner_layout = QVBoxLayout(inner)
+        inner_layout.setSpacing(Spacing.SM)
+
         # Категории
-        for cat, score in result.categories.items():
-            if score > 0:
+        categories = getattr(result, "categories", {})
+        for cat, cat_score in categories.items():
+            if cat_score > 0:
                 row = QHBoxLayout()
                 row.addWidget(QLabel(cat))
                 row.addStretch()
