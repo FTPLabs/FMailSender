@@ -20,8 +20,10 @@ def _load_icon(target):
 
 
 def main():
-    from core.license import security_check
-    security_check()
+    from core.license import security_check, generate_hwid
+threading.Thread(target=generate_hwid, daemon=True).start()  # prewarm HWID cache
+import threading
+threading.Thread(target=security_check, daemon=True).start()  # FIX: non-blocking startup
 
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QFont
