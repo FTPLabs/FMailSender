@@ -1,75 +1,44 @@
 #!/bin/bash
-# FMail Sender — VPS Setup & Deploy Script
-set -e
+  # FMail Sender — VPS Setup & Deploy Script v2.5.0
+  set -e
 
-echo "=== FMail Sender Bot Setup ==="
+  echo "=== FMail Sender Bot Setup v2.5.0 ==="
 
-# Install system dependencies
-apt-get update -qq
-apt-get install -y -qq python3 python3-pip python3-venv git curl
+  apt-get update -qq
+  apt-get install -y -qq python3 python3-pip python3-venv git curl
 
-# Clone or update repo
-cd /opt
-if [ -d "fmailsender" ]; then
-    echo "Updating existing installation..."
-    cd fmailsender
-    git fetch origin
-    git reset --hard origin/main
-else
-    echo "Cloning repository..."
-    git clone https://github.com/FTPLabs/EmailSenderPro.git fmailsender
-    cd fmailsender
-fi
+  cd /opt
+  if [ -d "fmailsender" ]; then
+      echo "Updating existing installation..."
+      cd fmailsender
+      git fetch origin
+      git reset --hard origin/main
+  else
+      echo "Cloning repository..."
+      git clone https://github.com/FTPLabs/FMailSender.git fmailsender
+      cd fmailsender
+  fi
 
-# Setup Python venv and install dependencies
-cd server
-python3 -m venv venv
-source venv/bin/activate
-pip install --quiet --upgrade pip
-pip install --quiet -r requirements.txt
+  cd server
+  python3 -m venv venv
+  source venv/bin/activate
+  pip install --quiet --upgrade pip
+  pip install --quiet -r requirements.txt
 
-# Write .env file
-cat > /opt/fmailsender/server/.env << 'ENVEOF'
-BOT_TOKEN=8869596289:AAFN22KeV6yp8oVCWwDTxu34wEc7Z-HX4bI
-ADMIN_IDS=8784635852
-CRYPTO_BOT_TOKEN=594916:AA6n54rTVfzrbCljPW33D49EVwHyDEpmW6f
-HWID_SALT=FMSND-PRODUCTION-SALT-X9K2-2026
-JWT_SECRET=fmsnd-jwt-2026-X9K2M7B4Q3F8W1T5R6Y9P0
-DB_PATH=/opt/fmailsender/server/licenses.db
-API_HOST=0.0.0.0
-API_PORT=8000
-ENVEOF
+  if [ ! -f /opt/fmailsender/server/.env ]; then
+      printf "BOT_TOKEN=8869596289:AAFN22KeV6yp8oVCWwDTxu34wEc7Z-HX4bI\nADMIN_IDS=8784635852\nCRYPTO_BOT_TOKEN=594916:AA6n54rTVfzrbCljPW33D49EVwHyDEpmW6f\nHWID_SALT=FMSND-PRODUCTION-SALT-X9K2-2026\nJWT_SECRET=fmsnd-jwt-2026-X9K2M7B4Q3F8W1T5R6Y9P0\nDB_PATH=/opt/fmailsender/server/licenses.db\nAPI_HOST=0.0.0.0\nAPI_PORT=8000\n" > /opt/fmailsender/server/.env
+      chmod 600 /opt/fmailsender/server/.env
+      echo ".env created"
+  else
+      echo ".env already exists, skipping"
+  fi
 
-chmod 600 /opt/fmailsender/server/.env
+  printf "[Unit]\nDescription=FMail Sender Telegram Bot + License API\nAfter=network.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser=root\nWorkingDirectory=/opt/fmailsender/server\nEnvironmentFile=/opt/fmailsender/server/.env\nExecStart=/opt/fmailsender/server/venv/bin/python bot.py\nRestart=always\nRestartSec=5\nStandardOutput=journal\nStandardError=journal\nSyslogIdentifier=fmailsender\n\n[Install]\nWantedBy=multi-user.target\n" > /etc/systemd/system/fmailsender.service
 
-# Create systemd service
-cat > /etc/systemd/system/fmailsender.service << 'SERVICEEOF'
-[Unit]
-Description=FMail Sender — Telegram Bot + License API
-After=network.target
-Wants=network-online.target
+  systemctl daemon-reload
+  systemctl enable fmailsender
+  systemctl restart fmailsender
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/fmailsender/server
-EnvironmentFile=/opt/fmailsender/server/.env
-ExecStart=/opt/fmailsender/server/venv/bin/python bot.py
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=fmailsender
-
-[Install]
-WantedBy=multi-user.target
-SERVICEEOF
-
-# Enable and start service
-systemctl daemon-reload
-systemctl enable fmailsender
-systemctl restart fmailsender
-
-echo ""
-echo "=== Setup complete! ==="
-systemctl status fmailsender --no-pager
+  echo "=== Setup complete! ==="
+  systemctl status fmailsender --no-pager
+  
