@@ -16,7 +16,6 @@ try:
 except ImportError:
     _DNS_AVAILABLE = False
 
-# FIX: импортируем validate_email_format из sender (единственный источник истины)
 from core.sender import validate_email_format
 
 DEFAULT_SPAM_WORDS = [
@@ -72,6 +71,70 @@ class SpamCheckResult:
         return self.score < 30
 
 
+@dataclass
+class DnsAuthStatus:
+    """DNS authentication status for a domain (SPF, DKIM, DMARC, MX)."""
+    spf: str = ""
+    spf_valid: bool = False
+    dkim_valid: bool = False
+    dmarc: str = ""
+    dmarc_valid: bool = False
+    mx_valid: bool = False
+
+
+def check_dns_auth(domain: str) -> DnsAuthStatus:
+    """
+    Check SPF, DKIM (common selectors), DMARC and MX records for a domain.
+    Returns DnsAuthStatus with spf/spf_valid/dkim_valid/dmarc/dmarc_valid/mx_valid.
+    Safe to call even when dnspython is not installed.
+    """
+    status = DnsAuthStatus()
+    if not _DNS_AVAILABLE:
+        return status
+
+    # SPF
+    try:
+        txt_records = dns.resolver.resolve(domain, "TXT", lifetime=5)
+        for rec in txt_records:
+            rec_str = str(rec).strip('"')
+            if rec_str.startswith("v=spf1"):
+                status.spf = rec_str
+                status.spf_valid = True
+                break
+    except Exception:
+        pass
+
+    # DKIM — try common selectors
+    for selector in ("google", "default", "mail", "dkim", "smtp", "k1", "selector1", "selector2"):
+        try:
+            dns.resolver.resolve(f"{selector}._domainkey.{domain}", "TXT", lifetime=5)
+            status.dkim_valid = True
+            break
+        except Exception:
+            pass
+
+    # DMARC
+    try:
+        dmarc_records = dns.resolver.resolve(f"_dmarc.{domain}", "TXT", lifetime=5)
+        for rec in dmarc_records:
+            rec_str = str(rec).strip('"')
+            if rec_str.startswith("v=DMARC1"):
+                status.dmarc = rec_str
+                status.dmarc_valid = True
+                break
+    except Exception:
+        pass
+
+    # MX
+    try:
+        dns.resolver.resolve(domain, "MX", lifetime=5)
+        status.mx_valid = True
+    except Exception:
+        pass
+
+    return status
+
+
 class SpamChecker:
     def __init__(self, spam_words_path: Optional[Path] = None):
         self._spam_words = list(DEFAULT_SPAM_WORDS)
@@ -89,20 +152,16 @@ class SpamChecker:
         body_text = self._strip_html(body_html)
         combined = (subject + " " + body_text).lower()
 
-        # ── Спам-слова ───────────────────────────────────────────────────
-        spam_found = []
-        for word in self._spam_words:
-            if word.lower() in combined:
-                spam_found.append(word)
+        # Spam words
+        spam_found = [w for w in self._spam_words if w.lower() in combined]
         if spam_found:
-            score = min(len(spam_found) * 5, 40)
-            result.score += score
+            result.score += min(len(spam_found) * 5, 40)
             result.issues.append(f"Спам-слова ({len(spam_found)}): {', '.join(spam_found[:5])}")
         else:
             result.passed.append("Нет спам-слов")
         result.details["spam_words_found"] = spam_found
 
-        # ── Заглавные буквы ──────────────────────────────────────────────
+        # Caps in subject
         words = subject.split()
         caps_count = sum(1 for w in words if len(w) > 2 and w.isupper())
         if len(words) > 0 and caps_count / max(len(words), 1) > 0.4:
@@ -111,7 +170,7 @@ class SpamChecker:
         else:
             result.passed.append("Нормальный регистр темы")
 
-        # ── Восклицательные знаки ────────────────────────────────────────
+        # Exclamation marks
         exclaim_count = subject.count("!") + body_text.count("!")
         if exclaim_count > 5:
             result.score += min(exclaim_count * 2, 15)
@@ -119,7 +178,7 @@ class SpamChecker:
         else:
             result.passed.append("Допустимое количество !")
 
-        # ── Image-to-Text ratio ──────────────────────────────────────────
+        # Image-to-Text ratio
         img_count = len(re.findall(r"<img", body_html, re.IGNORECASE))
         text_len = len(body_text.strip())
         if img_count > 0 and text_len < 100:
@@ -128,7 +187,7 @@ class SpamChecker:
         elif img_count == 0 and text_len > 50:
             result.passed.append("Хороший Image-to-Text баланс")
 
-        # ── HTML-структура ───────────────────────────────────────────────
+        # HTML structure
         if not re.search(r"<html", body_html, re.IGNORECASE):
             result.warnings.append("Отсутствует тег <html>")
         if not re.search(r"unsubscribe|отписаться", combined):
@@ -137,12 +196,12 @@ class SpamChecker:
         else:
             result.passed.append("Есть ссылка отписки")
 
-        # ── URL в теме ───────────────────────────────────────────────────
+        # URL in subject
         if re.search(r"https?://", subject):
             result.score += 10
             result.issues.append("URL в теме письма")
 
-        # ── Проверка отправителя ─────────────────────────────────────────
+        # Sender email check
         if sender_email:
             if not validate_email_format(sender_email):
                 result.score += 20
@@ -158,7 +217,6 @@ class SpamChecker:
 
     def _check_dns(self, domain: str, result: SpamCheckResult) -> None:
         """Проверяет MX и SPF записи домена."""
-        # MX check
         try:
             dns.resolver.resolve(domain, "MX")
             result.passed.append("MX запись найдена")
@@ -171,12 +229,9 @@ class SpamChecker:
         except Exception:
             pass
 
-        # SPF check — FIX: отдельный except для каждого типа ошибки DNS
         try:
             txt_records = dns.resolver.resolve(domain, "TXT")
-            spf_found = any(
-                "v=spf1" in str(r) for r in txt_records
-            )
+            spf_found = any("v=spf1" in str(r) for r in txt_records)
             if spf_found:
                 result.passed.append("SPF запись найдена")
             else:
@@ -189,7 +244,6 @@ class SpamChecker:
         except Exception:
             pass
 
-        # A-record fallback
         try:
             dns.resolver.resolve(domain, "A")
             result.passed.append("A-запись домена найдена")
