@@ -1,9 +1,9 @@
 """Configuration for FMail Sender license bot + API server.
 
-  Required environment variables (set in .env or system environment):
+  Required environment variables:
     BOT_TOKEN         — Telegram bot token from @BotFather
     CRYPTO_BOT_TOKEN  — CryptoBot token from @CryptoBot
-    JWT_SECRET        — Secret key for signing license JWT (min 32 chars)
+    JWT_SECRET        — Secret key for signing license JWT tokens (min 32 chars)
 
   Optional:
     ADMIN_IDS         — Comma-separated Telegram user IDs with admin access

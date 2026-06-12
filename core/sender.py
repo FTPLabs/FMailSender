@@ -47,6 +47,7 @@ class SmtpAccount:
     def __post_init__(self):
         self._reset_date = date_t.today().isoformat()
         self._reset_hour = datetime.now().hour
+        object.__setattr__(self, '_lock', threading.Lock())
 
     def _refresh_counters(self) -> None:
         today = date_t.today().isoformat()
@@ -76,6 +77,14 @@ class SmtpAccount:
         )
 
 
+
+    def increment_sent(self) -> None:
+        """Атомарно увеличивает счётчики (thread-safe)."""
+        with self._lock:
+            self._refresh_counters()
+            self.sent_today += 1
+            self.sent_this_hour += 1
+            self.last_sent = time.time()
 @dataclass
 class Recipient:
     email: str
@@ -233,8 +242,11 @@ CONFIGS = {
 
 
 def get_smtp_config(email: str) -> dict:
+    """Alias — delegates to get_smtp_config_for_domain."""
     domain = email.split("@")[-1].lower() if "@" in email else ""
-    return CONFIGS.get(domain, {"host": "", "port": 587, "use_ssl": False, "use_tls": True})
+    return get_smtp_config_for_domain(domain)
+
+
 
 
 def get_smtp_config_for_domain(domain: str) -> dict:

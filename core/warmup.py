@@ -2,6 +2,7 @@
 Модуль прогрева SMTP-аккаунтов.
 Автоматически увеличивает объём отправки по кривой: день 1→5, день 7→50, день 30→500+
 """
+import atexit
 import json
 import math
 import random
@@ -85,6 +86,7 @@ class WarmupScheduler:
         # FIX: инициализируем _save_counter в __init__, не через getattr
         self._save_counter: int = 0
         self._load()
+        atexit.register(self.flush)
 
     def _advance_pending_days(self, record: WarmupRecord) -> None:
         if not record.is_active:
@@ -122,67 +124,3 @@ class WarmupScheduler:
         """Принудительное сохранение — вызывать при завершении приложения."""
         if self.records:
             self._save()
-
-    def __del__(self):
-        try:
-            self.flush()
-        except Exception:
-            pass
-
-    def add_account(self, email: str) -> WarmupRecord:
-        if email not in self.records:
-            self.records[email] = WarmupRecord(
-                email=email,
-                start_date=date.today().isoformat(),
-            )
-            self._save()
-        return self.records[email]
-
-    def remove_account(self, email: str) -> None:
-        self.records.pop(email, None)
-        self._save()
-
-    def get_record(self, email: str) -> Optional[WarmupRecord]:
-        return self.records.get(email)
-
-    def get_all_records(self) -> List[WarmupRecord]:
-        return list(self.records.values())
-
-    def record_sent(self, email: str, count: int = 1) -> None:
-        """Debounced save — flush every 10 calls or on explicit flush()."""
-        record = self.records.get(email)
-        if record:
-            record.record_sent(count)
-            self._save_counter += 1
-            if self._save_counter >= 10:
-                self._save()
-
-    def can_send(self, email: str) -> bool:
-        record = self.records.get(email)
-        return record.can_send_today() if record else False
-
-    def get_today_limit(self, email: str) -> int:
-        record = self.records.get(email)
-        return record.today_limit if record else 0
-
-    def pause_account(self, email: str, until=None) -> None:
-        record = self.records.get(email)
-        if record:
-            record.is_active = False
-            if until:
-                record.paused_until = until.isoformat()
-            self._save()
-
-    def resume_account(self, email: str) -> None:
-        record = self.records.get(email)
-        if record:
-            record.is_active = True
-            record.paused_until = None
-            self._save()
-
-    def get_summary(self) -> dict:
-        return {
-            "total_accounts": len(self.records),
-            "active": sum(1 for r in self.records.values() if r.is_active),
-            "total_sent": sum(r.total_sent for r in self.records.values()),
-        }

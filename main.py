@@ -70,7 +70,6 @@
       def on_success(license_info):
           from gui.app import MainWindow
           window = MainWindow(license_info)
-          # Сохраняем ссылку на уровне app — предотвращает GC уничтожение окна
           app._main_window = window
           window.show()
           container.close()
