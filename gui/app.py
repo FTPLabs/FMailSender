@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QFrame, QStackedWidget
 )
-from PyQt6.QtCore import Qt, QByteArray
+from PyQt6.QtCore import Qt, QByteArray, pyqtSignal
 from PyQt6.QtSvgWidgets import QSvgWidget
 
 from gui.theme import Colors, Spacing, Typography
@@ -84,6 +84,8 @@ class SidebarButton(QPushButton):
 
 
 class MainWindow(QMainWindow):
+    _update_available = pyqtSignal(dict)  # thread-safe
+
     def __init__(self, license_info: LicenseInfo):
         super().__init__()
         self._license = license_info
@@ -91,7 +93,8 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1100, 680)
         self.resize(1280, 780)
         self._setup_ui()
-        start_background_check(self._on_update_found, delay_sec=30.0)
+        self._update_available.connect(self._on_update_found)
+        start_background_check(lambda info: self._update_available.emit(info), delay_sec=30.0)
 
     def _on_update_found(self, info: dict) -> None:
         from PyQt6.QtWidgets import QMessageBox
