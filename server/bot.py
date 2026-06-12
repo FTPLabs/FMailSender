@@ -862,16 +862,85 @@ async def activate(req: ActivateRequest):
     return {"token": token}
 
 
+class VerifyRequest(BaseModel):
+    key: str
+    hwid: str
+
+
+@api_app.post("/v1/verify")
+async def verify_license(req: VerifyRequest):
+    """
+    Проверка актуального статуса лицензии (для фоновой проверки клиентом).
+    Возвращает 200 если ключ активен, 403 если отозван/истёк, 404 если не найден.
+    """
+    key = req.key.strip().upper()
+    hwid = req.hwid.strip().upper()
+
+    lic = await db.get_license(key)
+    if not lic:
+        raise HTTPException(status_code=404, detail="License not found")
+
+    if not lic.get("is_active"):
+        raise HTTPException(status_code=403, detail="License revoked")
+
+    expires_at_str = lic.get("expires_at", "")
+    try:
+        expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Invalid expiry date")
+
+    if datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(status_code=403, detail="License expired")
+
+    existing_hwid = lic.get("hwid", "")
+    if existing_hwid and existing_hwid.upper() != hwid.upper():
+        raise HTTPException(status_code=403, detail="HWID mismatch")
+
+    return {
+        "valid": True,
+        "plan": lic.get("plan"),
+        "expires_at": expires_at_str,
+    }
+
+
+class AdminRevokeRequest(BaseModel):
+    admin_secret: str
+    key: str
+
+
+@api_app.post("/v1/admin/revoke")
+async def admin_revoke(req: AdminRevokeRequest):
+    """
+    HTTP-эндпоинт отзыва лицензии (только с секретным ключом администратора).
+    """
+    import os
+    expected = os.environ.get("ADMIN_REVOKE_SECRET", "")
+    if not expected or req.admin_secret != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    revoked = await db.revoke_license(req.key.strip().upper())
+    if not revoked:
+        raise HTTPException(status_code=404, detail="License not found")
+    return {"revoked": True, "key": req.key.upper()}
+
+
 @api_app.get("/health")
 async def health():
-    return {"status": "ok", "service": "FMail Sender License API", "version": "2.5.0"}
+    stats = await db.get_stats()
+    return {
+        "status": "ok",
+        "service": "FMail Sender License API",
+        "version": "2.7.0",
+        "active_licenses": stats.get("active_licenses", 0),
+    }
 
 
 # ─── Entry Point ─────────────────────────────────────────────────────────────
 
 async def main():
     await db.init_db()
-    logger.info("Starting FMail Sender Bot + API v2.5.0...")
+    logger.info("Starting FMail Sender Bot + API v2.7.0...")
 
     config = uvicorn.Config(
         api_app, host="0.0.0.0", port=8000,
