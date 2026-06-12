@@ -76,8 +76,6 @@ class SmtpAccount:
             and self.sent_this_hour < self.hourly_limit
         )
 
-
-
     def increment_sent(self) -> None:
         """Атомарно увеличивает счётчики (thread-safe)."""
         with self._lock:
@@ -85,6 +83,8 @@ class SmtpAccount:
             self.sent_today += 1
             self.sent_this_hour += 1
             self.last_sent = time.time()
+
+
 @dataclass
 class Recipient:
     email: str
@@ -175,7 +175,6 @@ def _interpolate(template: str, variables: dict) -> str:
     return re.sub(r"\{\{([^}]+)\}\}", _replacer, template)
 
 
-# HTML entities table — comprehensive coverage
 _HTML_ENTITIES = {
     "&amp;": "&", "&lt;": "<", "&gt;": ">", "&nbsp;": " ",
     "&quot;": '"', "&#39;": "'", "&apos;": "'", "&#160;": " ",
@@ -207,7 +206,6 @@ def validate_email_format(email: str) -> bool:
     return bool(re.match(pattern, email.strip()))
 
 
-# SMTP host presets
 CONFIGS = {
     "gmail.com":        {"host": "smtp.gmail.com",          "port": 465, "use_ssl": True,  "use_tls": False},
     "googlemail.com":   {"host": "smtp.gmail.com",          "port": 465, "use_ssl": True,  "use_tls": False},
@@ -242,24 +240,16 @@ CONFIGS = {
 
 
 def get_smtp_config(email: str) -> dict:
-    """Alias — delegates to get_smtp_config_for_domain."""
     domain = email.split("@")[-1].lower() if "@" in email else ""
     return get_smtp_config_for_domain(domain)
 
 
-
-
 def get_smtp_config_for_domain(domain: str) -> dict:
-    """Return SMTP preset config for a given domain string (no @ needed)."""
     d = domain.lower().strip()
     return CONFIGS.get(d, {"host": "", "port": 587, "use_ssl": False, "use_tls": True})
 
 
 async def test_smtp_connection(account: "SmtpAccount") -> Tuple[bool, str]:
-    """
-    Test SMTP authentication without sending any email.
-    Returns (success: bool, log: str).
-    """
     lines = [
         f"Хост: {account.host}:{account.port}",
         f"Режим: {'SSL/TLS' if account.use_ssl else 'STARTTLS' if account.use_tls else 'Нет шифрования'}",
@@ -267,19 +257,9 @@ async def test_smtp_connection(account: "SmtpAccount") -> Tuple[bool, str]:
     ]
     try:
         if account.use_ssl:
-            smtp = aiosmtplib.SMTP(
-                hostname=account.host,
-                port=account.port,
-                use_tls=True,
-                timeout=15,
-            )
+            smtp = aiosmtplib.SMTP(hostname=account.host, port=account.port, use_tls=True, timeout=15)
         else:
-            smtp = aiosmtplib.SMTP(
-                hostname=account.host,
-                port=account.port,
-                use_tls=False,
-                timeout=15,
-            )
+            smtp = aiosmtplib.SMTP(hostname=account.host, port=account.port, use_tls=False, timeout=15)
         async with smtp:
             if not account.use_ssl and account.use_tls:
                 await smtp.starttls()
@@ -305,7 +285,34 @@ def _build_message(
     recipient: Recipient,
     template: EmailTemplate,
 ) -> MIMEMultipart:
-    msg = MIMEMultipart("alternative")
+    """
+    ИСПРАВЛЕНИЕ: Правильная MIME-структура согласно RFC 2046.
+    Без вложений: MIMEMultipart("alternative")
+    С вложениями: MIMEMultipart("mixed") → [MIMEMultipart("alternative"), attachments...]
+    """
+    has_attachments = bool(template.attachments and any(Path(p).exists() for p in template.attachments))
+
+    if has_attachments:
+        msg = MIMEMultipart("mixed")
+        alt = MIMEMultipart("alternative")
+        if template.body_text:
+            alt.attach(MIMEText(template.body_text, "plain", "utf-8"))
+        alt.attach(MIMEText(template.body_html, "html", "utf-8"))
+        msg.attach(alt)
+        for path_str in template.attachments:
+            path = Path(path_str)
+            if path.exists():
+                part = MIMEBase("application", "octet-stream")
+                part.set_payload(path.read_bytes())
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", f'attachment; filename="{path.name}"')
+                msg.attach(part)
+    else:
+        msg = MIMEMultipart("alternative")
+        if template.body_text:
+            msg.attach(MIMEText(template.body_text, "plain", "utf-8"))
+        msg.attach(MIMEText(template.body_html, "html", "utf-8"))
+
     msg["From"] = account.display_email
     msg["To"] = recipient.email
     msg["Subject"] = template.subject
@@ -323,19 +330,6 @@ def _build_message(
     if headers:
         msg["List-Unsubscribe"] = ", ".join(headers)
         msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
-
-    if template.body_text:
-        msg.attach(MIMEText(template.body_text, "plain", "utf-8"))
-    msg.attach(MIMEText(template.body_html, "html", "utf-8"))
-
-    for path_str in template.attachments:
-        path = Path(path_str)
-        if path.exists():
-            part = MIMEBase("application", "octet-stream")
-            part.set_payload(path.read_bytes())
-            encoders.encode_base64(part)
-            part.add_header("Content-Disposition", f'attachment; filename="{path.name}"')
-            msg.attach(part)
 
     return msg
 
@@ -410,7 +404,6 @@ class SendingEngine:
             msg = _build_message(account, recipient, personalized)
             try:
                 if account.use_ssl:
-                    # SSL/TLS from the start (port 465) — use_tls=True
                     await aiosmtplib.send(
                         msg,
                         hostname=account.host,
@@ -422,7 +415,6 @@ class SendingEngine:
                         timeout=30,
                     )
                 else:
-                    # Plain or STARTTLS (port 587)
                     await aiosmtplib.send(
                         msg,
                         hostname=account.host,
@@ -433,9 +425,8 @@ class SendingEngine:
                         start_tls=account.use_tls,
                         timeout=30,
                     )
-                account.sent_today += 1
-                account.sent_this_hour += 1
-                account.last_sent = time.time()
+                # ИСПРАВЛЕНИЕ: используем increment_sent() (thread-safe) вместо прямого +=
+                account.increment_sent()
                 result = SendResult(
                     recipient_email=recipient.email,
                     success=True,
