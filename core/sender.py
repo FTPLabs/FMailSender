@@ -374,7 +374,7 @@ class SendingEngine:
                     tasks.append(_noop())
                     continue
                 tasks.append(_send_with_delay(account, recipient))
-            return await asyncio.gather(*tasks, return_exceptions=False)
+            return await asyncio.gather(*tasks, return_exceptions=True)
 
         batch_size = max(self.config.max_threads, 1)
         i = 0
