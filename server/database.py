@@ -332,3 +332,11 @@ async def set_setting(key: str, value: str) -> None:
             (key, value),
         )
         await db.commit()
+
+async def clear_all_licenses() -> None:
+    """Удаляет все лицензии и платежи (необратимо). Только для администратора."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM licenses")
+        await db.execute("DELETE FROM payments")
+        await db.commit()
+    logger.info("All licenses and payments cleared by admin.")
