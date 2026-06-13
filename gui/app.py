@@ -139,27 +139,27 @@ class MainWindow(QMainWindow):
         sidebar_layout.setSpacing(2)
 
         logo_row = QHBoxLayout()
-          logo_row.setContentsMargins(8, 0, 8, 12)
-          from PyQt6.QtGui import QPixmap
-          from pathlib import Path as _Path
-          import sys as _sys
-          _base = _Path(getattr(_sys, "_MEIPASS", _Path(__file__).parent.parent))
-          _logo_path = _base / "assets" / "images" / "fmail_logo.png"
-          logo_lbl = QLabel()
-          logo_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-          logo_lbl.setStyleSheet("background: transparent; border: none;")
-          logo_lbl.setFixedSize(28, 28)
-          if _logo_path.exists():
-              _px = QPixmap(str(_logo_path))
-              logo_lbl.setPixmap(_px.scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-          else:
-              _fallback = QSvgWidget()
-              _fallback.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-              _fallback.setStyleSheet("background: transparent;")
-              _fallback.load(QByteArray(LOGO_SVG))
-              _fallback.setFixedSize(28, 28)
-              logo_lbl = _fallback
-          logo_row.addWidget(logo_lbl)
+        logo_row.setContentsMargins(8, 0, 8, 12)
+        from PyQt6.QtGui import QPixmap
+        from pathlib import Path as _Path
+        import sys as _sys
+        _base = _Path(getattr(_sys, "_MEIPASS", _Path(__file__).parent.parent))
+        _logo_path = _base / "assets" / "images" / "fmail_logo.png"
+        logo_lbl = QLabel()
+        logo_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        logo_lbl.setStyleSheet("background: transparent; border: none;")
+        logo_lbl.setFixedSize(28, 28)
+        if _logo_path.exists():
+            _px = QPixmap(str(_logo_path))
+            logo_lbl.setPixmap(_px.scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        else:
+            _fallback = QSvgWidget()
+            _fallback.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            _fallback.setStyleSheet("background: transparent;")
+            _fallback.load(QByteArray(LOGO_SVG))
+            _fallback.setFixedSize(28, 28)
+            logo_lbl = _fallback
+        logo_row.addWidget(logo_lbl)
         logo_title = QLabel(APP_NAME)
         logo_title.setStyleSheet(
             f"font-size:14px;font-weight:bold;"
