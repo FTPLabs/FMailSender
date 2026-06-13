@@ -158,12 +158,14 @@ def save_accounts(accounts: list[SmtpAccount]) -> None:
             "display_name": a.display_name,
             "daily_limit": a.daily_limit,
             "hourly_limit": a.hourly_limit,
-        if hasattr(a, "proxy") and a.proxy and not hasattr(a, "proxy_list"):
+            "is_active": a.is_active,
         }
         if hasattr(a, "proxy_list") and a.proxy_list:
             entry["proxy_list"] = a.proxy_list
-            entry["proxy"] = a.proxy_list[0]  # обратная совместимость
+            entry["proxy"] = a.proxy_list[0]
             entry["proxy_rotation_random"] = getattr(a, "proxy_rotation_random", False)
+        elif hasattr(a, "proxy") and a.proxy:
+            entry["proxy"] = a.proxy
         data.append(entry)
     ACCOUNTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
