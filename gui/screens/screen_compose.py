@@ -268,167 +268,132 @@ class ComposeScreen(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
-        layout.setSpacing(Spacing.LG)
+          layout = QVBoxLayout(self)
+          layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+          layout.setSpacing(Spacing.LG)
 
-        # ── Заголовок ────────────────────────────
-        header_row = QHBoxLayout()
-        title = QLabel("Создание письма")
-        title.setObjectName("section_header")
-        header_row.addWidget(title)
-        header_row.addStretch()
+          # ── Заголовок ────────────────────────────
+          header_row = QHBoxLayout()
+          title = QLabel("Создание письма")
+          title.setObjectName("section_header")
+          header_row.addWidget(title)
+          header_row.addStretch()
 
-        save_template_btn = QPushButton("Сохранить шаблон")
-        save_template_btn.clicked.connect(self._save_template)
-        header_row.addWidget(save_template_btn)
+          save_btn = QPushButton("Сохранить шаблон")
+          save_btn.setObjectName("btn_secondary")
+          save_btn.clicked.connect(self._save_template)
+          header_row.addWidget(save_btn)
 
-        load_template_btn = QPushButton("Загрузить шаблон")
-        load_template_btn.clicked.connect(self._load_template)
-        header_row.addWidget(load_template_btn)
+          load_btn = QPushButton("Загрузить шаблон")
+          load_btn.setObjectName("btn_secondary")
+          load_btn.clicked.connect(self._load_template)
+          header_row.addWidget(load_btn)
 
-        layout.addLayout(header_row)
+          self.use_template_btn = QPushButton("Использовать →")
+          self.use_template_btn.setObjectName("btn_primary")
+          self.use_template_btn.clicked.connect(self._emit_template)
+          header_row.addWidget(self.use_template_btn)
+          layout.addLayout(header_row)
 
-        # ── A/B тестирование ─────────────────────
-        ab_row = QHBoxLayout()
-        ab_label = QLabel("Варианты (A/B тест):")
-        ab_label.setObjectName("label_muted")
-        ab_row.addWidget(ab_label)
+          # ── Тема письма ──────────────────────────
+          subject_card = QFrame()
+          subject_card.setObjectName("card")
+          subject_layout = QHBoxLayout(subject_card)
+          subject_layout.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
 
-        self.ab_tabs = QTabWidget()
-        self.ab_tabs.setMaximumHeight(30)
-        self.ab_tabs.addTab(QWidget(), "Вариант A")
-        ab_row.addWidget(self.ab_tabs, 1)
+          subject_lbl = QLabel("Тема:")
+          subject_lbl.setFixedWidth(50)
+          subject_layout.addWidget(subject_lbl)
 
-        add_variant_btn = QPushButton("+ Вариант")
-        add_variant_btn.clicked.connect(self._add_ab_variant)
-        ab_row.addWidget(add_variant_btn)
+          self.subject_input = QLineEdit()
+          self.subject_input.setPlaceholderText(
+              "Тема письма — поддерживает {{first_name}}, {{last_name}}, {{company}}"
+          )
+          self.subject_input.textChanged.connect(self._on_content_changed)
+          subject_layout.addWidget(self.subject_input)
+          layout.addWidget(subject_card)
 
-        layout.addLayout(ab_row)
+          # ── Редактор с вкладками ─────────────────
+          self.editor_tabs = QTabWidget()
 
-        # ── Тема письма ──────────────────────────
-        subject_row = QHBoxLayout()
-        subject_label = QLabel("Тема:")
-        subject_label.setFixedWidth(80)
-        subject_row.addWidget(subject_label)
+          # Вкладка 1: визуальный редактор
+          rich_tab = QWidget()
+          rich_layout = QVBoxLayout(rich_tab)
+          rich_layout.setContentsMargins(0, Spacing.SM, 0, 0)
+          rich_layout.setSpacing(Spacing.SM)
 
-        self.subject_input = QLineEdit()
-        self.subject_input.setPlaceholderText("Тема письма — поддерживает {{first_name}}")
-        self.subject_input.textChanged.connect(self._on_content_changed)
-        subject_row.addWidget(self.subject_input)
+          self.rich_editor = QTextEdit()
+          self.rich_editor.setPlaceholderText(
+              "Введите текст письма...\n\n"
+              "Персонализация: {{first_name}}, {{last_name}}, {{company}}, {{email}}"
+          )
+          self.rich_editor.textChanged.connect(self._on_content_changed)
+          self.rich_editor.setMinimumHeight(260)
 
-        layout.addLayout(subject_row)
+          self.formatting_toolbar = FormattingToolbar(self.rich_editor)
+          rich_layout.addWidget(self.formatting_toolbar)
+          rich_layout.addWidget(self.rich_editor, 1)
+          self.editor_tabs.addTab(rich_tab, "✏  Редактор")
 
-        # ── Разделитель: редактор / превью ───────
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+          # Вкладка 2: HTML-код
+          self.html_editor = QTextEdit()
+          self.html_editor.setFont(QFont("Courier New", 12))
+          self.html_editor.setPlaceholderText("<!-- HTML-код письма -->")
+          self.html_highlighter = HtmlHighlighter(self.html_editor.document())
+          self.html_editor.textChanged.connect(self._on_html_changed)
+          self.editor_tabs.addTab(self.html_editor, "</>  HTML")
 
-        # Левая часть — редактор
-        editor_widget = QWidget()
-        editor_layout = QVBoxLayout(editor_widget)
-        editor_layout.setContentsMargins(0, 0, 0, 0)
-        editor_layout.setSpacing(Spacing.SM)
+          # Вкладка 3: предпросмотр
+          preview_container = QWidget()
+          preview_layout = QVBoxLayout(preview_container)
+          preview_layout.setContentsMargins(0, Spacing.SM, 0, 0)
+          preview_layout.setSpacing(Spacing.XS)
 
-        # Вкладки редакторов
-        editor_tabs = QTabWidget()
+          prev_header = QHBoxLayout()
+          prev_lbl = QLabel("Предпросмотр письма")
+          prev_lbl.setObjectName("label_muted")
+          prev_header.addWidget(prev_lbl)
+          prev_header.addStretch()
+          refresh_btn = QPushButton("↻  Обновить")
+          refresh_btn.setObjectName("btn_secondary")
+          refresh_btn.clicked.connect(self._update_preview)
+          prev_header.addWidget(refresh_btn)
+          preview_layout.addLayout(prev_header)
 
-        # Rich text редактор
-        rich_tab = QWidget()
-        rich_layout = QVBoxLayout(rich_tab)
-        rich_layout.setContentsMargins(0, 0, 0, 0)
-        rich_layout.setSpacing(4)
+          if _HAS_WEBENGINE:
+              self.preview = QWebEngineView()
+          else:
+              from PyQt6.QtWidgets import QTextBrowser
+              self.preview = QTextBrowser()
+              self.preview.setOpenExternalLinks(True)
+          preview_layout.addWidget(self.preview, 1)
+          self.editor_tabs.addTab(preview_container, "👁  Предпросмотр")
 
-        self.rich_editor = QTextEdit()
-        self.rich_editor.setPlaceholderText(
-            "Введите текст письма...\n\nИспользуйте переменные: {{first_name}}, {{company}} и т.д."
-        )
-        self.rich_editor.textChanged.connect(self._on_content_changed)
+          self.editor_tabs.currentChanged.connect(self._on_tab_changed)
+          layout.addWidget(self.editor_tabs, 1)
 
-        self.formatting_toolbar = FormattingToolbar(self.rich_editor)
-        rich_layout.addWidget(self.formatting_toolbar)
-        rich_layout.addWidget(self.rich_editor)
-        editor_tabs.addTab(rich_tab, "Визуальный редактор")
+          # ── Нижняя панель ─────────────────────────
+          bottom_row = QHBoxLayout()
+          bottom_row.setSpacing(Spacing.SM)
 
-        # HTML редактор
-        self.html_editor = QTextEdit()
-        self.html_editor.setFont(QFont("Courier New", 12))
-        self.html_editor.setPlaceholderText("<!-- HTML-код письма -->")
-        self.html_highlighter = HtmlHighlighter(self.html_editor.document())
-        self.html_editor.textChanged.connect(self._on_html_changed)
-        editor_tabs.addTab(self.html_editor, "HTML")
+          self.attach_btn = QPushButton("+ Вложение")
+          self.attach_btn.setObjectName("btn_secondary")
+          self.attach_btn.clicked.connect(self._add_attachment)
+          bottom_row.addWidget(self.attach_btn)
 
-        editor_layout.addWidget(editor_tabs)
+          self.attach_label = QLabel("Вложений нет")
+          self.attach_label.setObjectName("label_muted")
+          bottom_row.addWidget(self.attach_label)
 
-        # Вложения
-        attachments_card = QFrame()
-        attachments_card.setObjectName("card")
-        att_layout = QVBoxLayout(attachments_card)
-        att_layout.setSpacing(Spacing.SM)
+          bottom_row.addStretch()
 
-        att_header = QHBoxLayout()
-        att_title = QLabel("Вложения")
-        att_title.setObjectName("label_muted")
-        att_header.addWidget(att_title)
-        att_header.addStretch()
+          self.spam_check_btn = QPushButton("Проверить спам-балл")
+          self.spam_check_btn.clicked.connect(self._check_spam)
+          bottom_row.addWidget(self.spam_check_btn)
 
-        add_att_btn = QPushButton("+ Добавить файл")
-        add_att_btn.clicked.connect(self._add_attachment)
-        att_header.addWidget(add_att_btn)
-        att_layout.addLayout(att_header)
+          layout.addLayout(bottom_row)
 
-        self.attachments_list = QListWidget()
-        self.attachments_list.setMaximumHeight(80)
-        att_layout.addWidget(self.attachments_list)
-
-        editor_layout.addWidget(attachments_card)
-        splitter.addWidget(editor_widget)
-
-        # Правая часть — превью
-        preview_widget = QWidget()
-        preview_layout = QVBoxLayout(preview_widget)
-        preview_layout.setContentsMargins(0, 0, 0, 0)
-        preview_layout.setSpacing(Spacing.SM)
-
-        preview_header = QHBoxLayout()
-        preview_title = QLabel("Предпросмотр")
-        preview_title.setObjectName("label_muted")
-        preview_header.addWidget(preview_title)
-        preview_header.addStretch()
-
-        refresh_btn = QPushButton("↻")
-        refresh_btn.setObjectName("btn_icon")
-        refresh_btn.setFixedSize(28, 28)
-        refresh_btn.clicked.connect(self._update_preview)
-        preview_header.addWidget(refresh_btn)
-        preview_layout.addLayout(preview_header)
-
-        if _HAS_WEBENGINE:
-            self.preview = QWebEngineView()
-        else:
-            from PyQt6.QtWidgets import QTextBrowser
-            self.preview = QTextBrowser()
-            self.preview.setOpenExternalLinks(True)
-        self.preview.setMinimumWidth(360)
-        preview_layout.addWidget(self.preview)
-
-        splitter.addWidget(preview_widget)
-        splitter.setSizes([600, 400])
-        layout.addWidget(splitter, 1)
-
-        # ── Кнопка готовности ────────────────────
-        bottom_row = QHBoxLayout()
-        bottom_row.addStretch()
-
-        self.spam_check_btn = QPushButton("Проверить спам-балл")
-        self.spam_check_btn.clicked.connect(self._check_spam)
-        bottom_row.addWidget(self.spam_check_btn)
-
-        self.use_template_btn = QPushButton("Использовать шаблон →")
-        self.use_template_btn.setObjectName("btn_primary")
-        self.use_template_btn.clicked.connect(self._emit_template)
-        bottom_row.addWidget(self.use_template_btn)
-
-        layout.addLayout(bottom_row)
-
+  
     def _on_content_changed(self):
         """Запускает дебаунс-таймер для обновления превью."""
         self._preview_timer.start()
@@ -437,6 +402,12 @@ class ComposeScreen(QWidget):
         """Синхронизирует HTML-редактор с rich редактором."""
         html = self.html_editor.toPlainText()
         self._preview_timer.start()
+
+
+    def _on_tab_changed(self, index: int):
+        """Обновляет предпросмотр при переключении на вкладку предпросмотра."""
+        if index == 2:
+            self._update_preview()
 
     def _update_preview(self):
         """Обновляет HTML-превью."""
@@ -469,13 +440,18 @@ a {{ color: #6366F1; }}
         for path in paths:
             size_mb = os.path.getsize(path) / (1024 * 1024)
             if size_mb > 25:
-                QMessageBox.warning(self, "Файл слишком большой",
-                                    f"{Path(path).name} превышает лимит 25MB")
+                QMessageBox.warning(
+                    self, "Файл слишком большой",
+                    f"{Path(path).name} превышает лимит 25 МБ"
+                )
                 continue
             if path not in self._attachments:
                 self._attachments.append(path)
-                item = QListWidgetItem(f"{Path(path).name} ({size_mb:.1f}MB)")
-                self.attachments_list.addItem(item)
+        count = len(self._attachments)
+        self.attach_label.setText(
+            "Вложений нет" if count == 0 else
+            f"Вложений: {count}"
+        )
 
     def _add_ab_variant(self):
         if len(self._ab_variants) >= 5:
