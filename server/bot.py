@@ -273,17 +273,17 @@ async def cb_menu_download(query: CallbackQuery):
 
       final_url = zip_url or dl_url
       buttons = [
-          [InlineKeyboardButton(text="U0001f4e6 Скачать .zip архив", url=final_url)],
+          [InlineKeyboardButton(text="📦 Скачать .zip архив", url=final_url)],
       ]
       if vt_url:
-          buttons.append([InlineKeyboardButton(text="U0001f6e1️ VirusTotal проверка", url=vt_url)])
+          buttons.append([InlineKeyboardButton(text="🛡️ VirusTotal проверка", url=vt_url)])
       buttons.append([InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")])
 
       plan = PLANS.get(active_lic.get("plan", ""), {})
       exp = active_lic.get("expires_at", "")[:10]
       await send_or_edit(
           query,
-          f"U0001f4e5 <b>Скачать FMail Sender</b>\n\n"
+          f"📥 <b>Скачать FMail Sender</b>\n\n"
           f"✅ {plan.get('name', active_lic.get('plan', ''))} | до {exp}\n\n"
           f"Скачай .zip архив, распакуй и запусти FMailSender.exe",
           reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
@@ -682,7 +682,7 @@ async def cb_admin_set_vt(query: CallbackQuery, state: FSMContext):
     await state.set_state(AdminFlow.set_vt_url)
     await send_or_edit(
         query,
-        f"U0001f6e1️ <b>VirusTotal ссылка</b>\n\nТекущая:\n<code>{current}</code>\n\n"
+        f"🛡️ <b>VirusTotal ссылка</b>\n\nТекущая:\n<code>{current}</code>\n\n"
         f"Отправь новую ссылку VirusTotal:\n"
         f"(https://www.virustotal.com/gui/file/SHA256)",
         reply_markup=kb_back_admin(),
