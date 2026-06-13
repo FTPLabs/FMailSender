@@ -419,6 +419,11 @@ class SendingEngine:
                     if isinstance(result, Exception):
                         continue
                     results.append(result)
+                    with self._stats_lock:
+                        if result.success:
+                            self._stats["success"] += 1
+                        else:
+                            self._stats["errors"] += 1
                     self._emit_progress(results, recipients, result)
                 if (
                     self.config.pause_after_n > 0

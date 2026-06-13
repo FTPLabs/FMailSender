@@ -684,7 +684,7 @@ class AccountsScreen(QWidget):
         lines = [l.strip() for l in raw.splitlines() if l.strip()]
         valid_proxies = []
         for line in lines:
-            p = ProxyRotator._normalize(line)
+            p = ProxyManager.parse(line)
             if p:
                 valid_proxies.append(p)
 

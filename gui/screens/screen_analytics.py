@@ -89,13 +89,8 @@ class AnalyticsScreen(QWidget):
         header_row.addWidget(title)
         header_row.addStretch()
 
-        self.campaign_combo = QComboBox()
-        self.campaign_combo.setFixedWidth(250)
-        self.campaign_combo.addItem("Текущая кампания")
-        self.campaign_combo.currentIndexChanged.connect(self._load_campaign)
-        header_row.addWidget(self.campaign_combo)
-
         refresh_btn = QPushButton("Обновить")
+        refresh_btn.setObjectName("btn_secondary")
         refresh_btn.clicked.connect(self._refresh)
         header_row.addWidget(refresh_btn)
 
@@ -109,11 +104,8 @@ class AnalyticsScreen(QWidget):
         self.card_delivered = AnalyticsSummaryCard("Доставлено", "0%", color=Colors.SUCCESS)
         self.card_opens = AnalyticsSummaryCard("Открытий", "0%", color=Colors.INFO)
         self.card_clicks = AnalyticsSummaryCard("Кликов", "0%", color=Colors.ACCENT)
-        self.card_bounces = AnalyticsSummaryCard("Отказов", "0%", color=Colors.ERROR)
-        self.card_unsub = AnalyticsSummaryCard("Отписок", "0", color=Colors.WARNING)
-
         for card in [self.card_sent, self.card_delivered, self.card_opens,
-                     self.card_clicks, self.card_bounces, self.card_unsub]:
+                     self.card_clicks]:
             card.setFixedHeight(100)
             summary_row.addWidget(card)
 
@@ -256,8 +248,7 @@ class AnalyticsScreen(QWidget):
 
         self.card_opens.set_value(open_rate)
         self.card_clicks.set_value(click_rate)
-        self.card_bounces.set_value(bounce_rate)
-        self.card_unsub.set_value(str(len(self._data.get("unsubscribes", []))))
+        
 
     def _save_campaign(self, results: List[SendResult]) -> None:
         campaign = {
@@ -274,13 +265,7 @@ class AnalyticsScreen(QWidget):
         self._data["campaigns"].append(campaign)
         _save_analytics(self._data)
 
-        # Обновляем комбобокс кампаний
-        self.campaign_combo.blockSignals(True)
-        self.campaign_combo.clear()
-        self.campaign_combo.addItem("Текущая кампания")
-        for c in reversed(self._data.get("campaigns", [])[-20:]):
-            self.campaign_combo.addItem(f"{c['date']} ({c['total']} писем)")
-        self.campaign_combo.blockSignals(False)
+
 
     def _load_campaign(self, index: int):
         if index == 0:

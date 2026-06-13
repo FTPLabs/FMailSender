@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QLineEdit, QTabWidget, QSplitter, QFrame,
     QComboBox, QFileDialog, QListWidget, QListWidgetItem,
     QToolBar, QFontComboBox, QSpinBox, QAbstractSpinBox, QColorDialog, QDialog,
-    QFormLayout, QDialogButtonBox, QMessageBox, QScrollArea
+    QFormLayout, QDialogButtonBox, QMessageBox, QScrollArea, QProgressBar
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QThread
 from PyQt6.QtGui import (
@@ -89,10 +89,10 @@ class FormattingToolbar(QFrame):
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(Spacing.SM, 4, Spacing.SM, 4)
-        layout.setSpacing(3)
+        layout.setContentsMargins(Spacing.SM, 3, Spacing.SM, 3)
+        layout.setSpacing(2)
         self.setObjectName("card")
-        self.setFixedHeight(46)
+        self.setFixedHeight(40)
 
         try:
             from gui.icons import make_icon, BOLD, ITALIC, UNDERLINE, ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, LINK, TEXT_COLOR_ICON
@@ -106,15 +106,15 @@ class FormattingToolbar(QFrame):
                         "align_right": "ALIGN_RIGHT", "link": "LINK", "color": "TEXT_COLOR_ICON"}
             b = QPushButton()
             b.setObjectName(obj)
-            b.setFixedSize(32, 32)
+            b.setFixedSize(26, 26)
             b.setToolTip(tooltip)
             b.clicked.connect(callback)
             if _has_icons and icon_key in _SVG_MAP:
                 import gui.icons as _ic
                 svg_str = getattr(_ic, _SVG_MAP[icon_key])
                 from PyQt6.QtCore import QSize as _QSize
-                b.setIcon(make_icon(svg_str, 18))
-                b.setIconSize(_QSize(18, 18))
+                b.setIcon(make_icon(svg_str, 14))
+                b.setIconSize(_QSize(14, 14))
             else:
                 b.setText(label)
             return b
@@ -137,8 +137,8 @@ class FormattingToolbar(QFrame):
         self.font_size = QSpinBox()
         self.font_size.setRange(8, 72)
         self.font_size.setValue(14)
-        self.font_size.setFixedWidth(52)
-        self.font_size.setFixedHeight(28)
+        self.font_size.setFixedWidth(46)
+        self.font_size.setFixedHeight(24)
         self.font_size.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.font_size.valueChanged.connect(self._font_size_changed)
         self.font_size.setToolTip("Размер шрифта (пт)")
@@ -635,9 +635,9 @@ a {{ color: #6366F1; }}
         ai_btn.clicked.connect(_run_ai_fix)
         dlg.exec()
     def _on_spam_error(self, error: str):
-      self.spam_check_btn.setEnabled(True)
-      self.spam_check_btn.setText("Проверить спам-балл")
-      QMessageBox.warning(self, "Ошибка проверки", f"Не удалось проверить:\n{error}")
+        self.spam_check_btn.setEnabled(True)
+        self.spam_check_btn.setText("Проверить спам-балл")
+        QMessageBox.warning(self, "Ошибка проверки", f"Не удалось проверить:\n{error}")
 
 
     def _show_spam_dialog(self, result):
