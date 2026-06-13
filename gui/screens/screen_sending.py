@@ -7,7 +7,7 @@ import threading
 import time
 from PyQt6.QtWidgets import (
   QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-  QSlider, QSpinBox, QFrame, QProgressBar, QListWidget,
+  QSlider, QSpinBox, QAbstractSpinBox, QFrame, QProgressBar, QListWidget,
   QListWidgetItem, QDateTimeEdit, QCheckBox, QGroupBox,
   QFormLayout, QMessageBox, QSplitter
 )
@@ -114,21 +114,25 @@ class SendingScreen(QWidget):
       self.min_delay_spin.setRange(0, 60000)
       self.min_delay_spin.setValue(500)
       self.min_delay_spin.setSuffix(" мс")
+      self.min_delay_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
       dgl.addRow("Минимальная:", self.min_delay_spin)
       self.max_delay_spin = QSpinBox()
       self.max_delay_spin.setRange(0, 300000)
       self.max_delay_spin.setValue(2000)
       self.max_delay_spin.setSuffix(" мс")
+      self.max_delay_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
       dgl.addRow("Максимальная:", self.max_delay_spin)
       self.pause_after_spin = QSpinBox()
       self.pause_after_spin.setRange(1, 10000)
       self.pause_after_spin.setValue(50)
       self.pause_after_spin.setSuffix(" писем")
+      self.pause_after_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
       dgl.addRow("Пауза после:", self.pause_after_spin)
       self.pause_duration_spin = QSpinBox()
       self.pause_duration_spin.setRange(1, 3600)
       self.pause_duration_spin.setValue(60)
       self.pause_duration_spin.setSuffix(" сек")
+      self.pause_duration_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
       dgl.addRow("Длительность паузы:", self.pause_duration_spin)
       ll.addWidget(dg)
       sg = QGroupBox("Расписание")
