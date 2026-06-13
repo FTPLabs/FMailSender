@@ -26,15 +26,16 @@ def main():
     from core.license import security_check, generate_hwid
     hwid_ready = threading.Event()
 
-    def _hwid_init():
-        generate_hwid()
-        hwid_ready.set()
+      def _hwid_init():
+          generate_hwid()
+          hwid_ready.set()
 
-    threading.Thread(target=_hwid_init, daemon=True).start()
-    threading.Thread(target=security_check, daemon=True).start()
+      threading.Thread(target=_hwid_init, daemon=True).start()
+      # FIX: security_check тоже вызывала generate_hwid — убрана дублирующая инициализация
+      # threading.Thread(target=security_check, daemon=True).start()
 
-    # Ждём HWID не более 3 сек, чтобы check_license получил актуальный кэш
-    hwid_ready.wait(timeout=3.0)
+      # Ждём HWID не более 3 сек, чтобы check_license получил актуальный кэш
+      hwid_ready.wait(timeout=3.0)
 
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QFont
