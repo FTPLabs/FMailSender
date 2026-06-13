@@ -46,6 +46,7 @@ LICENSE_VERIFY_URL = os.environ.get(
 OFFLINE_GRACE_HOURS = 72
 ONLINE_CHECK_INTERVAL_H = 24
 LICENSE_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "license.dat"
+_HWID_FILE   = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "hwid.dat"
 
 KEY_PREFIX = "FMSND"
 _JWT_SECRET_FALLBACK = os.environ.get("JWT_SECRET", "")
@@ -198,26 +199,56 @@ def _get_board_id() -> str:
     return "UNKNOWN_BOARD"
 
 
-def generate_hwid() -> str:
-    """
-    Генерирует HWID. Кэшируется в памяти — повторные вызовы мгновенны.
-    Все медленные WMI/subprocess вызовы параллельны, таймаут 2 с каждый.
-    """
-    global _hwid_cache
-    with _hwid_lock:
-        if _hwid_cache is not None:
-            return _hwid_cache
-        mac = _get_mac_address()
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            f_cpu   = ex.submit(_run_safe, _get_cpu_id,    2.0)
-            f_disk  = ex.submit(_run_safe, _get_disk_serial, 2.0)
-            f_board = ex.submit(_run_safe, _get_board_id,  2.0)
-            cpu   = f_cpu.result()
-            disk  = f_disk.result()
-            board = f_board.result()
-        raw = f"{cpu}|{mac}|{disk}|{board}|{HWID_SALT}"
-        _hwid_cache = hashlib.sha256(raw.encode()).hexdigest()[:32].upper()
-        return _hwid_cache
+def _load_hwid_from_file() -> Optional[str]:
+      """Загружает сохранённый HWID из зашифрованного файла."""
+      try:
+          if not _HWID_FILE.exists():
+              return None
+          f = Fernet(_get_fernet_key())
+          val = f.decrypt(_HWID_FILE.read_bytes()).decode()
+          return val if len(val) == 32 and val.isalnum() else None
+      except Exception:
+          return None
+
+
+  def _save_hwid_to_file(hwid: str) -> None:
+      """Сохраняет HWID в зашифрованный файл для стабильности при перезапусках."""
+      try:
+          _HWID_FILE.parent.mkdir(parents=True, exist_ok=True)
+          f = Fernet(_get_fernet_key())
+          _HWID_FILE.write_bytes(f.encrypt(hwid.encode()))
+      except Exception:
+          pass
+
+
+  def generate_hwid() -> str:
+      """
+      Генерирует HWID. Кэшируется в памяти И на диске.
+      Стабилен между перезапусками: первый запуск генерирует из железа и сохраняет
+      в hwid.dat; все последующие запуски загружают из файла.
+      """
+      global _hwid_cache
+      with _hwid_lock:
+          if _hwid_cache is not None:
+              return _hwid_cache
+          # Загружаем с диска если файл есть (стабильно между перезапусками)
+          saved = _load_hwid_from_file()
+          if saved:
+              _hwid_cache = saved
+              return _hwid_cache
+          # Нет файла — вычисляем из железа и сохраняем
+          mac = _get_mac_address()
+          with ThreadPoolExecutor(max_workers=3) as ex:
+              f_cpu   = ex.submit(_run_safe, _get_cpu_id,    2.0)
+              f_disk  = ex.submit(_run_safe, _get_disk_serial, 2.0)
+              f_board = ex.submit(_run_safe, _get_board_id,  2.0)
+              cpu   = f_cpu.result()
+              disk  = f_disk.result()
+              board = f_board.result()
+          raw = f"{cpu}|{mac}|{disk}|{board}|{HWID_SALT}"
+          _hwid_cache = hashlib.sha256(raw.encode()).hexdigest()[:32].upper()
+          _save_hwid_to_file(_hwid_cache)
+          return _hwid_cache
 
 
 # ── Валидация формата ключа ───────────────────────────────────────────────────
