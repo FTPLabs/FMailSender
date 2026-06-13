@@ -171,9 +171,9 @@ QPushButton#btn_primary {{
     font-weight: {Typography.WEIGHT_BOLD};
 }}
 QPushButton#btn_secondary, QPushButton#btn_icon {{
-    background: {c.BG_GLASS
+    background: {c.BG_GLASS};
     padding: 4px;
-    min-width: 0px;};
+    min-width: 0px;
     color: {c.TEXT_SECONDARY};
     border: 1px solid {c.BORDER};
 }}
