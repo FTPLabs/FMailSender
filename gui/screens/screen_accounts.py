@@ -266,57 +266,57 @@ class AccountDialog(QDialog):
 
 
 
-  class BulkImportWorker(QThread):
-      """Импорт SMTP-аккаунтов из файла в фоновом потоке — не блокирует UI."""
-      progress = pyqtSignal(int, int)   # (текущий, всего)
-      finished = pyqtSignal(int, int)   # (импортировано, пропущено)
-      error    = pyqtSignal(str)
+class BulkImportWorker(QThread):
+    """Импорт SMTP-аккаунтов из файла в фоновом потоке — не блокирует UI."""
+    progress = pyqtSignal(int, int)   # (текущий, всего)
+    finished = pyqtSignal(int, int)   # (импортировано, пропущено)
+    error    = pyqtSignal(str)
 
-      def __init__(self, path: str, existing_emails: set, parent=None):
-          super().__init__(parent)
-          self._path = path
-          self._existing = existing_emails
-          self.new_accounts: list = []
+    def __init__(self, path: str, existing_emails: set, parent=None):
+        super().__init__(parent)
+        self._path = path
+        self._existing = existing_emails
+        self.new_accounts: list = []
 
-      def run(self):
-          try:
-              lines = Path(self._path).read_text(encoding="utf-8", errors="replace").splitlines()
-              total = len(lines)
-              imported = errors = 0
-              for idx, line in enumerate(lines):
-                  self.progress.emit(idx, total)
-                  line = line.strip()
-                  if not line or line.startswith("#"):
-                      continue
-                  parts = [p.strip() for p in re.split(r"[;:|\t]", line)]
-                  if len(parts) < 2:
-                      errors += 1
-                      continue
-                  email, password = parts[0], parts[1]
-                  if "@" not in email or email.lower() in self._existing:
-                      errors += 1
-                      continue
-                  domain = email.split("@")[-1].lower()
-                  cfg = get_smtp_config_for_domain(domain)
-                  if not cfg:
-                      errors += 1
-                      continue
-                  acc = SmtpAccount(
-                      email=email,
-                      password=password,
-                      host=cfg["host"],
-                      port=cfg["port"],
-                      use_ssl=cfg.get("use_ssl", True),
-                      use_tls=cfg.get("use_tls", False),
-                  )
-                  self.new_accounts.append(acc)
-                  self._existing.add(email.lower())
-                  imported += 1
-              self.finished.emit(imported, errors)
-          except Exception as e:
-              self.error.emit(str(e))
+    def run(self):
+        try:
+            lines = Path(self._path).read_text(encoding="utf-8", errors="replace").splitlines()
+            total = len(lines)
+            imported = errors = 0
+            for idx, line in enumerate(lines):
+                self.progress.emit(idx, total)
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = [p.strip() for p in re.split(r"[;:|\t]", line)]
+                if len(parts) < 2:
+                    errors += 1
+                    continue
+                email, password = parts[0], parts[1]
+                if "@" not in email or email.lower() in self._existing:
+                    errors += 1
+                    continue
+                domain = email.split("@")[-1].lower()
+                cfg = get_smtp_config_for_domain(domain)
+                if not cfg:
+                    errors += 1
+                    continue
+                acc = SmtpAccount(
+                    email=email,
+                    password=password,
+                    host=cfg["host"],
+                    port=cfg["port"],
+                    use_ssl=cfg.get("use_ssl", True),
+                    use_tls=cfg.get("use_tls", False),
+                )
+                self.new_accounts.append(acc)
+                self._existing.add(email.lower())
+                imported += 1
+            self.finished.emit(imported, errors)
+        except Exception as e:
+            self.error.emit(str(e))
 
-  
+
 class AccountsScreen(QWidget):
     accounts_changed = pyqtSignal(list)
 

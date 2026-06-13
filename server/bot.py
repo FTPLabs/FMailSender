@@ -6,6 +6,9 @@ import asyncio
 import logging
 import os
 import sys
+
+from dotenv import load_dotenv
+load_dotenv()  # Load .env before config imports
 from datetime import datetime, timezone
 from typing import Optional
 
