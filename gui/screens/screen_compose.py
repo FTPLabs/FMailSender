@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QLineEdit, QTabWidget, QSplitter, QFrame,
     QComboBox, QFileDialog, QListWidget, QListWidgetItem,
-    QToolBar, QFontComboBox, QSpinBox, QColorDialog, QDialog,
+    QToolBar, QFontComboBox, QSpinBox, QAbstractSpinBox, QColorDialog, QDialog,
     QFormLayout, QDialogButtonBox, QMessageBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QThread
@@ -120,6 +120,7 @@ class FormattingToolbar(QFrame):
         self.font_size.setRange(8, 72)
         self.font_size.setValue(14)
         self.font_size.setFixedWidth(60)
+        self.font_size.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.font_size.valueChanged.connect(self._font_size_changed)
         layout.addWidget(self.font_size)
 
