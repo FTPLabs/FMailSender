@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
 from PyQt6.QtGui import QFont, QClipboard
-from PyQt6.QtSvgWidgets import QSvgWidget
+from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtCore import QByteArray
 
 from core.license import activate_license, generate_hwid, LicenseInfo, KEY_PREFIX
@@ -99,9 +99,18 @@ class ActivationScreen(QWidget):
         # ── Icon ────────────────────────────────────────────────────────
         icon_row = QHBoxLayout()
         icon_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_svg = QSvgWidget()
-        icon_svg.load(QByteArray(MAIL_ICON_SVG))
+        _svg_renderer = QSvgRenderer(QByteArray(MAIL_ICON_SVG))
+        _svg_pixmap = QPixmap(52, 52)
+        _svg_pixmap.fill(Qt.GlobalColor.transparent)
+        _svg_painter = QPainter(_svg_pixmap)
+        _svg_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        _svg_renderer.render(_svg_painter)
+        _svg_painter.end()
+        icon_svg = QLabel()
+        icon_svg.setPixmap(_svg_pixmap)
         icon_svg.setFixedSize(52, 52)
+        icon_svg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_svg.setStyleSheet("background: transparent; border: none;")
         icon_row.addWidget(icon_svg)
         card_layout.addLayout(icon_row)
         card_layout.addSpacing(16)
