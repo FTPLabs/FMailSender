@@ -55,6 +55,7 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "web.de":          {"host": "smtp.web.de",          "port": 587, "use_ssl": False, "use_tls": True},
     "aol.com":         {"host": "smtp.aol.com",         "port": 465, "use_ssl": True,  "use_tls": False},
     "zoho.com":        {"host": "smtp.zoho.com",        "port": 465, "use_ssl": True,  "use_tls": False},
+    "zick-mail.casa": {"host": "smtp.zick-mail.casa", "port": 465, "use_ssl": True, "use_tls": False, "imap_host": "imap.zick-mail.casa", "imap_port": 993, "imap_ssl": True},
 }
 
 
@@ -75,6 +76,9 @@ class SmtpAccount:
     hourly_limit: int = 50
     is_active: bool = True
     proxy: str = ""
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_ssl: bool = True
 
     def __post_init__(self):
         self._lock = threading.Lock()

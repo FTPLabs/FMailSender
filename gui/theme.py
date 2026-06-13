@@ -204,9 +204,9 @@ QPushButton#btn_icon:hover {{
 }}
 QPushButton#btn_fmt {{
     background: {c.BG_SURFACE3};
-    padding: 2px;
-    min-width: 0px;
-    min-height: 0px;
+    padding: 5px 10px;
+    min-width: 30px;
+    min-height: 30px;
     color: {c.TEXT_SECONDARY};
     border: 1px solid {c.BORDER};
     border-radius: {r.SMALL};
@@ -223,9 +223,9 @@ QPushButton#btn_fmt_color:hover {{
 }}
 QPushButton#btn_fmt_bold {{
     background: {c.BG_SURFACE3};
-    padding: 2px;
-    min-width: 0px;
-    min-height: 0px;
+    padding: 5px 10px;
+    min-width: 30px;
+    min-height: 30px;
     color: {c.TEXT_SECONDARY};
     border: 1px solid {c.BORDER};
     border-radius: {r.SMALL};
@@ -234,9 +234,9 @@ QPushButton#btn_fmt_bold {{
 }}
 QPushButton#btn_fmt_italic {{
     background: {c.BG_SURFACE3};
-    padding: 2px;
-    min-width: 0px;
-    min-height: 0px;
+    padding: 5px 10px;
+    min-width: 30px;
+    min-height: 30px;
     color: {c.TEXT_SECONDARY};
     border: 1px solid {c.BORDER};
     border-radius: {r.SMALL};
@@ -245,9 +245,9 @@ QPushButton#btn_fmt_italic {{
 }}
 QPushButton#btn_fmt_underline {{
     background: {c.BG_SURFACE3};
-    padding: 2px;
-    min-width: 0px;
-    min-height: 0px;
+    padding: 5px 10px;
+    min-width: 30px;
+    min-height: 30px;
     color: {c.TEXT_SECONDARY};
     border: 1px solid {c.BORDER};
     border-radius: {r.SMALL};
@@ -256,15 +256,15 @@ QPushButton#btn_fmt_underline {{
 }}
 QPushButton#btn_fmt_color {{
     background: {c.BG_SURFACE3};
-    padding: 2px;
-    min-width: 0px;
-    min-height: 0px;
+    padding: 5px 10px;
+    min-width: 30px;
+    min-height: 30px;
     color: {c.TEXT_SECONDARY};
     border: 1px solid {c.BORDER};
     border-radius: {r.SMALL};
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: -0.5px;
+    letter-spacing: 0.2px;
 }}
 QPushButton#btn_danger {{
     background: rgba(239, 68, 68, 0.12);

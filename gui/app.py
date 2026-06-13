@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QByteArray, pyqtSignal
 from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtSvgWidgets import QSvgWidget
 from PyQt6.QtGui import QPixmap, QPainter
 
 from gui.theme import Colors, Spacing, Typography
@@ -33,24 +32,6 @@ ICONS: dict[str, bytes] = {
     "analytics":  b'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="COLOR" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
 }
 
-LOGO_SVG = b"""<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#8B5CF6"/>
-      <stop offset="100%" stop-color="#06B6D4"/>
-    </linearGradient>
-  </defs>
-  <!-- Rounded square background -->
-  <rect x="2" y="2" width="28" height="28" rx="7" fill="url(#lg)" opacity="0.13"/>
-  <rect x="2" y="2" width="28" height="28" rx="7" fill="none" stroke="url(#lg)" stroke-width="1.6"/>
-  <!-- F letterform -->
-  <path d="M10 8.5 H22 M10 8.5 V23.5 M10 16.5 H19"
-        stroke="url(#lg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- Send indicator -->
-  <circle cx="22.5" cy="22.5" r="4.2" fill="url(#lg)"/>
-  <path d="M20.9 22.5 L22.1 23.7 L25.1 20.5"
-        stroke="white" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>"""
 
 
 def _svg_to_pixmap(svg_bytes: bytes, size: int = 20) -> QPixmap:
@@ -145,22 +126,16 @@ class MainWindow(QMainWindow):
         sidebar_layout.setSpacing(2)
 
         logo_row = QHBoxLayout()
-        logo_row.setContentsMargins(8, 0, 8, 12)
-        logo_widget = QSvgWidget()
-        logo_widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        logo_widget.setStyleSheet("background: transparent;")
-        logo_widget.load(QByteArray(LOGO_SVG))
-        logo_widget.setFixedSize(32, 32)
-        logo_row.addWidget(logo_widget)
-        logo_title = QLabel(APP_NAME)
-        logo_title.setStyleSheet(
-            f"font-size:14px;font-weight:bold;"
-            f"background: transparent;"
-            f"color: {Colors.TEXT_PRIMARY};"
-        )
-        logo_row.addWidget(logo_title)
-        logo_row.addStretch()
-        sidebar_layout.addLayout(logo_row)
+          logo_row.setContentsMargins(8, 0, 8, 12)
+          logo_title = QLabel(APP_NAME)
+          logo_title.setStyleSheet(
+              f"font-size:15px;font-weight:700;letter-spacing:0.8px;"
+              f"background: transparent;"
+              f"color: {Colors.TEXT_PRIMARY};"
+          )
+          logo_row.addWidget(logo_title)
+          logo_row.addStretch()
+          sidebar_layout.addLayout(logo_row)
 
         if getattr(self._license, "is_demo", False):
             badge = QLabel("DEMO")

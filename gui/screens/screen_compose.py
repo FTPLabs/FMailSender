@@ -323,7 +323,7 @@ class ComposeScreen(QWidget):
               "Персонализация: {{first_name}}, {{last_name}}, {{company}}, {{email}}"
           )
           self.rich_editor.textChanged.connect(self._on_content_changed)
-          self.rich_editor.setMinimumHeight(260)
+          self.rich_editor.setMinimumHeight(300)
 
           self.formatting_toolbar = FormattingToolbar(self.rich_editor)
           rich_layout.addWidget(self.formatting_toolbar)
@@ -476,33 +476,147 @@ a {{ color: #6366F1; }}
         worker.start()
 
     def _on_spam_result(self, result):
-        self.spam_check_btn.setEnabled(True)
-        self.spam_check_btn.setText("Проверить спам-балл")
-        score = getattr(result, 'score', 0)
-        verdict = getattr(result, 'verdict', '—')
-        issues = getattr(result, 'issues', [])
-        warnings = getattr(result, 'warnings', [])
-        passed = getattr(result, 'passed', [])
-        msg = f"<b>Оценка: {score}/100</b> — {verdict}<br><br>"
-        if issues:
-            msg += "<b>🚫 Проблемы:</b><br>" + "<br>".join(f"• {i}" for i in issues) + "<br><br>"
-        if warnings:
-            msg += "<b>⚠️ Предупреждения:</b><br>" + "<br>".join(f"• {w}" for w in warnings) + "<br><br>"
-        if passed:
-            msg += "<b>✅ Пройдено:</b><br>" + "<br>".join(f"• {p}" for p in passed[:5])
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Проверка спам-балла")
-        dlg.setMinimumWidth(480)
-        lay = QVBoxLayout(dlg)
-        lbl = QLabel(msg)
-        lbl.setWordWrap(True)
-        lbl.setTextFormat(Qt.TextFormat.RichText)
-        lay.addWidget(lbl)
-        btn = QPushButton("ОК")
-        btn.clicked.connect(dlg.accept)
-        lay.addWidget(btn)
-        dlg.exec()
+          self.spam_check_btn.setEnabled(True)
+          self.spam_check_btn.setText("Проверить спам-балл")
+          self._show_spam_dialog_ai(result)
 
+      def _show_spam_dialog_ai(self, result):
+          score = getattr(result, 'score', 0)
+          verdict = getattr(result, 'verdict', '\u2014')
+          issues = getattr(result, 'issues', [])
+          warnings = getattr(result, 'warnings', [])
+          passed = getattr(result, 'passed', [])
+
+          if score < 20:
+              grade_color = "#22C55E"
+          elif score < 50:
+              grade_color = "#F59E0B"
+          else:
+              grade_color = "#EF4444"
+
+          dlg = QDialog(self)
+          dlg.setWindowTitle("\u0410\u043d\u0430\u043b\u0438\u0437 \u0441\u043f\u0430\u043c-\u0431\u0430\u043b\u043b\u0430")
+          dlg.setMinimumWidth(520)
+          dlg.setMinimumHeight(460)
+          lay = QVBoxLayout(dlg)
+          lay.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+          lay.setSpacing(Spacing.MD)
+
+          score_lbl = QLabel(f"<span style='font-size:18px;font-weight:bold;color:{grade_color}'>\u0421\u043f\u0430\u043c-\u0431\u0430\u043b\u043b: {score}/100</span> &nbsp; {verdict}")
+          score_lbl.setTextFormat(Qt.TextFormat.RichText)
+          lay.addWidget(score_lbl)
+
+          bar = QProgressBar()
+          bar.setRange(0, 100)
+          bar.setValue(score)
+          bar.setFixedHeight(10)
+          bar.setStyleSheet(f"QProgressBar::chunk{{background:{grade_color};border-radius:4px;}}QProgressBar{{border-radius:4px;background:rgba(255,255,255,0.08);}}")
+          lay.addWidget(bar)
+
+          scroll = QScrollArea()
+          scroll.setWidgetResizable(True)
+          scroll.setFixedHeight(220)
+          inner = QWidget()
+          inner_lay = QVBoxLayout(inner)
+          inner_lay.setSpacing(4)
+          if issues:
+              inner_lay.addWidget(QLabel("<b>\U0001f6ab \u041f\u0440\u043e\u0431\u043b\u0435\u043c\u044b:</b>"))
+              for i in issues:
+                  l = QLabel(f"  \u2022 {i}")
+                  l.setWordWrap(True)
+                  l.setStyleSheet(f"color: {Colors.ERROR};")
+                  inner_lay.addWidget(l)
+          if warnings:
+              inner_lay.addWidget(QLabel("<b>\u26a0\ufe0f \u041f\u0440\u0435\u0434\u0443\u043f\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u044f:</b>"))
+              for w in warnings:
+                  l = QLabel(f"  \u2022 {w}")
+                  l.setWordWrap(True)
+                  l.setStyleSheet(f"color: {Colors.WARNING};")
+                  inner_lay.addWidget(l)
+          if passed:
+              inner_lay.addWidget(QLabel("<b>\u2705 \u041f\u0440\u043e\u0439\u0434\u0435\u043d\u043e:</b>"))
+              for p in passed[:6]:
+                  l = QLabel(f"  \u2022 {p}")
+                  l.setWordWrap(True)
+                  inner_lay.addWidget(l)
+          inner_lay.addStretch()
+          scroll.setWidget(inner)
+          lay.addWidget(scroll)
+
+          btn_row = QHBoxLayout()
+          ai_btn = QPushButton("\u2728 \u0418\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441 \u0418\u0418")
+          ai_btn.setObjectName("btn_primary")
+          close_btn = QPushButton("\u0417\u0430\u043a\u0440\u044b\u0442\u044c")
+          close_btn.setObjectName("btn_secondary")
+          close_btn.clicked.connect(dlg.accept)
+          btn_row.addWidget(ai_btn)
+          btn_row.addWidget(close_btn)
+          lay.addLayout(btn_row)
+
+          def _run_ai_fix():
+              from core.ai_fixer import AiSpamFixer
+              from PyQt6.QtWidgets import QInputDialog
+              fixer = AiSpamFixer()
+              if not fixer.has_key:
+                  key, ok = QInputDialog.getText(
+                      dlg, "OpenAI API Key",
+                      "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 OpenAI API \u043a\u043b\u044e\u0447 (sk-...):",
+                      QLineEdit.EchoMode.Password,
+                  )
+                  if not ok or not key.strip():
+                      return
+                  import os
+                  os.environ["OPENAI_API_KEY"] = key.strip()
+                  fixer = AiSpamFixer(api_key=key.strip())
+
+              ai_btn.setEnabled(False)
+              ai_btn.setText("\u2728 \u0418\u0441\u043f\u0440\u0430\u0432\u043b\u044f\u044e...")
+
+              class _AiFixWorker(QThread):
+                  done = pyqtSignal(object)
+                  err = pyqtSignal(str)
+                  def __init__(self, fixer, subj, html, iss, warns):
+                      super().__init__()
+                      self._f = fixer; self._s = subj; self._h = html
+                      self._i = iss; self._w = warns
+                  def run(self):
+                      try:
+                          self.done.emit(self._f.fix_email(self._s, self._h, self._i, self._w))
+                      except Exception as e:
+                          self.err.emit(str(e))
+
+              worker = _AiFixWorker(
+                  fixer,
+                  self.subject_input.text(),
+                  self.html_editor.toPlainText() or self.rich_editor.toHtml(),
+                  issues, warnings,
+              )
+              def on_done(fix_result):
+                  ai_btn.setEnabled(True)
+                  ai_btn.setText("\u2728 \u0418\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441 \u0418\u0418")
+                  reply = QMessageBox.question(
+                      dlg,
+                      "\u0418\u0418-\u0438\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0433\u043e\u0442\u043e\u0432\u043e",
+                      f"\u0418\u0418 \u0438\u0441\u043f\u0440\u0430\u0432\u0438\u043b \u043f\u0438\u0441\u044c\u043c\u043e.\n\n{fix_result.explanation}\n\n\u041f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c?",
+                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                  )
+                  if reply == QMessageBox.StandardButton.Yes:
+                      self.subject_input.setText(fix_result.subject)
+                      self.html_editor.setPlainText(fix_result.body_html)
+                      dlg.accept()
+              def on_err(msg):
+                  ai_btn.setEnabled(True)
+                  ai_btn.setText("\u2728 \u0418\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441 \u0418\u0418")
+                  QMessageBox.warning(dlg, "\u041e\u0448\u0438\u0431\u043a\u0430 \u0418\u0418", msg)
+              worker.done.connect(on_done)
+              worker.err.connect(on_err)
+              worker.done.connect(worker.deleteLater)
+              worker.err.connect(worker.deleteLater)
+              self._ai_fix_worker = worker
+              worker.start()
+
+          ai_btn.clicked.connect(_run_ai_fix)
+          dlg.exec()
     def _on_spam_error(self, error: str):
         self.spam_check_btn.setEnabled(True)
         self.spam_check_btn.setText("Проверить спам-балл")

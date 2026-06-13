@@ -159,6 +159,9 @@ def save_accounts(accounts: list[SmtpAccount]) -> None:
             "daily_limit": a.daily_limit,
             "hourly_limit": a.hourly_limit,
             "is_active": a.is_active,
+            "imap_host": getattr(a, "imap_host", ""),
+            "imap_port": getattr(a, "imap_port", 993),
+            "imap_ssl": getattr(a, "imap_ssl", True),
         }
         if hasattr(a, "proxy_list") and a.proxy_list:
             entry["proxy_list"] = a.proxy_list
@@ -194,6 +197,9 @@ def load_accounts() -> list[SmtpAccount]:
                 hourly_limit=d.get("hourly_limit", 50),
                 is_active=d.get("is_active", True),
             )
+            acc.imap_host = d.get("imap_host", "")
+            acc.imap_port = d.get("imap_port", 993)
+            acc.imap_ssl = d.get("imap_ssl", True)
             if "proxy_list" in d:
                 acc.proxy_list = d["proxy_list"]
                 acc.proxy_rotation_random = d.get("proxy_rotation_random", False)
@@ -308,7 +314,27 @@ class AccountDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
-    def _autofill_smtp(self, email: str):
+    def _import_proxies(self):
+          from PyQt6.QtWidgets import QFileDialog
+          path, _ = QFileDialog.getOpenFileName(
+              self, "Импорт прокси из файла", "",
+              "Текстовые файлы (*.txt *.csv *.dat);;Все файлы (*)"
+          )
+          if not path:
+              return
+          try:
+              lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+              valid = [l.strip() for l in lines if l.strip() and not l.strip().startswith("#")]
+              existing = self.proxy_edit.toPlainText().strip()
+              combined = (existing + "
+" + "
+".join(valid)).strip()
+              self.proxy_edit.setPlainText(combined)
+              QMessageBox.information(self, "Импорт прокси", f"Загружено {len(valid)} прокси из файла.")
+          except Exception as e:
+              QMessageBox.warning(self, "Ошибка импорта", str(e))
+
+      def _autofill_smtp(self, email: str):
         if "@" not in email:
             return
         domain = email.split("@")[-1].strip().lower()
@@ -332,6 +358,9 @@ class AccountDialog(QDialog):
         self.active_check.setChecked(acc.is_active)
         self.proxy_edit.setPlainText("\n".join(getattr(acc, "proxy_list", []) or ([getattr(acc, "proxy", "")] if getattr(acc, "proxy", "") else [])))
         self.proxy_rotation_check.setChecked(getattr(acc, "proxy_rotation_random", False))
+          self.imap_host_edit.setText(getattr(acc, "imap_host", ""))
+          self.imap_port_spin.setValue(getattr(acc, "imap_port", 993))
+          self.imap_ssl_check.setChecked(getattr(acc, "imap_ssl", True))
 
     def _validate_and_accept(self):
         email = self.email_edit.text().strip()
@@ -367,6 +396,9 @@ class AccountDialog(QDialog):
             # Для обратной совместимости первый прокси как acc.proxy
             acc.proxy = parsed[0]
         acc.proxy_rotation_random = self.proxy_rotation_check.isChecked()
+        acc.imap_host = self.imap_host_edit.text().strip()
+        acc.imap_port = self.imap_port_spin.value()
+        acc.imap_ssl = self.imap_ssl_check.isChecked()
         return acc
 
 
