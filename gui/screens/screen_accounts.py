@@ -194,13 +194,13 @@ def load_accounts() -> list[SmtpAccount]:
                 hourly_limit=d.get("hourly_limit", 50),
                 is_active=d.get("is_active", True),
             )
-        if "proxy_list" in d:
-            acc.proxy_list = d["proxy_list"]
-            acc.proxy_rotation_random = d.get("proxy_rotation_random", False)
-            if d["proxy_list"]:
-                acc.proxy = d["proxy_list"][0]
-        elif "proxy" in d:
-            acc.proxy = d["proxy"]
+            if "proxy_list" in d:
+                acc.proxy_list = d["proxy_list"]
+                acc.proxy_rotation_random = d.get("proxy_rotation_random", False)
+                if d["proxy_list"]:
+                    acc.proxy = d["proxy_list"][0]
+            elif "proxy" in d:
+                acc.proxy = d["proxy"]
             result.append(acc)
         return result
     except Exception:
