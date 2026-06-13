@@ -94,12 +94,6 @@ class SmtpAccount:
                 self._hour_reset = now
             return self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit
 
-    def increment_sent(self) -> None:
-        """Thread-safe counter increment. Use try_increment for atomic check+increment."""
-        with self._lock:
-            self.sent_today += 1
-            self.sent_this_hour += 1
-
     def try_increment(self) -> bool:
         """Atomically check limits AND increment. Eliminates TOCTOU race condition."""
         if not self.is_active:

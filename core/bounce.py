@@ -240,6 +240,7 @@ class BounceMonitor:
 
     def check_bounces(self) -> List[BounceRecord]:
         new_bounces = []
+        conn = None
         try:
             if self.use_ssl:
                 conn = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
@@ -275,7 +276,6 @@ class BounceMonitor:
                 except Exception as e:
                     logger.warning(f"Ошибка обработки сообщения {msg_id}: {e}")
 
-            conn.logout()
             if new_bounces:
                 self._save_bounces()
 
@@ -283,6 +283,12 @@ class BounceMonitor:
             logger.error(f"IMAP ошибка: {e}")
         except Exception as e:
             logger.error(f"Ошибка мониторинга bounces: {e}")
+        finally:
+            if conn is not None:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
 
         return new_bounces
 

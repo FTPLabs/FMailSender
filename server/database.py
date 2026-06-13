@@ -252,17 +252,13 @@ async def delete_all_licenses() -> int:
     Deletes ALL licenses and payments inside a single transaction.
     WARNING: irreversible — admin confirmation is required before calling.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(DB_PATH, isolation_level=None) as db:
         await db.execute("BEGIN")
-        try:
-            cur = await db.execute("SELECT COUNT(*) FROM licenses")
-            count = (await cur.fetchone())[0]
-            await db.execute("DELETE FROM licenses")
-            await db.execute("DELETE FROM payments")
-            await db.execute("COMMIT")
-        except Exception:
-            await db.execute("ROLLBACK")
-            raise
+        cur = await db.execute("SELECT COUNT(*) FROM licenses")
+        count = (await cur.fetchone())[0]
+        await db.execute("DELETE FROM licenses")
+        await db.execute("DELETE FROM payments")
+        await db.execute("COMMIT")
     logger.warning("All licenses and payments deleted. Count: %d", count)
     return count
 

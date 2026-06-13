@@ -459,7 +459,7 @@ a {{ color: #6366F1; }}
             return
         self._ab_variants.append({"subject": "", "body": ""})
         letter = chr(ord('A') + len(self._ab_variants) - 1)
-        self.ab_tabs.addTab(QWidget(), f"Вариант {letter}")
+        # ab_tabs removed — A/B variant UI not yet implemented
 
     def _check_spam(self):
         """Run spam check in background thread to avoid UI freeze."""
@@ -581,13 +581,13 @@ a {{ color: #6366F1; }}
                 layout.addWidget(lbl)
 
         # Рекомендации
-        if result.suggestions:
+        if result.warnings:
             sugg_label = QLabel("Рекомендации:")
             sugg_label.setObjectName("label_subtitle")
             layout.addWidget(sugg_label)
-            for s in result.suggestions[:3]:
+            for s in result.warnings[:3]:
                 lbl = QLabel(f"• {s}")
-                lbl.setStyleSheet(f"color: {Colors.SUCCESS};")
+                lbl.setStyleSheet(f"color: {Colors.WARNING};")
                 lbl.setWordWrap(True)
                 layout.addWidget(lbl)
 

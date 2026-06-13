@@ -50,6 +50,11 @@ _HWID_FILE   = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "hwid.dat"
 
 KEY_PREFIX = "FMSND"
 _JWT_SECRET_FALLBACK = os.environ.get("JWT_SECRET", "")
+if not _JWT_SECRET_FALLBACK:
+    logger.warning(
+        "JWT_SECRET env var not set — offline JWT verification disabled. "
+        "Set JWT_SECRET to the same value as the license server."
+    )
 
 # ── Внутренний кэш HWID ───────────────────────────────────────────────────────
 _hwid_cache: Optional[str] = None

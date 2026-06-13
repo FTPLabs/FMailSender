@@ -148,10 +148,10 @@ class RecipientsScreen(QWidget):
         header_row.addWidget(title)
         header_row.addStretch()
 
-        import_btn = QPushButton("Импорт CSV/XLSX/TXT")
-        import_btn.setObjectName("btn_primary")
-        import_btn.clicked.connect(self._import_file)
-        header_row.addWidget(import_btn)
+        self._import_btn = QPushButton("Импорт CSV/XLSX/TXT")
+        self._import_btn.setObjectName("btn_primary")
+        self._import_btn.clicked.connect(self._import_file)
+        header_row.addWidget(self._import_btn)
 
         add_manual_btn = QPushButton("+ Добавить вручную")
         add_manual_btn.clicked.connect(self._add_manual)
