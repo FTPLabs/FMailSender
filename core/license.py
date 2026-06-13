@@ -73,10 +73,10 @@ def _check_debugger() -> bool:
 
 
 def security_check() -> None:
-    """Быстрая проверка без блокировки UI. Прогревает HWID-кэш в фоне."""
+    """Быстрая проверка без блокировки UI."""
     if _check_debugger():
         logger.warning("Debugger detected — running in debug mode")
-    threading.Thread(target=generate_hwid, daemon=True).start()
+    # HWID прогревается из main() — дублирующий поток убран
 
 
 # ── Fernet-ключ ───────────────────────────────────────────────────────────────
@@ -245,12 +245,21 @@ def generate_hwid() -> str:
         # Нет файла — вычисляем из железа и сохраняем
         mac = _get_mac_address()
         with ThreadPoolExecutor(max_workers=3) as ex:
-            f_cpu   = ex.submit(_run_safe, _get_cpu_id,    2.0)
-            f_disk  = ex.submit(_run_safe, _get_disk_serial, 2.0)
-            f_board = ex.submit(_run_safe, _get_board_id,  2.0)
-            cpu   = f_cpu.result()
-            disk  = f_disk.result()
-            board = f_board.result()
+            f_cpu   = ex.submit(_get_cpu_id)
+            f_disk  = ex.submit(_get_disk_serial)
+            f_board = ex.submit(_get_board_id)
+            try:
+                cpu = f_cpu.result(timeout=2.0) or ""
+            except Exception:
+                cpu = ""
+            try:
+                disk = f_disk.result(timeout=2.0) or ""
+            except Exception:
+                disk = ""
+            try:
+                board = f_board.result(timeout=2.0) or ""
+            except Exception:
+                board = ""
         raw = f"{cpu}|{mac}|{disk}|{board}|{HWID_SALT}"
         _hwid_cache = hashlib.sha256(raw.encode()).hexdigest()[:32].upper()
         _save_hwid_to_file(_hwid_cache)
