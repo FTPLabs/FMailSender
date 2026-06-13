@@ -95,7 +95,7 @@ class AnalyticsScreen(QWidget):
         self.campaign_combo.currentIndexChanged.connect(self._load_campaign)
         header_row.addWidget(self.campaign_combo)
 
-        refresh_btn = QPushButton("↻ Обновить")
+        refresh_btn = QPushButton("Обновить")
         refresh_btn.clicked.connect(self._refresh)
         header_row.addWidget(refresh_btn)
 
