@@ -506,4 +506,29 @@ QPushButton#btn_activate:hover {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 {c.ACCENT}, stop:1 {c.CYAN});
 }}
-"""
+
+  /* ═══ SpinBox arrows ════════════════════════════════════════════════════ */
+  QSpinBox::up-button, QSpinBox::down-button {{
+      background: {c.BG_SURFACE4};
+      border: none;
+      width: 16px;
+      subcontrol-origin: border;
+  }}
+  QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+      background: {c.BG_GLASS2};
+  }}
+  QSpinBox::up-arrow {{
+      image: none;
+      width: 0; height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-bottom: 5px solid {c.TEXT_SECONDARY};
+  }}
+  QSpinBox::down-arrow {{
+      image: none;
+      width: 0; height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 5px solid {c.TEXT_SECONDARY};
+  }}
+  """
