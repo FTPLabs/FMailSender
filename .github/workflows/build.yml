@@ -52,7 +52,19 @@ jobs:
           else:
               print("fmail_logo.png not found, skipping")
 
-      - name: Build EXE
+      - name: Syntax check — all Python files
+          shell: python
+          run: |
+            import compileall, sys
+            # Проверяем весь проект, исключая venv/dist
+            ok = compileall.compile_dir(".", quiet=2, force=True,
+                                        rx=__import__("re").compile(r"(venv|dist|build|\.git)"))
+            if not ok:
+                print("\n❌ Syntax errors found — aborting build")
+                sys.exit(1)
+            print("✅ All Python files passed syntax check")
+
+        - name: Build EXE
         env:
           HWID_SALT: ${{ secrets.HWID_SALT }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
