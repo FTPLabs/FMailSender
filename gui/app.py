@@ -126,22 +126,22 @@ class MainWindow(QMainWindow):
         sidebar_layout.setSpacing(2)
 
         logo_row = QHBoxLayout()
-          logo_row.setContentsMargins(8, 0, 8, 12)
-          logo_title = QLabel(APP_NAME)
-          logo_title.setStyleSheet(
-              f"font-size:15px;font-weight:700;letter-spacing:0.8px;"
-              f"background: transparent;"
-              f"color: {Colors.TEXT_PRIMARY};"
-          )
-          logo_row.addWidget(logo_title)
-          logo_row.addStretch()
-          sidebar_layout.addLayout(logo_row)
+        logo_row.setContentsMargins(8, 0, 8, 12)
+        logo_title = QLabel(APP_NAME)
+        logo_title.setStyleSheet(
+            f"font-size:15px;font-weight:700;letter-spacing:0.8px;"
+            f"background: transparent;"
+            f"color: {Colors.TEXT_PRIMARY};"
+        )
+        logo_row.addWidget(logo_title)
+        logo_row.addStretch()
+        sidebar_layout.addLayout(logo_row)
 
         if getattr(self._license, "is_demo", False):
-            badge = QLabel("DEMO")
-            badge.setObjectName("demo_badge")
-            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            sidebar_layout.addWidget(badge)
+          badge = QLabel("DEMO")
+          badge.setObjectName("demo_badge")
+          badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+          sidebar_layout.addWidget(badge)
 
         sidebar_layout.addSpacing(8)
 

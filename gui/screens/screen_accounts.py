@@ -326,24 +326,22 @@ class AccountDialog(QDialog):
               lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
               valid = [l.strip() for l in lines if l.strip() and not l.strip().startswith("#")]
               existing = self.proxy_edit.toPlainText().strip()
-              combined = (existing + "
-" + "
-".join(valid)).strip()
+              combined = (existing + "\n" + "\n".join(valid)).strip()
               self.proxy_edit.setPlainText(combined)
               QMessageBox.information(self, "Импорт прокси", f"Загружено {len(valid)} прокси из файла.")
           except Exception as e:
               QMessageBox.warning(self, "Ошибка импорта", str(e))
 
-      def _autofill_smtp(self, email: str):
-        if "@" not in email:
-            return
-        domain = email.split("@")[-1].strip().lower()
-        cfg = get_smtp_config_for_domain(domain)
-        if cfg:
-            self.host_edit.setText(cfg["host"])
-            self.port_spin.setValue(cfg["port"])
-            self.ssl_check.setChecked(cfg.get("use_ssl", True))
-            self.tls_check.setChecked(cfg.get("use_tls", False))
+    def _autofill_smtp(self, email: str):
+      if "@" not in email:
+          return
+      domain = email.split("@")[-1].strip().lower()
+      cfg = get_smtp_config_for_domain(domain)
+      if cfg:
+          self.host_edit.setText(cfg["host"])
+          self.port_spin.setValue(cfg["port"])
+          self.ssl_check.setChecked(cfg.get("use_ssl", True))
+          self.tls_check.setChecked(cfg.get("use_tls", False))
 
     def _fill(self, acc: SmtpAccount):
         self.email_edit.setText(acc.email)
