@@ -69,6 +69,23 @@ jobs:
           if ($exe.Length -lt 1MB) { exit 1 }
         shell: pwsh
 
+      - name: Create ZIP and compute checksums
+        id: checksums
+        shell: pwsh
+        run: |
+          $version = "${{ steps.get_version.outputs.version }}"
+          $exePath  = "dist\FMailSender.exe"
+          $zipName  = "FMailSender_v$version.zip"
+          $zipPath  = "dist\$zipName"
+          Compress-Archive -Path $exePath -DestinationPath $zipPath
+          $sha256 = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLower()
+          $vtUrl  = "https://www.virustotal.com/gui/file/$sha256"
+          "sha256=$sha256"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "vt_url=$vtUrl"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "ZIP: $zipPath"
+          Write-Host "SHA256: $sha256"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -76,19 +93,26 @@ jobs:
           name: "FMail Sender ${{ steps.get_version.outputs.version }}"
           draft: false
           prerelease: false
-          files: dist/FMailSender.exe
+          files: |
+            dist/FMailSender.exe
+            dist/${{ steps.checksums.outputs.zip_name }}
           body: |
             ## FMail Sender ${{ steps.get_version.outputs.version }}
 
             ### Установка
-            1. Скачайте `FMailSender.exe`
-            2. Запустите файл
+            1. Скачайте архив `${{ steps.checksums.outputs.zip_name }}`
+            2. Распакуйте и запустите `FMailSender.exe`
             3. Введите лицензионный ключ (получить в боте @FMailSenderBot)
 
             ### Изменения
             ${{ github.event.head_commit.message }}
 
             ---
-            Новые версии публикуются здесь для свободного скачивания.
+            ### Контроль целостности
+            | Файл | SHA-256 |
+            |------|---------|
+            | FMailSender.exe | `${{ steps.checksums.outputs.sha256 }}` |
+
+            U0001f6e1️ [Проверить на VirusTotal](${{ steps.checksums.outputs.vt_url }})
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
