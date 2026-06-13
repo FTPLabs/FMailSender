@@ -34,17 +34,16 @@ ICONS: dict[str, bytes] = {
 }
 
 LOGO_SVG = b"""<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
-<defs>
-  <linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="100%">
-    <stop offset="0%" style="stop-color:#7C3AED"/>
-    <stop offset="100%" style="stop-color:#06B6D4"/>
-  </linearGradient>
-</defs>
-<rect width="28" height="28" rx="7" fill="url(#lg)" opacity="0.15"/>
-<rect x="1" y="1" width="26" height="26" rx="6" fill="none" stroke="url(#lg)" stroke-width="1.5"/>
-<path d="M5 10 L14 16 L23 10" stroke="#8B5CF6" stroke-width="2" fill="none" stroke-linecap="round"/>
-<rect x="5" y="8" width="18" height="12" rx="2" fill="none" stroke="#06B6D4" stroke-width="1.5"/>
-</svg>"""
+  <defs>
+    <linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="8" width="22" height="14" rx="3" fill="none" stroke="url(#lg)" stroke-width="1.8"/>
+  <path d="M3 11 L14 18 L25 11" stroke="url(#lg)" stroke-width="1.8" fill="none"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>"""
 
 
 def _svg_to_pixmap(svg_bytes: bytes, size: int = 20) -> QPixmap:
@@ -140,26 +139,12 @@ class MainWindow(QMainWindow):
 
         logo_row = QHBoxLayout()
         logo_row.setContentsMargins(8, 0, 8, 12)
-        from PyQt6.QtGui import QPixmap
-        from pathlib import Path as _Path
-        import sys as _sys
-        _base = _Path(getattr(_sys, "_MEIPASS", _Path(__file__).parent.parent))
-        _logo_path = _base / "assets" / "images" / "fmail_logo.png"
-        logo_lbl = QLabel()
-        logo_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        logo_lbl.setStyleSheet("background: transparent; border: none;")
-        logo_lbl.setFixedSize(28, 28)
-        if _logo_path.exists():
-            _px = QPixmap(str(_logo_path))
-            logo_lbl.setPixmap(_px.scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        else:
-            _fallback = QSvgWidget()
-            _fallback.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-            _fallback.setStyleSheet("background: transparent;")
-            _fallback.load(QByteArray(LOGO_SVG))
-            _fallback.setFixedSize(28, 28)
-            logo_lbl = _fallback
-        logo_row.addWidget(logo_lbl)
+        logo_widget = QSvgWidget()
+        logo_widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        logo_widget.setStyleSheet("background: transparent;")
+        logo_widget.load(QByteArray(LOGO_SVG))
+        logo_widget.setFixedSize(28, 28)
+        logo_row.addWidget(logo_widget)
         logo_title = QLabel(APP_NAME)
         logo_title.setStyleSheet(
             f"font-size:14px;font-weight:bold;"
@@ -197,6 +182,17 @@ class MainWindow(QMainWindow):
 
         sidebar_layout.addStretch()
 
+        expiry_lbl = QLabel(
+            f"до {self._license.expires_at.strftime('%d.%m.%Y')}"
+        )
+        expiry_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        expiry_lbl.setStyleSheet(
+            "color: rgba(139,92,246,0.55); font-size: 11px;"
+            " font-weight: 400; letter-spacing: 0.5px;"
+            " background: transparent; padding: 2px 8px;"
+        )
+        sidebar_layout.addWidget(expiry_lbl)
+
         plan_lbl = QLabel(self._license.plan)
         plan_lbl.setObjectName("plan_badge")
         plan_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -222,11 +218,6 @@ class MainWindow(QMainWindow):
         )
         header_layout.addWidget(self.page_title)
         header_layout.addStretch()
-        expiry_lbl = QLabel(
-            f"Лицензия до: {self._license.expires_at.strftime('%d.%m.%Y')}"
-        )
-        expiry_lbl.setObjectName("label_muted")
-        header_layout.addWidget(expiry_lbl)
         main_layout.addWidget(header)
 
         self._stack = QStackedWidget()
