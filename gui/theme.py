@@ -202,6 +202,70 @@ QPushButton#btn_icon:hover {{
     color: {c.TEXT_PRIMARY};
     border: 1px solid {c.BORDER_HOVER};
 }}
+QPushButton#btn_fmt {{
+    background: {c.BG_SURFACE3};
+    padding: 2px;
+    min-width: 0px;
+    min-height: 0px;
+    color: {c.TEXT_SECONDARY};
+    border: 1px solid {c.BORDER};
+    border-radius: {r.SMALL};
+    font-size: 13px;
+}}
+QPushButton#btn_fmt:hover,
+QPushButton#btn_fmt_bold:hover,
+QPushButton#btn_fmt_italic:hover,
+QPushButton#btn_fmt_underline:hover,
+QPushButton#btn_fmt_color:hover {{
+    background: {c.BG_SURFACE4};
+    color: {c.TEXT_PRIMARY};
+    border: 1px solid {c.BORDER_HOVER};
+}}
+QPushButton#btn_fmt_bold {{
+    background: {c.BG_SURFACE3};
+    padding: 2px;
+    min-width: 0px;
+    min-height: 0px;
+    color: {c.TEXT_SECONDARY};
+    border: 1px solid {c.BORDER};
+    border-radius: {r.SMALL};
+    font-weight: 700;
+    font-size: 14px;
+}}
+QPushButton#btn_fmt_italic {{
+    background: {c.BG_SURFACE3};
+    padding: 2px;
+    min-width: 0px;
+    min-height: 0px;
+    color: {c.TEXT_SECONDARY};
+    border: 1px solid {c.BORDER};
+    border-radius: {r.SMALL};
+    font-style: italic;
+    font-size: 14px;
+}}
+QPushButton#btn_fmt_underline {{
+    background: {c.BG_SURFACE3};
+    padding: 2px;
+    min-width: 0px;
+    min-height: 0px;
+    color: {c.TEXT_SECONDARY};
+    border: 1px solid {c.BORDER};
+    border-radius: {r.SMALL};
+    text-decoration: underline;
+    font-size: 14px;
+}}
+QPushButton#btn_fmt_color {{
+    background: {c.BG_SURFACE3};
+    padding: 2px;
+    min-width: 0px;
+    min-height: 0px;
+    color: {c.TEXT_SECONDARY};
+    border: 1px solid {c.BORDER};
+    border-radius: {r.SMALL};
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+}}
 QPushButton#btn_danger {{
     background: rgba(239, 68, 68, 0.12);
     color: {c.ERROR};

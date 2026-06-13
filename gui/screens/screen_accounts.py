@@ -24,6 +24,85 @@ from core.license import get_storage_key
 from core.sender import SmtpAccount, test_smtp_connection, get_smtp_config_for_domain
 from gui.theme import Colors, Spacing
 
+
+import random
+
+
+class ProxyManager:
+    """Менеджер прокси с ротацией: round_robin или random.
+
+    Поддерживаемые форматы:
+      socks5://user:pass@host:port
+      socks4://host:port
+      http://host:port
+      https://user:pass@host:port
+      host:port               -> socks5://host:port
+      host:port:user:pass     -> socks5://user:pass@host:port
+      user:pass:host:port     -> socks5://user:pass@host:port
+    """
+
+    def __init__(self, raw_list: list[str] | None = None, mode: str = "round_robin"):
+        self._mode = mode  # "round_robin" | "random"
+        self._index = 0
+        import threading
+        self._lock = threading.Lock()
+        self._proxies: list[str] = []
+        for raw in (raw_list or []):
+            normalized = self.parse(raw)
+            if normalized:
+                self._proxies.append(normalized)
+
+    @staticmethod
+    def parse(raw: str) -> str | None:
+        """Нормализует строку прокси в URL-формат. None если невалидно."""
+        raw = raw.strip()
+        if not raw or raw.startswith("#"):
+            return None
+        # Уже URL-формат
+        if "://" in raw:
+            return raw
+        parts = raw.split(":")
+        if len(parts) == 2:
+            # host:port
+            try:
+                int(parts[1])
+                return f"socks5://{parts[0]}:{parts[1]}"
+            except ValueError:
+                return None
+        if len(parts) == 4:
+            # Пробуем host:port:user:pass
+            try:
+                int(parts[1])
+                return f"socks5://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
+            except ValueError:
+                pass
+            # Пробуем user:pass:host:port
+            try:
+                int(parts[3])
+                return f"socks5://{parts[0]}:{parts[1]}@{parts[2]}:{parts[3]}"
+            except ValueError:
+                pass
+        return None
+
+    def next_proxy(self) -> str | None:
+        """Возвращает следующий прокси или None если список пуст."""
+        with self._lock:
+            if not self._proxies:
+                return None
+            if self._mode == "random":
+                return random.choice(self._proxies)
+            proxy = self._proxies[self._index % len(self._proxies)]
+            self._index += 1
+            return proxy
+
+    @property
+    def count(self) -> int:
+        return len(self._proxies)
+
+    def to_list(self) -> list[str]:
+        return list(self._proxies)
+
+
 try:
     from cryptography.fernet import Fernet
     _HAS_FERNET = True
@@ -79,10 +158,12 @@ def save_accounts(accounts: list[SmtpAccount]) -> None:
             "display_name": a.display_name,
             "daily_limit": a.daily_limit,
             "hourly_limit": a.hourly_limit,
-            "is_active": a.is_active,
+        if hasattr(a, "proxy") and a.proxy and not hasattr(a, "proxy_list"):
         }
-        if hasattr(a, "proxy") and a.proxy:
-            entry["proxy"] = a.proxy
+        if hasattr(a, "proxy_list") and a.proxy_list:
+            entry["proxy_list"] = a.proxy_list
+            entry["proxy"] = a.proxy_list[0]  # обратная совместимость
+            entry["proxy_rotation_random"] = getattr(a, "proxy_rotation_random", False)
         data.append(entry)
     ACCOUNTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -111,8 +192,13 @@ def load_accounts() -> list[SmtpAccount]:
                 hourly_limit=d.get("hourly_limit", 50),
                 is_active=d.get("is_active", True),
             )
-            if "proxy" in d:
-                acc.proxy = d["proxy"]
+        if "proxy_list" in d:
+            acc.proxy_list = d["proxy_list"]
+            acc.proxy_rotation_random = d.get("proxy_rotation_random", False)
+            if d["proxy_list"]:
+                acc.proxy = d["proxy_list"][0]
+        elif "proxy" in d:
+            acc.proxy = d["proxy"]
             result.append(acc)
         return result
     except Exception:
@@ -194,10 +280,21 @@ class AccountDialog(QDialog):
         self.hourly_spin.setSuffix(" писем/час")
         layout.addRow("Часовой лимит:", self.hourly_spin)
 
-        self.proxy_edit = QLineEdit()
-        self.proxy_edit.setPlaceholderText("socks5://user:pass@host:port (необязательно)")
+        # Прокси: поддержка нескольких в формате одного на строку с ротацией
+        self.proxy_edit = QTextEdit()
+        self.proxy_edit.setPlaceholderText(
+            "По одному прокси на строку. Форматы:\n"
+            "  socks5://user:pass@host:port\n"
+            "  http://host:port\n"
+            "  host:port\n"
+            "  host:port:user:pass"
+        )
+        self.proxy_edit.setFixedHeight(80)
+        self.proxy_edit.setObjectName("proxy_list_edit")
         layout.addRow("Прокси:", self.proxy_edit)
 
+        self.proxy_rotation_check = QCheckBox("Случайная ротация (иначе round-robin)")
+        layout.addRow("", self.proxy_rotation_check)
         self.active_check = QCheckBox("Активен")
         self.active_check.setChecked(True)
         layout.addRow("", self.active_check)
@@ -231,7 +328,8 @@ class AccountDialog(QDialog):
         self.daily_spin.setValue(acc.daily_limit)
         self.hourly_spin.setValue(acc.hourly_limit)
         self.active_check.setChecked(acc.is_active)
-        self.proxy_edit.setText(getattr(acc, "proxy", ""))
+        self.proxy_edit.setPlainText("\n".join(getattr(acc, "proxy_list", []) or ([getattr(acc, "proxy", "")] if getattr(acc, "proxy", "") else [])))
+        self.proxy_rotation_check.setChecked(getattr(acc, "proxy_rotation_random", False))
 
     def _validate_and_accept(self):
         email = self.email_edit.text().strip()
@@ -259,9 +357,14 @@ class AccountDialog(QDialog):
             hourly_limit=self.hourly_spin.value(),
             is_active=self.active_check.isChecked(),
         )
-        proxy = self.proxy_edit.text().strip()
-        if proxy:
-            acc.proxy = proxy
+        raw_proxies = [l.strip() for l in self.proxy_edit.toPlainText().split("\n") if l.strip()]
+        parsed = [ProxyManager.parse(p) for p in raw_proxies]
+        parsed = [p for p in parsed if p]
+        if parsed:
+            acc.proxy_list = parsed
+            # Для обратной совместимости первый прокси как acc.proxy
+            acc.proxy = parsed[0]
+        acc.proxy_rotation_random = self.proxy_rotation_check.isChecked()
         return acc
 
 

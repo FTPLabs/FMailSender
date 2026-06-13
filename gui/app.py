@@ -33,17 +33,24 @@ ICONS: dict[str, bytes] = {
     "analytics":  b'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="COLOR" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
 }
 
-LOGO_SVG = b"""<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+LOGO_SVG = b"""<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#8B5CF6"/>
       <stop offset="100%" stop-color="#06B6D4"/>
     </linearGradient>
   </defs>
-  <rect x="3" y="8" width="22" height="14" rx="3" fill="none" stroke="url(#lg)" stroke-width="1.8"/>
-  <path d="M3 11 L14 18 L25 11" stroke="url(#lg)" stroke-width="1.8" fill="none"
-        stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>"""
+  <!-- Rounded square background -->
+  <rect x="2" y="2" width="28" height="28" rx="7" fill="url(#lg)" opacity="0.13"/>
+  <rect x="2" y="2" width="28" height="28" rx="7" fill="none" stroke="url(#lg)" stroke-width="1.6"/>
+  <!-- F letterform -->
+  <path d="M10 8.5 H22 M10 8.5 V23.5 M10 16.5 H19"
+        stroke="url(#lg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Send indicator -->
+  <circle cx="22.5" cy="22.5" r="4.2" fill="url(#lg)"/>
+  <path d="M20.9 22.5 L22.1 23.7 L25.1 20.5"
+        stroke="white" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>"""
 
 
 def _svg_to_pixmap(svg_bytes: bytes, size: int = 20) -> QPixmap:
@@ -143,7 +150,7 @@ class MainWindow(QMainWindow):
         logo_widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         logo_widget.setStyleSheet("background: transparent;")
         logo_widget.load(QByteArray(LOGO_SVG))
-        logo_widget.setFixedSize(28, 28)
+        logo_widget.setFixedSize(32, 32)
         logo_row.addWidget(logo_widget)
         logo_title = QLabel(APP_NAME)
         logo_title.setStyleSheet(
@@ -255,7 +262,22 @@ class MainWindow(QMainWindow):
 
         self._navigate("dashboard")
 
-    def _navigate(self, key: str):
+    def closeEvent(self, event):
+          """При закрытии окна — останавливаем рассылку и завершаем процесс."""
+          sending_screen = self._screens.get("sending")
+          if sending_screen is not None:
+              engine = getattr(sending_screen, "_engine", None)
+              if engine is not None:
+                  try:
+                      engine.stop()
+                  except Exception:
+                      pass
+          import os
+          event.accept()
+          # Принудительно завершаем все фоновые потоки/процессы
+          os._exit(0)
+
+      def _navigate(self, key: str):
         labels = {
             "dashboard": "Обзор", "accounts": "Аккаунты",
             "compose": "Письмо", "recipients": "Получатели",

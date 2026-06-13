@@ -89,68 +89,63 @@ class FormattingToolbar(QFrame):
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM)
-        layout.setSpacing(4)
+        layout.setContentsMargins(Spacing.SM, 4, Spacing.SM, 4)
+        layout.setSpacing(3)
         self.setObjectName("card")
+        self.setFixedHeight(46)
 
-        def btn(label: str, callback, tooltip: str = "") -> QPushButton:
+        def fbtn(label: str, callback, tooltip: str = "", obj: str = "btn_fmt") -> QPushButton:
             b = QPushButton(label)
-            b.setObjectName("btn_icon")
-            b.setFixedSize(32, 32)
+            b.setObjectName(obj)
+            b.setFixedSize(30, 30)
             b.setToolTip(tooltip)
             b.clicked.connect(callback)
             return b
 
-        # Жирный
-        layout.addWidget(btn("B", self._bold, "Жирный (Ctrl+B)"))
-        # Курсив
-        layout.addWidget(btn("I", self._italic, "Курсив (Ctrl+I)"))
-        # Подчёркнутый
-        layout.addWidget(btn("U", self._underline, "Подчёркнутый (Ctrl+U)"))
+        def sep() -> QFrame:
+            s = QFrame()
+            s.setFrameShape(QFrame.Shape.VLine)
+            s.setFixedWidth(1)
+            s.setMaximumHeight(22)
+            s.setStyleSheet(f"background: {Colors.BORDER}; margin: 0 2px;")
+            return s
 
-        # Разделитель
-        sep1 = QFrame()
-        sep1.setFrameShape(QFrame.Shape.VLine)
-        sep1.setFixedWidth(1)
-        sep1.setStyleSheet(f"background: {Colors.BORDER};")
-        layout.addWidget(sep1)
+        # ── Форматирование текста ─────────────────────────────────────────
+        layout.addWidget(fbtn("B", self._bold, "Жирный (Ctrl+B)", "btn_fmt_bold"))
+        layout.addWidget(fbtn("I", self._italic, "Курсив (Ctrl+I)", "btn_fmt_italic"))
+        layout.addWidget(fbtn("U", self._underline, "Подчёркнутый (Ctrl+U)", "btn_fmt_underline"))
+        layout.addWidget(sep())
 
-        # Размер шрифта
+        # ── Размер шрифта ──────────────────────────────────────────────────
         self.font_size = QSpinBox()
         self.font_size.setRange(8, 72)
         self.font_size.setValue(14)
-        self.font_size.setFixedWidth(60)
+        self.font_size.setFixedWidth(52)
+        self.font_size.setFixedHeight(28)
         self.font_size.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.font_size.valueChanged.connect(self._font_size_changed)
+        self.font_size.setToolTip("Размер шрифта (пт)")
         layout.addWidget(self.font_size)
 
-        # Цвет текста
-        layout.addWidget(btn("A", self._text_color, "Цвет текста"))
+        # ── Цвет текста ────────────────────────────────────────────────────
+        layout.addWidget(fbtn("Aa", self._text_color, "Цвет текста", "btn_fmt_color"))
+        layout.addWidget(sep())
 
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.Shape.VLine)
-        sep2.setFixedWidth(1)
-        sep2.setStyleSheet(f"background: {Colors.BORDER};")
-        layout.addWidget(sep2)
+        # ── Выравнивание ─────────────────────────────────────────────────────
+        layout.addWidget(fbtn("←", lambda: self._align(Qt.AlignmentFlag.AlignLeft), "По левому краю"))
+        layout.addWidget(fbtn("↔", lambda: self._align(Qt.AlignmentFlag.AlignCenter), "По центру"))
+        layout.addWidget(fbtn("→", lambda: self._align(Qt.AlignmentFlag.AlignRight), "По правому краю"))
+        layout.addWidget(sep())
 
-        # Выравнивание
-        layout.addWidget(btn("L|", lambda: self._align(Qt.AlignmentFlag.AlignLeft), "По левому краю"))
-        layout.addWidget(btn("|C|", lambda: self._align(Qt.AlignmentFlag.AlignCenter), "По центру"))
-        layout.addWidget(btn("|R", lambda: self._align(Qt.AlignmentFlag.AlignRight), "По правому краю"))
+        # ── Ссылка ──────────────────────────────────────────────────────────────
+        layout.addWidget(fbtn("⊕", self._insert_link, "Вставить ссылку (URL)"))
+        layout.addWidget(sep())
 
-        sep3 = QFrame()
-        sep3.setFrameShape(QFrame.Shape.VLine)
-        sep3.setFixedWidth(1)
-        sep3.setStyleSheet(f"background: {Colors.BORDER};")
-        layout.addWidget(sep3)
-
-        # Ссылка
-        layout.addWidget(btn("URL", self._insert_link, "Вставить ссылку"))
-
-        # Переменные
+        # ── Переменные ───────────────────────────────────────────────────────
         vars_combo = QComboBox()
-        vars_combo.setFixedWidth(160)
-        vars_combo.addItem("Вставить переменную...")
+        vars_combo.setFixedWidth(148)
+        vars_combo.setFixedHeight(28)
+        vars_combo.addItem("∴ Переменная...")
         vars_combo.addItems([
             "{{first_name}}", "{{last_name}}", "{{company}}",
             "{{custom_1}}", "{{custom_2}}", "{{custom_3}}",

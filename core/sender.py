@@ -317,6 +317,13 @@ class SendingEngine:
     def stop(self) -> None:
         self.stop_event.set()
         self._paused = False
+        # Отменяем текущую asyncio-задачу для мгновенной остановки
+        task = getattr(self, "_campaign_task", None)
+        if task is not None and not task.done():
+            try:
+                task.cancel()
+            except Exception:
+                pass
 
     def run(self) -> None:
         loop = asyncio.new_event_loop()
@@ -338,63 +345,84 @@ class SendingEngine:
             self._stats = {"success": 0, "errors": 0, "total": len(recipients)}
         self.stop_event.clear()
         self._paused = False
+        self._campaign_task = asyncio.current_task()
+
+        # Сбрасываем счётчики аккаунтов перед каждой новой рассылкой
+        for _acct in self.accounts:
+            if _acct.is_active:
+                with _acct._lock:
+                    _acct.sent_today = 0
+                    _acct.sent_this_hour = 0
+                    _acct._hour_reset = time.time()
 
         results: List[SendResult] = []
         sem = asyncio.Semaphore(self.config.max_threads)
 
-        async def _send_with_delay(
-            account: SmtpAccount,
-            recipient: Recipient,
-        ) -> SendResult:
-            """Delay is inside the task so all tasks run concurrently."""
+        async def _send_with_acct_delay(recipient: Recipient) -> SendResult:
+            """Задержка + выбор аккаунта ВНУТРИ задачи — для честной ротации."""
+            if self.stop_event.is_set():
+                return SendResult(
+                    recipient_email=recipient.email,
+                    success=False,
+                    error="Отменено",
+                )
             delay = random.randint(self.config.min_delay_ms, self.config.max_delay_ms) / 1000.0
             await asyncio.sleep(delay)
+            if self.stop_event.is_set():
+                return SendResult(
+                    recipient_email=recipient.email,
+                    success=False,
+                    error="Отменено",
+                )
+            account = self._pick_account()
+            if account is None:
+                with self._stats_lock:
+                    self._stats["errors"] += 1
+                return SendResult(
+                    recipient_email=recipient.email,
+                    success=False,
+                    error="Нет доступных аккаунтов",
+                )
             return await self._send_one(sem, account, recipient, template)
 
         async def _process_batch(batch_recipients: List[Recipient]) -> List[SendResult]:
-            tasks = []
-            for recipient in batch_recipients:
-                account = self._pick_account()
-                if account is None:
-                    result = SendResult(
-                        recipient_email=recipient.email,
-                        success=False,
-                        error="Нет доступных аккаунтов",
-                    )
-                    with self._stats_lock:
-                        self._stats["errors"] += 1
-                    self._emit_progress(results, recipients, result)
-                    async def _noop(r=result): return r
-                    tasks.append(_noop())
-                    continue
-                tasks.append(_send_with_delay(account, recipient))
+            tasks = [_send_with_acct_delay(r) for r in batch_recipients]
             return await asyncio.gather(*tasks, return_exceptions=True)
 
-        batch_size = max(self.config.max_threads, 1)
-        i = 0
-        while i < len(recipients):
-            if self.stop_event.is_set():
-                break
-            while self._paused and not self.stop_event.is_set():
-                await asyncio.sleep(0.1)
-            if self.stop_event.is_set():
-                break
-            batch = recipients[i:i + batch_size]
-            batch_results = await _process_batch(batch)
-            for result in batch_results:
-                results.append(result)
-                self._emit_progress(results, recipients, result)
-            if (
-                self.config.pause_after_n > 0
-                and len(results) % self.config.pause_after_n == 0
-                and len(results) < len(recipients)
-            ):
-                await asyncio.sleep(self.config.pause_duration_sec)
-            i += batch_size
+        try:
+            batch_size = max(self.config.max_threads, 1)
+            i = 0
+            while i < len(recipients):
+                if self.stop_event.is_set():
+                    break
+                while self._paused and not self.stop_event.is_set():
+                    await asyncio.sleep(0.1)
+                if self.stop_event.is_set():
+                    break
+                batch = recipients[i:i + batch_size]
+                batch_results = await _process_batch(batch)
+                for result in batch_results:
+                    if isinstance(result, Exception):
+                        continue
+                    results.append(result)
+                    self._emit_progress(results, recipients, result)
+                if (
+                    self.config.pause_after_n > 0
+                    and len(results) % self.config.pause_after_n == 0
+                    and len(results) < len(recipients)
+                ):
+                    await asyncio.sleep(self.config.pause_duration_sec)
+                i += batch_size
+
+        except asyncio.CancelledError:
+            pass  # Остановлено через stop()
+        finally:
+            self._campaign_task = None
 
         if self.on_finished:
             self.on_finished(results)
         return results
+
 
     def _pick_account(self) -> Optional[SmtpAccount]:
         """Pick first account that passes atomic try_increment check."""
