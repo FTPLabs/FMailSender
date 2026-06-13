@@ -170,15 +170,30 @@ QPushButton#btn_primary {{
         stop:0 {c.GRAD_START}, stop:1 {c.GRAD_END});
     font-weight: {Typography.WEIGHT_BOLD};
 }}
-QPushButton#btn_secondary, QPushButton#btn_icon {{
-    background: {c.BG_GLASS};
-    padding: 4px;
+QPushButton#btn_secondary {{
+    background: {c.BG_SURFACE3};
+    padding: 6px 14px;
     min-width: 0px;
     color: {c.TEXT_SECONDARY};
     border: 1px solid {c.BORDER};
+    border-radius: {r.BUTTON};
 }}
-QPushButton#btn_secondary:hover, QPushButton#btn_icon:hover {{
+QPushButton#btn_icon {{
+    background: {c.BG_SURFACE3};
+    padding: 4px;
+    min-width: 0px;
+    min-height: 0px;
+    color: {c.TEXT_SECONDARY};
+    border: 1px solid {c.BORDER};
+    border-radius: {r.SMALL};
+}}
+QPushButton#btn_secondary:hover {{
     background: {c.BG_GLASS2};
+    color: {c.TEXT_PRIMARY};
+    border: 1px solid {c.BORDER_HOVER};
+}}
+QPushButton#btn_icon:hover {{
+    background: {c.BG_SURFACE4};
     color: {c.TEXT_PRIMARY};
     border: 1px solid {c.BORDER_HOVER};
 }}
@@ -466,7 +481,7 @@ QDateTimeEdit {{
 }}
 QDateTimeEdit:focus {{ border-color: {c.BORDER_FOCUS}; }}
 QDateTimeEdit::up-button, QDateTimeEdit::down-button {{
-    background: transparent; border: none; width: 16px;
+    width: 0px; height: 0px; border: none; background: transparent;
 }}
 
 /* ═══ Splitter ══════════════════════════════════════════════════════════ */
