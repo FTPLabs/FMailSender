@@ -263,21 +263,20 @@ class MainWindow(QMainWindow):
         self._navigate("dashboard")
 
     def closeEvent(self, event):
-          """При закрытии окна — останавливаем рассылку и завершаем процесс."""
-          sending_screen = self._screens.get("sending")
-          if sending_screen is not None:
-              engine = getattr(sending_screen, "_engine", None)
-              if engine is not None:
-                  try:
-                      engine.stop()
-                  except Exception:
-                      pass
-          import os
-          event.accept()
-          # Принудительно завершаем все фоновые потоки/процессы
-          os._exit(0)
+        """При закрытии окна — останавливаем рассылку и завершаем процесс."""
+        sending_screen = self._screens.get("sending")
+        if sending_screen is not None:
+            engine = getattr(sending_screen, "_engine", None)
+            if engine is not None:
+                try:
+                    engine.stop()
+                except Exception:
+                    pass
+        event.accept()
+        import os
+        os._exit(0)
 
-      def _navigate(self, key: str):
+    def _navigate(self, key: str):
         labels = {
             "dashboard": "Обзор", "accounts": "Аккаунты",
             "compose": "Письмо", "recipients": "Получатели",
