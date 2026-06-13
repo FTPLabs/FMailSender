@@ -56,7 +56,7 @@ jobs:
         shell: python
         run: |
           import compileall, sys, re
-          ok = compileall.compile_dir(".", quiet=2, force=True,
+          ok = compileall.compile_dir(".", quiet=0, force=True,
                                       rx=re.compile(r"venv|dist|build|\.git"))
           if not ok:
               print("Syntax errors found - aborting")
