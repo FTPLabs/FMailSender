@@ -1,5 +1,5 @@
 """
-FMailSender core sending engine v2.9.0.
+FMailSender core sending engine v2.9.1.
 Fixes: IndentationError in increment_sent/try_increment/Recipient,
        async parallelism (delay moved inside task wrapper),
        duplicate params documented, race condition eliminated via try_increment.
@@ -88,7 +88,7 @@ class SmtpAccount:
 
     @property
     def can_send(self) -> bool:
-        """Thread-safe read-only check (no side effects)."""
+        """Thread-safe check. Resets hourly counter if window expired (intentional side effect)."""
         if not self.is_active:
             return False
         with self._lock:
@@ -214,6 +214,8 @@ def _build_message(
     outer["Date"] = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
     if template.reply_to:
         outer["Reply-To"] = template.reply_to
+    if template.cc:
+        outer["CC"] = ", ".join(template.cc)
 
     alt = MIMEMultipart("alternative")
     plain = template.body_text or re.sub(r"<[^>]+>", "", template.body_html)
@@ -236,7 +238,25 @@ def _build_message(
     return outer
 
 
-async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
+def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
+      """Sync SMTP test — runs in thread pool to avoid blocking the event loop."""
+      import ssl
+      try:
+          ctx = ssl.create_default_context()
+          if account.use_ssl:
+              s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=15)
+          else:
+              s = smtplib.SMTP(account.host, account.port, timeout=15)
+              if account.use_tls:
+                  s.starttls(context=ctx)
+          s.login(account.email, account.password)
+          s.quit()
+          return True, f"OK — {account.host}:{account.port}"
+      except Exception as e:
+          return False, f"ОШИБКА: {e}"
+
+
+  async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
     if not _HAS_AIOSMTPLIB:
         try:
             import ssl
@@ -261,9 +281,11 @@ async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
         else:
             smtp = aiosmtplib.SMTP(
                 hostname=account.host, port=account.port,
-                use_tls=False, start_tls=account.use_tls, timeout=20,
+                use_tls=False, timeout=20,
             )
-        await smtp.connect()
+            await smtp.connect()
+            if account.use_tls:
+                await smtp.starttls()
         await smtp.login(account.email, account.password)
         await smtp.quit()
         return True, f"OK — SMTP {account.host}:{account.port} авторизация успешна"

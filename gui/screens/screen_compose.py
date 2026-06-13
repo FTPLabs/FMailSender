@@ -94,12 +94,29 @@ class FormattingToolbar(QFrame):
         self.setObjectName("card")
         self.setFixedHeight(46)
 
-        def fbtn(label: str, callback, tooltip: str = "", obj: str = "btn_fmt") -> QPushButton:
-            b = QPushButton(label)
+        try:
+            from gui.icons import make_icon, BOLD, ITALIC, UNDERLINE, ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, LINK, TEXT_COLOR_ICON
+            _has_icons = True
+        except ImportError:
+            _has_icons = False
+
+        def fbtn(label: str, callback, tooltip: str = "", obj: str = "btn_fmt", icon_key: str = "") -> QPushButton:
+            _SVG_MAP = {"bold": "BOLD", "italic": "ITALIC", "underline": "UNDERLINE",
+                        "align_left": "ALIGN_LEFT", "align_center": "ALIGN_CENTER",
+                        "align_right": "ALIGN_RIGHT", "link": "LINK", "color": "TEXT_COLOR_ICON"}
+            b = QPushButton()
             b.setObjectName(obj)
-            b.setFixedSize(30, 30)
+            b.setFixedSize(32, 32)
             b.setToolTip(tooltip)
             b.clicked.connect(callback)
+            if _has_icons and icon_key in _SVG_MAP:
+                import gui.icons as _ic
+                svg_str = getattr(_ic, _SVG_MAP[icon_key])
+                from PyQt6.QtCore import QSize as _QSize
+                b.setIcon(make_icon(svg_str, 18))
+                b.setIconSize(_QSize(18, 18))
+            else:
+                b.setText(label)
             return b
 
         def sep() -> QFrame:
@@ -111,9 +128,9 @@ class FormattingToolbar(QFrame):
             return s
 
         # ── Форматирование текста ─────────────────────────────────────────
-        layout.addWidget(fbtn("B", self._bold, "Жирный (Ctrl+B)", "btn_fmt_bold"))
-        layout.addWidget(fbtn("I", self._italic, "Курсив (Ctrl+I)", "btn_fmt_italic"))
-        layout.addWidget(fbtn("U", self._underline, "Подчёркнутый (Ctrl+U)", "btn_fmt_underline"))
+        layout.addWidget(fbtn("B", self._bold, "Жирный (Ctrl+B)", "btn_fmt_bold", "bold"))
+        layout.addWidget(fbtn("I", self._italic, "Курсив (Ctrl+I)", "btn_fmt_italic", "italic"))
+        layout.addWidget(fbtn("U", self._underline, "Подчёркнутый (Ctrl+U)", "btn_fmt_underline", "underline"))
         layout.addWidget(sep())
 
         # ── Размер шрифта ──────────────────────────────────────────────────
@@ -128,17 +145,17 @@ class FormattingToolbar(QFrame):
         layout.addWidget(self.font_size)
 
         # ── Цвет текста ────────────────────────────────────────────────────
-        layout.addWidget(fbtn("Aa", self._text_color, "Цвет текста", "btn_fmt_color"))
+        layout.addWidget(fbtn("Aa", self._text_color, "Цвет текста", "btn_fmt_color", "color"))
         layout.addWidget(sep())
 
         # ── Выравнивание ─────────────────────────────────────────────────────
-        layout.addWidget(fbtn("←", lambda: self._align(Qt.AlignmentFlag.AlignLeft), "По левому краю"))
-        layout.addWidget(fbtn("↔", lambda: self._align(Qt.AlignmentFlag.AlignCenter), "По центру"))
-        layout.addWidget(fbtn("→", lambda: self._align(Qt.AlignmentFlag.AlignRight), "По правому краю"))
+        layout.addWidget(fbtn("←", lambda: self._align(Qt.AlignmentFlag.AlignLeft), "По левому краю", icon_key="align_left"))
+        layout.addWidget(fbtn("↔", lambda: self._align(Qt.AlignmentFlag.AlignCenter), "По центру", icon_key="align_center"))
+        layout.addWidget(fbtn("→", lambda: self._align(Qt.AlignmentFlag.AlignRight), "По правому краю", icon_key="align_right"))
         layout.addWidget(sep())
 
         # ── Ссылка ──────────────────────────────────────────────────────────────
-        layout.addWidget(fbtn("⊕", self._insert_link, "Вставить ссылку (URL)"))
+        layout.addWidget(fbtn("⊕", self._insert_link, "Вставить ссылку (URL)", icon_key="link"))
         layout.addWidget(sep())
 
         # ── Переменные ───────────────────────────────────────────────────────
