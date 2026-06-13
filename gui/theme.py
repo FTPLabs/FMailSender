@@ -101,6 +101,11 @@ QMainWindow, QDialog, QWidget {{
 }}
 QStackedWidget {{ background-color: {c.BG_BASE}; }}
 
+  /* Transparent for widgets that must NOT paint over parent card backgrounds */
+  QLabel, QCheckBox, QRadioButton {{
+      background: transparent;
+  }}
+
 /* ═══ Sidebar — glass panel ═════════════════════════════════════════════ */
 #sidebar {{
     background-color: {c.BG_SURFACE1};
