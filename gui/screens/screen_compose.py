@@ -133,9 +133,9 @@ class FormattingToolbar(QFrame):
         layout.addWidget(sep2)
 
         # Выравнивание
-        layout.addWidget(btn("≡L", lambda: self._align(Qt.AlignmentFlag.AlignLeft), "По левому краю"))
-        layout.addWidget(btn("≡C", lambda: self._align(Qt.AlignmentFlag.AlignCenter), "По центру"))
-        layout.addWidget(btn("≡R", lambda: self._align(Qt.AlignmentFlag.AlignRight), "По правому краю"))
+        layout.addWidget(btn("L|", lambda: self._align(Qt.AlignmentFlag.AlignLeft), "По левому краю"))
+        layout.addWidget(btn("|C|", lambda: self._align(Qt.AlignmentFlag.AlignCenter), "По центру"))
+        layout.addWidget(btn("|R", lambda: self._align(Qt.AlignmentFlag.AlignRight), "По правому краю"))
 
         sep3 = QFrame()
         sep3.setFrameShape(QFrame.Shape.VLine)
@@ -144,7 +144,7 @@ class FormattingToolbar(QFrame):
         layout.addWidget(sep3)
 
         # Ссылка
-        layout.addWidget(btn("🔗", self._insert_link, "Вставить ссылку"))
+        layout.addWidget(btn("URL", self._insert_link, "Вставить ссылку"))
 
         # Переменные
         vars_combo = QComboBox()
