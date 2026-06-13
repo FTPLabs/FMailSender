@@ -65,6 +65,7 @@ class AdminFlow(StatesGroup):
     broadcast_text = State()
     confirm_clear = State()
     set_download_url = State()
+    set_vt_url = State()
     upload_file = State()
 
 
@@ -119,7 +120,8 @@ def kb_admin() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💲 Изменить цены", callback_data="admin_prices")],
         [InlineKeyboardButton(text="🚫 Отозвать ключ", callback_data="admin_revoke")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text="🔗 Ссылка скачивания", callback_data="admin_set_download")],
+        [InlineKeyboardButton(text="🔗 ZIP-ссылка скачивания", callback_data="admin_set_download")],
+        [InlineKeyboardButton(text="🛡 VirusTotal ссылка", callback_data="admin_set_vt")],
         [InlineKeyboardButton(text="📤 Загрузить файл (.exe)", callback_data="admin_upload_file")],
         [InlineKeyboardButton(text="🗑 Удалить все ключи", callback_data="admin_clear_keys")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
@@ -245,37 +247,47 @@ async def cb_cabinet(query: CallbackQuery):
 
 @dp.callback_query(F.data == "menu_download")
 async def cb_menu_download(query: CallbackQuery):
-    user_id = query.from_user.id
-    licenses = await db.get_license_by_telegram(user_id)
-    active_lic = _get_active_license(licenses)
+      user_id = query.from_user.id
+      try:
+          licenses = await db.get_license_by_telegram(user_id)
+      except Exception as e:
+          logger.error("db error in cb_menu_download: %s", e)
+          licenses = []
+      active_lic = _get_active_license(licenses)
 
-    try:
-        dl_url = await db.get_setting("download_url") or DOWNLOAD_URL
-    except Exception:
-        dl_url = DOWNLOAD_URL
+      if not active_lic:
+          await send_or_edit(
+              query,
+              "❌ <b>Скачивание недоступно</b>\n\nУ тебя нет активной подписки.\nНажми «Купить лицензию» для получения доступа.",
+              reply_markup=kb_main(is_admin(user_id)),
+          )
+          return
 
-    if not active_lic:
-        await send_or_edit(
-            query,
-            "❌ <b>Скачивание недоступно</b>\n\n"
-            "У тебя нет активной подписки.\n"
-            "Нажми «Купить лицензию» чтобы получить доступ.",
-            reply_markup=kb_main(is_admin(user_id)),
-        )
-        return
+      try:
+          zip_url  = await db.get_setting("zip_url")  or ""
+          vt_url   = await db.get_setting("vt_url")   or ""
+          dl_url   = await db.get_setting("download_url") or DOWNLOAD_URL
+      except Exception:
+          zip_url = vt_url = ""
+          dl_url = DOWNLOAD_URL
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬇️ Скачать FMailSender.exe", url=dl_url)],
-        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
-    ])
-    await send_or_edit(
-        query,
-        "📥 <b>Скачать FMail Sender</b>\n\n✅ Подписка активна. Нажми кнопку ниже:",
-        reply_markup=kb,
-    )
+      final_url = zip_url or dl_url
+      buttons = [
+          [InlineKeyboardButton(text="U0001f4e6 Скачать .zip архив", url=final_url)],
+      ]
+      if vt_url:
+          buttons.append([InlineKeyboardButton(text="U0001f6e1️ VirusTotal проверка", url=vt_url)])
+      buttons.append([InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")])
 
-
-# ─── Поддержка (тикет) ───────────────────────────────────────────────────────
+      plan = PLANS.get(active_lic.get("plan", ""), {})
+      exp = active_lic.get("expires_at", "")[:10]
+      await send_or_edit(
+          query,
+          f"U0001f4e5 <b>Скачать FMail Sender</b>\n\n"
+          f"✅ {plan.get('name', active_lic.get('plan', ''))} | до {exp}\n\n"
+          f"Скачай .zip архив, распакуй и запусти FMailSender.exe",
+          reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+      )
 
 @dp.callback_query(F.data == "menu_support")
 async def cb_support(query: CallbackQuery, state: FSMContext):
@@ -500,13 +512,16 @@ async def cb_admin_panel(query: CallbackQuery, state: FSMContext):
     if not is_admin(query.from_user.id):
         return
     await state.clear()
-    stats = await db.get_stats()
+    try:
+        stats = await db.get_stats()
+    except Exception as e:
+        logger.error("Admin stats error: %s", e)
+        stats = {'active': 0, 'total': 0, 'users': 0, 'paid': 0}
     text = (
         f"⚙️ <b>Панель администратора</b>\n\n"
-        f"✅ Активных лицензий: <b>{stats['active_licenses']}</b>\n"
-        f"📦 Всего лицензий: <b>{stats['total_licenses']}</b>\n"
-        f"💰 Выручка: <b>${stats['total_revenue_usdt']:.2f} USDT</b>\n"
-        f"👥 Пользователей: <b>{stats['total_users']}</b>"
+        f"✅ Активных лицензий: <b>{stats.get('active', 0)}</b>\n"
+        f"📦 Всего лицензий: <b>{stats.get('total', 0)}</b>\n"
+                f"👥 Пользователей: <b>{stats.get('users', 0)}</b>"
     )
     await send_or_edit(query, text, reply_markup=kb_admin())
 
@@ -537,11 +552,11 @@ async def cb_admin_stats(query: CallbackQuery):
     stats = await db.get_stats()
     text = (
         f"📊 <b>Статистика</b>\n\n"
-        f"✅ Активных лицензий: <b>{stats['active_licenses']}</b>\n"
-        f"📦 Всего лицензий: <b>{stats['total_licenses']}</b>\n"
+        f"✅ Активных лицензий: <b>{stats.get('active', 0)}</b>\n"
+        f"📦 Всего лицензий: <b>{stats.get('total', 0)}</b>\n"
         f"💳 Оплаченных заказов: <b>{stats['paid_orders']}</b>\n"
-        f"👥 Пользователей: <b>{stats['total_users']}</b>\n"
-        f"💰 Выручка: <b>${stats['total_revenue_usdt']:.2f} USDT</b>"
+        f"👥 Пользователей: <b>{stats.get('users', 0)}</b>\n"
+        f"💰 Выручка: <b>${0:.2f} USDT</b>"
     )
     await send_or_edit(query, text, reply_markup=kb_back_admin())
 
@@ -638,7 +653,92 @@ async def msg_admin_note(message: Message, state: FSMContext):
             await message.answer(f"⚠️ Не удалось отправить: {e}\nОтправьте вручную: <code>{key}</code>")
 
 
-# ─── Admin Revoke ────────────────────────────────────────────────────────────
+# ─── Admin Set Download URL ────────────────────────────────────────────────────
+
+  @dp.message(AdminFlow.set_download_url)
+  async def msg_admin_set_download_url(message: Message, state: FSMContext):
+      if not is_admin(message.from_user.id):
+          return
+      url = (message.text or "").strip()
+      await state.clear()
+      if not url.startswith("http"):
+          await message.answer("❌ Некорректная ссылка. Должна начинаться с http(s)://", reply_markup=kb_admin())
+          return
+      await db.set_setting("zip_url", url)
+      await db.set_setting("download_url", url)
+      await message.answer(f"✅ ZIP-ссылка обновлена:\n<code>{url}</code>", reply_markup=kb_admin())
+
+
+  # ─── Admin Set VirusTotal URL ────────────────────────────────────────────────
+
+  @dp.callback_query(F.data == "admin_set_vt")
+  async def cb_admin_set_vt(query: CallbackQuery, state: FSMContext):
+      if not is_admin(query.from_user.id):
+          return
+      try:
+          current = await db.get_setting("vt_url") or "не задана"
+      except Exception:
+          current = "не задана"
+      await state.set_state(AdminFlow.set_vt_url)
+      await send_or_edit(
+          query,
+          f"U0001f6e1️ <b>VirusTotal ссылка</b>\n\nТекущая:\n<code>{current}</code>\n\n"
+          f"Отправь новую ссылку VirusTotal:\n"
+          f"(https://www.virustotal.com/gui/file/SHA256)",
+          reply_markup=kb_back_admin(),
+      )
+
+
+  @dp.message(AdminFlow.set_vt_url)
+  async def msg_admin_set_vt_url(message: Message, state: FSMContext):
+      if not is_admin(message.from_user.id):
+          return
+      url = (message.text or "").strip()
+      await state.clear()
+      if not url.startswith("http"):
+          await message.answer("❌ Некорректная ссылка.", reply_markup=kb_admin())
+          return
+      await db.set_setting("vt_url", url)
+      await message.answer(f"✅ VirusTotal ссылка сохранена:\n<code>{url}</code>", reply_markup=kb_admin())
+
+
+  # ─── Admin Upload File ───────────────────────────────────────────────────────
+
+  @dp.message(AdminFlow.upload_file)
+  async def msg_admin_upload_file(message: Message, state: FSMContext):
+      if not is_admin(message.from_user.id):
+          return
+      await state.clear()
+      doc = message.document
+      if not doc:
+          await message.answer("❌ Отправь файл (.exe или .zip)", reply_markup=kb_admin())
+          return
+      await message.answer(
+          f"✅ Файл <b>{doc.file_name}</b> получен.\n"
+          f"Обнови ZIP-ссылку через «Ссылка ZIP скачивания».",
+          reply_markup=kb_admin()
+      )
+
+
+  # ─── Admin Clear All Keys ────────────────────────────────────────────────────
+
+  @dp.message(AdminFlow.confirm_clear)
+  async def msg_admin_confirm_clear(message: Message, state: FSMContext):
+      if not is_admin(message.from_user.id):
+          return
+      text = (message.text or "").strip()
+      await state.clear()
+      if text != "ПОДТВЕРЖДАЮ":
+          await message.answer(
+              "❌ Отменено. Для удаления напиши точно: ПОДТВЕРЖДАЮ",
+              reply_markup=kb_admin()
+          )
+          return
+      await db.clear_all_licenses()
+      await message.answer("U0001f5d1 Все лицензии и платежи удалены.", reply_markup=kb_admin())
+
+
+  # ─── Admin Revoke ────────────────────────────────────────────────────────────
 
 @dp.callback_query(F.data == "admin_revoke")
 async def cb_admin_revoke(query: CallbackQuery, state: FSMContext):
@@ -818,9 +918,8 @@ async def cmd_admin(message: Message, state: FSMContext):
     stats = await db.get_stats()
     text = (
         f"⚙️ <b>Панель администратора</b>\n\n"
-        f"✅ Активных: <b>{stats['active_licenses']}</b>\n"
-        f"💰 Выручка: <b>${stats['total_revenue_usdt']:.2f} USDT</b>\n"
-        f"👥 Пользователей: <b>{stats['total_users']}</b>"
+        f"✅ Активных: <b>{stats.get('active', 0)}</b>\n"
+                f"👥 Пользователей: <b>{stats.get('users', 0)}</b>"
     )
     await message.answer(text, reply_markup=kb_admin())
 
@@ -1041,7 +1140,7 @@ async def health():
       "status": "ok",
       "service": "FMail Sender License API",
       "version": "2.7.0",
-      "active_licenses": stats.get("active_licenses", 0),
+      "active_licenses": stats.get('active', 0),
   }
 
 
