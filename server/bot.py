@@ -655,90 +655,90 @@ async def msg_admin_note(message: Message, state: FSMContext):
 
 # ─── Admin Set Download URL ────────────────────────────────────────────────────
 
-  @dp.message(AdminFlow.set_download_url)
-  async def msg_admin_set_download_url(message: Message, state: FSMContext):
-      if not is_admin(message.from_user.id):
-          return
-      url = (message.text or "").strip()
-      await state.clear()
-      if not url.startswith("http"):
-          await message.answer("❌ Некорректная ссылка. Должна начинаться с http(s)://", reply_markup=kb_admin())
-          return
-      await db.set_setting("zip_url", url)
-      await db.set_setting("download_url", url)
-      await message.answer(f"✅ ZIP-ссылка обновлена:\n<code>{url}</code>", reply_markup=kb_admin())
+@dp.message(AdminFlow.set_download_url)
+async def msg_admin_set_download_url(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    url = (message.text or "").strip()
+    await state.clear()
+    if not url.startswith("http"):
+        await message.answer("❌ Некорректная ссылка. Должна начинаться с http(s)://", reply_markup=kb_admin())
+        return
+    await db.set_setting("zip_url", url)
+    await db.set_setting("download_url", url)
+    await message.answer(f"✅ ZIP-ссылка обновлена:\n<code>{url}</code>", reply_markup=kb_admin())
 
 
-  # ─── Admin Set VirusTotal URL ────────────────────────────────────────────────
+# ─── Admin Set VirusTotal URL ────────────────────────────────────────────────
 
-  @dp.callback_query(F.data == "admin_set_vt")
-  async def cb_admin_set_vt(query: CallbackQuery, state: FSMContext):
-      if not is_admin(query.from_user.id):
-          return
-      try:
-          current = await db.get_setting("vt_url") or "не задана"
-      except Exception:
-          current = "не задана"
-      await state.set_state(AdminFlow.set_vt_url)
-      await send_or_edit(
-          query,
-          f"U0001f6e1️ <b>VirusTotal ссылка</b>\n\nТекущая:\n<code>{current}</code>\n\n"
-          f"Отправь новую ссылку VirusTotal:\n"
-          f"(https://www.virustotal.com/gui/file/SHA256)",
-          reply_markup=kb_back_admin(),
-      )
-
-
-  @dp.message(AdminFlow.set_vt_url)
-  async def msg_admin_set_vt_url(message: Message, state: FSMContext):
-      if not is_admin(message.from_user.id):
-          return
-      url = (message.text or "").strip()
-      await state.clear()
-      if not url.startswith("http"):
-          await message.answer("❌ Некорректная ссылка.", reply_markup=kb_admin())
-          return
-      await db.set_setting("vt_url", url)
-      await message.answer(f"✅ VirusTotal ссылка сохранена:\n<code>{url}</code>", reply_markup=kb_admin())
+@dp.callback_query(F.data == "admin_set_vt")
+async def cb_admin_set_vt(query: CallbackQuery, state: FSMContext):
+    if not is_admin(query.from_user.id):
+        return
+    try:
+        current = await db.get_setting("vt_url") or "не задана"
+    except Exception:
+        current = "не задана"
+    await state.set_state(AdminFlow.set_vt_url)
+    await send_or_edit(
+        query,
+        f"U0001f6e1️ <b>VirusTotal ссылка</b>\n\nТекущая:\n<code>{current}</code>\n\n"
+        f"Отправь новую ссылку VirusTotal:\n"
+        f"(https://www.virustotal.com/gui/file/SHA256)",
+        reply_markup=kb_back_admin(),
+    )
 
 
-  # ─── Admin Upload File ───────────────────────────────────────────────────────
-
-  @dp.message(AdminFlow.upload_file)
-  async def msg_admin_upload_file(message: Message, state: FSMContext):
-      if not is_admin(message.from_user.id):
-          return
-      await state.clear()
-      doc = message.document
-      if not doc:
-          await message.answer("❌ Отправь файл (.exe или .zip)", reply_markup=kb_admin())
-          return
-      await message.answer(
-          f"✅ Файл <b>{doc.file_name}</b> получен.\n"
-          f"Обнови ZIP-ссылку через «Ссылка ZIP скачивания».",
-          reply_markup=kb_admin()
-      )
+@dp.message(AdminFlow.set_vt_url)
+async def msg_admin_set_vt_url(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    url = (message.text or "").strip()
+    await state.clear()
+    if not url.startswith("http"):
+        await message.answer("❌ Некорректная ссылка.", reply_markup=kb_admin())
+        return
+    await db.set_setting("vt_url", url)
+    await message.answer(f"✅ VirusTotal ссылка сохранена:\n<code>{url}</code>", reply_markup=kb_admin())
 
 
-  # ─── Admin Clear All Keys ────────────────────────────────────────────────────
+# ─── Admin Upload File ───────────────────────────────────────────────────────
 
-  @dp.message(AdminFlow.confirm_clear)
-  async def msg_admin_confirm_clear(message: Message, state: FSMContext):
-      if not is_admin(message.from_user.id):
-          return
-      text = (message.text or "").strip()
-      await state.clear()
-      if text != "ПОДТВЕРЖДАЮ":
-          await message.answer(
-              "❌ Отменено. Для удаления напиши точно: ПОДТВЕРЖДАЮ",
-              reply_markup=kb_admin()
-          )
-          return
-      await db.clear_all_licenses()
-      await message.answer("U0001f5d1 Все лицензии и платежи удалены.", reply_markup=kb_admin())
+@dp.message(AdminFlow.upload_file)
+async def msg_admin_upload_file(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.clear()
+    doc = message.document
+    if not doc:
+        await message.answer("❌ Отправь файл (.exe или .zip)", reply_markup=kb_admin())
+        return
+    await message.answer(
+        f"✅ Файл <b>{doc.file_name}</b> получен.\n"
+        f"Обнови ZIP-ссылку через «Ссылка ZIP скачивания».",
+        reply_markup=kb_admin()
+    )
 
 
-  # ─── Admin Revoke ────────────────────────────────────────────────────────────
+# ─── Admin Clear All Keys ────────────────────────────────────────────────────
+
+@dp.message(AdminFlow.confirm_clear)
+async def msg_admin_confirm_clear(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    text = (message.text or "").strip()
+    await state.clear()
+    if text != "ПОДТВЕРЖДАЮ":
+        await message.answer(
+            "❌ Отменено. Для удаления напиши точно: ПОДТВЕРЖДАЮ",
+            reply_markup=kb_admin()
+        )
+        return
+    await db.clear_all_licenses()
+    await message.answer("U0001f5d1 Все лицензии и платежи удалены.", reply_markup=kb_admin())
+
+
+# ─── Admin Revoke ────────────────────────────────────────────────────────────
 
 @dp.callback_query(F.data == "admin_revoke")
 async def cb_admin_revoke(query: CallbackQuery, state: FSMContext):
