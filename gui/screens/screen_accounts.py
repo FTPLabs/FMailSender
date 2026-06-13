@@ -323,10 +323,14 @@ class AccountsScreen(QWidget):
         self.status_label.setObjectName("label_muted")
         layout.addWidget(self.status_label)
 
-    def _load(self):
-        self._accounts = load_accounts()
-        self._refresh_table()
-        self.accounts_changed.emit(self._accounts)
+    def get_accounts(self) -> list:
+          """Return currently loaded list of SmtpAccount objects."""
+          return self._accounts
+
+      def _load(self):
+          self._accounts = load_accounts()
+          self._refresh_table()
+          self.accounts_changed.emit(self._accounts)
 
     def _refresh_table(self):
         self.table.setRowCount(0)
