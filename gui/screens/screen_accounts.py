@@ -265,6 +265,58 @@ class AccountDialog(QDialog):
         return acc
 
 
+
+  class BulkImportWorker(QThread):
+      """Импорт SMTP-аккаунтов из файла в фоновом потоке — не блокирует UI."""
+      progress = pyqtSignal(int, int)   # (текущий, всего)
+      finished = pyqtSignal(int, int)   # (импортировано, пропущено)
+      error    = pyqtSignal(str)
+
+      def __init__(self, path: str, existing_emails: set, parent=None):
+          super().__init__(parent)
+          self._path = path
+          self._existing = existing_emails
+          self.new_accounts: list = []
+
+      def run(self):
+          try:
+              lines = Path(self._path).read_text(encoding="utf-8", errors="replace").splitlines()
+              total = len(lines)
+              imported = errors = 0
+              for idx, line in enumerate(lines):
+                  self.progress.emit(idx, total)
+                  line = line.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  parts = [p.strip() for p in re.split(r"[;:|\t]", line)]
+                  if len(parts) < 2:
+                      errors += 1
+                      continue
+                  email, password = parts[0], parts[1]
+                  if "@" not in email or email.lower() in self._existing:
+                      errors += 1
+                      continue
+                  domain = email.split("@")[-1].lower()
+                  cfg = get_smtp_config_for_domain(domain)
+                  if not cfg:
+                      errors += 1
+                      continue
+                  acc = SmtpAccount(
+                      email=email,
+                      password=password,
+                      host=cfg["host"],
+                      port=cfg["port"],
+                      use_ssl=cfg.get("use_ssl", True),
+                      use_tls=cfg.get("use_tls", False),
+                  )
+                  self.new_accounts.append(acc)
+                  self._existing.add(email.lower())
+                  imported += 1
+              self.finished.emit(imported, errors)
+          except Exception as e:
+              self.error.emit(str(e))
+
+  
 class AccountsScreen(QWidget):
     accounts_changed = pyqtSignal(list)
 
@@ -419,49 +471,48 @@ class AccountsScreen(QWidget):
             w.start()
 
     def _import_accounts(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Импорт аккаунтов", "", "Text files (*.txt);;All files (*)"
-        )
-        if not path:
-            return
-        imported = 0
-        errors = 0
-        try:
-            lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
-            for line in lines:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = [p.strip() for p in re.split(r"[;:|\t]", line)]
-                if len(parts) < 2:
-                    errors += 1
-                    continue
-                email, password = parts[0], parts[1]
-                if "@" not in email:
-                    errors += 1
-                    continue
-                domain = email.split("@")[-1].lower()
-                cfg = get_smtp_config_for_domain(domain)
-                if not cfg:
-                    errors += 1
-                    continue
-                acc = SmtpAccount(
-                    email=email,
-                    password=password,
-                    host=cfg["host"],
-                    port=cfg["port"],
-                    use_ssl=cfg.get("use_ssl", True),
-                    use_tls=cfg.get("use_tls", False),
-                )
-                self._accounts.append(acc)
-                imported += 1
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка импорта", str(e))
-            return
-        save_accounts(self._accounts)
-        self._refresh_table()
-        self.accounts_changed.emit(self._accounts)
-        QMessageBox.information(
-            self, "Импорт завершён",
-            f"Импортировано: {imported}\nПропущено: {errors}",
-        )
+          path, _ = QFileDialog.getOpenFileName(
+              self, "Импорт аккаунтов", "", "Text files (*.txt);;All files (*)"
+          )
+          if not path:
+              return
+
+          existing = {a.email.lower() for a in self._accounts}
+          worker = BulkImportWorker(path, existing, self)
+
+          from PyQt6.QtWidgets import QProgressDialog
+          progress_dlg = QProgressDialog(
+              "Импорт аккаунтов...", "Отмена", 0, 100, self
+          )
+          progress_dlg.setWindowTitle("Импорт")
+          progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
+          progress_dlg.setMinimumDuration(0)
+          progress_dlg.setValue(0)
+
+          def on_progress(cur, total):
+              if total > 0:
+                  progress_dlg.setValue(int(cur * 100 / total))
+
+          def on_finished(imported, errors):
+              progress_dlg.close()
+              self._accounts.extend(worker.new_accounts)
+              save_accounts(self._accounts)
+              self._refresh_table()
+              self.accounts_changed.emit(self._accounts)
+              QMessageBox.information(
+                  self, "Импорт завершён",
+                  f"Импортировано: {imported}\nПропущено (дубли/неизвестный домен): {errors}",
+              )
+              self._import_worker = None
+
+          def on_error(msg):
+              progress_dlg.close()
+              QMessageBox.critical(self, "Ошибка импорта", msg)
+              self._import_worker = None
+
+          worker.progress.connect(on_progress)
+          worker.finished.connect(on_finished)
+          worker.error.connect(on_error)
+          progress_dlg.canceled.connect(worker.terminate)
+          self._import_worker = worker
+          worker.start()
