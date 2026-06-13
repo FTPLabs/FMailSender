@@ -315,22 +315,22 @@ class AccountDialog(QDialog):
         layout.addRow(buttons)
 
     def _import_proxies(self):
-          from PyQt6.QtWidgets import QFileDialog
-          path, _ = QFileDialog.getOpenFileName(
-              self, "Импорт прокси из файла", "",
-              "Текстовые файлы (*.txt *.csv *.dat);;Все файлы (*)"
-          )
-          if not path:
-              return
-          try:
-              lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
-              valid = [l.strip() for l in lines if l.strip() and not l.strip().startswith("#")]
-              existing = self.proxy_edit.toPlainText().strip()
-              combined = (existing + "\n" + "\n".join(valid)).strip()
-              self.proxy_edit.setPlainText(combined)
-              QMessageBox.information(self, "Импорт прокси", f"Загружено {len(valid)} прокси из файла.")
-          except Exception as e:
-              QMessageBox.warning(self, "Ошибка импорта", str(e))
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Импорт прокси из файла", "",
+            "Текстовые файлы (*.txt *.csv *.dat);;Все файлы (*)"
+        )
+        if not path:
+            return
+        try:
+            lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+            valid = [l.strip() for l in lines if l.strip() and not l.strip().startswith("#")]
+            existing = self.proxy_edit.toPlainText().strip()
+            combined = (existing + "\n" + "\n".join(valid)).strip()
+            self.proxy_edit.setPlainText(combined)
+            QMessageBox.information(self, "Импорт прокси", f"Загружено {len(valid)} прокси из файла.")
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка импорта", str(e))
 
     def _autofill_smtp(self, email: str):
       if "@" not in email:
@@ -611,112 +611,112 @@ class AccountsScreen(QWidget):
             self._test_workers.append(w)
             w.start()
 
-      def _import_proxies(self):
-          """Массовый импорт прокси из файла или текстового ввода с назначением аккаунтам."""
-          from PyQt6.QtWidgets import (
-              QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-              QPushButton, QTextEdit, QComboBox, QDialogButtonBox
-          )
+    def _import_proxies(self):
+        """Массовый импорт прокси из файла или текстового ввода с назначением аккаунтам."""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+            QPushButton, QTextEdit, QComboBox, QDialogButtonBox
+        )
 
-          dlg = QDialog(self)
-          dlg.setWindowTitle("Массовый импорт прокси")
-          dlg.setMinimumWidth(520)
-          dlg.setMinimumHeight(420)
-          lay = QVBoxLayout(dlg)
-          lay.setSpacing(12)
-          lay.setContentsMargins(20, 20, 20, 20)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Массовый импорт прокси")
+        dlg.setMinimumWidth(520)
+        dlg.setMinimumHeight(420)
+        lay = QVBoxLayout(dlg)
+        lay.setSpacing(12)
+        lay.setContentsMargins(20, 20, 20, 20)
 
-          hint = QLabel(
-              "Введите прокси — по одному на строку. Форматы:\n"
-              "  host:port\n"
-              "  host:port:user:pass\n"
-              "  socks5://user:pass@host:port\n"
-              "  http://user:pass@host:port"
-          )
-          hint.setObjectName("label_muted")
-          hint.setWordWrap(True)
-          lay.addWidget(hint)
+        hint = QLabel(
+            "Введите прокси — по одному на строку. Форматы:\n"
+            "  host:port\n"
+            "  host:port:user:pass\n"
+            "  socks5://user:pass@host:port\n"
+            "  http://user:pass@host:port"
+        )
+        hint.setObjectName("label_muted")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
 
-          text_edit = QTextEdit()
-          text_edit.setPlaceholderText("192.168.1.1:8080\n10.0.0.1:3128:user:pass\n...")
-          text_edit.setMinimumHeight(180)
-          lay.addWidget(text_edit)
+        text_edit = QTextEdit()
+        text_edit.setPlaceholderText("192.168.1.1:8080\n10.0.0.1:3128:user:pass\n...")
+        text_edit.setMinimumHeight(180)
+        lay.addWidget(text_edit)
 
-          file_row = QHBoxLayout()
-          load_file_btn = QPushButton("📂 Загрузить из файла")
-          load_file_btn.setObjectName("btn_secondary")
-          def _load_file():
-              path, _ = QFileDialog.getOpenFileName(
-                  dlg, "Выбрать файл с прокси", "", "Text files (*.txt);;All files (*)"
-              )
-              if path:
-                  with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                      text_edit.setPlainText(f.read())
-          load_file_btn.clicked.connect(_load_file)
-          file_row.addWidget(load_file_btn)
-          file_row.addStretch()
-          lay.addLayout(file_row)
+        file_row = QHBoxLayout()
+        load_file_btn = QPushButton("📂 Загрузить из файла")
+        load_file_btn.setObjectName("btn_secondary")
+        def _load_file():
+            path, _ = QFileDialog.getOpenFileName(
+                dlg, "Выбрать файл с прокси", "", "Text files (*.txt);;All files (*)"
+            )
+            if path:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    text_edit.setPlainText(f.read())
+        load_file_btn.clicked.connect(_load_file)
+        file_row.addWidget(load_file_btn)
+        file_row.addStretch()
+        lay.addLayout(file_row)
 
-          mode_row = QHBoxLayout()
-          mode_row.addWidget(QLabel("Режим назначения:"))
-          mode_combo = QComboBox()
-          mode_combo.addItems([
-              "По кругу (round-robin)",
-              "Один прокси всем аккаунтам (первый в списке)",
-              "Только добавить в общий пул (без назначения)"
-          ])
-          mode_row.addWidget(mode_combo)
-          mode_row.addStretch()
-          lay.addLayout(mode_row)
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Режим назначения:"))
+        mode_combo = QComboBox()
+        mode_combo.addItems([
+            "По кругу (round-robin)",
+            "Один прокси всем аккаунтам (первый в списке)",
+            "Только добавить в общий пул (без назначения)"
+        ])
+        mode_row.addWidget(mode_combo)
+        mode_row.addStretch()
+        lay.addLayout(mode_row)
 
-          btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-          btns.accepted.connect(dlg.accept)
-          btns.rejected.connect(dlg.reject)
-          lay.addWidget(btns)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        lay.addWidget(btns)
 
-          if dlg.exec() != QDialog.DialogCode.Accepted:
-              return
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
 
-          raw = text_edit.toPlainText().strip()
-          if not raw:
-              return
+        raw = text_edit.toPlainText().strip()
+        if not raw:
+            return
 
-          lines = [l.strip() for l in raw.splitlines() if l.strip()]
-          valid_proxies = []
-          for line in lines:
-              p = ProxyRotator._normalize(line)
-              if p:
-                  valid_proxies.append(p)
+        lines = [l.strip() for l in raw.splitlines() if l.strip()]
+        valid_proxies = []
+        for line in lines:
+            p = ProxyRotator._normalize(line)
+            if p:
+                valid_proxies.append(p)
 
-          if not valid_proxies:
-              QMessageBox.warning(self, "Нет валидных прокси",
-                                  "Ни один прокси не прошёл проверку формата.\n"
-                                  "Используйте: host:port или host:port:user:pass")
-              return
+        if not valid_proxies:
+            QMessageBox.warning(self, "Нет валидных прокси",
+                                "Ни один прокси не прошёл проверку формата.\n"
+                                "Используйте: host:port или host:port:user:pass")
+            return
 
-          mode = mode_combo.currentIndex()
-          assigned = 0
+        mode = mode_combo.currentIndex()
+        assigned = 0
 
-          if mode == 0:  # round-robin
-              for i, acc in enumerate(self._accounts):
-                  acc.proxy = valid_proxies[i % len(valid_proxies)]
-                  assigned += 1
-          elif mode == 1:  # первый всем
-              for acc in self._accounts:
-                  acc.proxy = valid_proxies[0]
-                  assigned += 1
-          # mode == 2: только пул, не назначаем
+        if mode == 0:  # round-robin
+            for i, acc in enumerate(self._accounts):
+                acc.proxy = valid_proxies[i % len(valid_proxies)]
+                assigned += 1
+        elif mode == 1:  # первый всем
+            for acc in self._accounts:
+                acc.proxy = valid_proxies[0]
+                assigned += 1
+        # mode == 2: только пул, не назначаем
 
-          if assigned > 0:
-              save_accounts(self._accounts)
-              self._refresh_table()
-              self.accounts_changed.emit(self._accounts)
+        if assigned > 0:
+            save_accounts(self._accounts)
+            self._refresh_table()
+            self.accounts_changed.emit(self._accounts)
 
-          QMessageBox.information(
-              self, "Прокси импортированы",
-              f"Загружено прокси: {len(valid_proxies)}\n"
-              f"Назначено аккаунтам: {assigned}"
-          )
+        QMessageBox.information(
+            self, "Прокси импортированы",
+            f"Загружено прокси: {len(valid_proxies)}\n"
+            f"Назначено аккаунтам: {assigned}"
+        )
 
   
     def _import_accounts(self):

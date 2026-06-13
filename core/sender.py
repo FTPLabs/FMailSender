@@ -239,39 +239,27 @@ def _build_message(
 
 
 def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
-      """Sync SMTP test — runs in thread pool to avoid blocking the event loop."""
-      import ssl
-      try:
-          ctx = ssl.create_default_context()
-          if account.use_ssl:
-              s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=15)
-          else:
-              s = smtplib.SMTP(account.host, account.port, timeout=15)
-              if account.use_tls:
-                  s.starttls(context=ctx)
-          s.login(account.email, account.password)
-          s.quit()
-          return True, f"OK — {account.host}:{account.port}"
-      except Exception as e:
-          return False, f"ОШИБКА: {e}"
+    """Sync SMTP test — runs in thread pool to avoid blocking the event loop."""
+    import ssl
+    try:
+        ctx = ssl.create_default_context()
+        if account.use_ssl:
+            s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=15)
+        else:
+            s = smtplib.SMTP(account.host, account.port, timeout=15)
+            if account.use_tls:
+                s.starttls(context=ctx)
+        s.login(account.email, account.password)
+        s.quit()
+        return True, f"OK — {account.host}:{account.port}"
+    except Exception as e:
+        return False, f"ОШИБКА: {e}"
 
 
-  async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
+async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
     if not _HAS_AIOSMTPLIB:
-        try:
-            import ssl
-            ctx = ssl.create_default_context()
-            if account.use_ssl:
-                s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=15)
-            else:
-                s = smtplib.SMTP(account.host, account.port, timeout=15)
-                if account.use_tls:
-                    s.starttls(context=ctx)
-            s.login(account.email, account.password)
-            s.quit()
-            return True, f"OK — {account.host}:{account.port}"
-        except Exception as e:
-            return False, f"ОШИБКА: {e}"
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _test_smtp_sync, account)
     try:
         if account.use_ssl:
             smtp = aiosmtplib.SMTP(
