@@ -356,9 +356,9 @@ class AccountDialog(QDialog):
         self.active_check.setChecked(acc.is_active)
         self.proxy_edit.setPlainText("\n".join(getattr(acc, "proxy_list", []) or ([getattr(acc, "proxy", "")] if getattr(acc, "proxy", "") else [])))
         self.proxy_rotation_check.setChecked(getattr(acc, "proxy_rotation_random", False))
-          self.imap_host_edit.setText(getattr(acc, "imap_host", ""))
-          self.imap_port_spin.setValue(getattr(acc, "imap_port", 993))
-          self.imap_ssl_check.setChecked(getattr(acc, "imap_ssl", True))
+        self.imap_host_edit.setText(getattr(acc, "imap_host", ""))
+        self.imap_port_spin.setValue(getattr(acc, "imap_port", 993))
+        self.imap_ssl_check.setChecked(getattr(acc, "imap_ssl", True))
 
     def _validate_and_accept(self):
         email = self.email_edit.text().strip()
