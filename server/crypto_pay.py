@@ -93,8 +93,8 @@ class CryptoPayClient:
         poll_interval: int = 5,
     ) -> Optional[dict]:
         """Poll until paid or timeout. Returns invoice dict or None."""
-        deadline = asyncio.get_event_loop().time() + timeout
-        while asyncio.get_event_loop().time() < deadline:
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
             try:
                 invoice = await self.get_invoice(invoice_id)
                 if invoice and invoice.get("status") == "paid":
