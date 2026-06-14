@@ -147,8 +147,15 @@ async def save_payment(
     currency: str = "USDT",
 ) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
+        # Check for existing — INSERT OR IGNORE returns lastrowid=0 on conflict
+        async with db.execute(
+            "SELECT id FROM payments WHERE invoice_id = ?", (invoice_id,)
+        ) as _chk:
+            row = await _chk.fetchone()
+            if row:
+                return row[0]
         cur = await db.execute(
-            """INSERT OR IGNORE INTO payments
+            """INSERT INTO payments
                (telegram_id, invoice_id, plan, hwid, amount, currency, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (telegram_id, invoice_id, plan, hwid, amount, currency, _now()),
