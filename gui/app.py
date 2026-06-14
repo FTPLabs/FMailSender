@@ -242,10 +242,8 @@ class MainWindow(QMainWindow):
         dashboard_screen = self._screens["dashboard"]
 
         inbox_screen: InboxScreen = self._screens["inbox"]
-          inbox_screen: InboxScreen = self._screens["inbox"]
-          acct_screen.accounts_changed.connect(sending_screen.set_accounts)
-          acct_screen.accounts_changed.connect(inbox_screen.set_accounts)
-          acct_screen.accounts_changed.connect(inbox_screen.set_accounts)
+        acct_screen.accounts_changed.connect(sending_screen.set_accounts)
+        acct_screen.accounts_changed.connect(inbox_screen.set_accounts)
         if acct_screen._accounts:
             sending_screen.set_accounts(acct_screen._accounts)
         recip_screen.list_ready.connect(sending_screen.set_recipients)
