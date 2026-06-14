@@ -296,7 +296,10 @@ async def get_stats() -> dict:
         active = await _count("SELECT COUNT(*) FROM licenses WHERE is_active=1")
         paid = await _count("SELECT COUNT(*) FROM payments WHERE status='paid'")
         users = await _count("SELECT COUNT(*) FROM users")
-        return {"total": total, "active": active, "paid": paid, "users": users}
+        async with db.execute("SELECT COALESCE(SUM(amount), 0.0) FROM payments WHERE status='paid'") as cur:
+            row = await cur.fetchone()
+            revenue = float(row[0]) if row else 0.0
+        return {"total": total, "active": active, "paid": paid, "paid_orders": paid, "users": users, "revenue_usdt": revenue}
 
 
 async def search_license(query: str) -> list:
@@ -328,10 +331,3 @@ async def set_setting(key: str, value: str) -> None:
         )
         await db.commit()
 
-async def clear_all_licenses() -> None:
-    """Удаляет все лицензии и платежи (необратимо). Только для администратора."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM licenses")
-        await db.execute("DELETE FROM payments")
-        await db.commit()
-    logger.info("All licenses and payments cleared by admin.")

@@ -248,7 +248,7 @@ class BounceMonitor:
               else:
                   conn = imaplib.IMAP4(self.imap_host, self.imap_port)
               conn.login(self.email_addr, self.password)
-              conn.select("INBOX", readonly=True)
+              conn.select("INBOX", readonly=False)
 
               all_uids: set = set()
               for search_query in _IMAP_SEARCHES:
@@ -283,6 +283,11 @@ class BounceMonitor:
                               self._bounce_records.append(record)
                               if record.bounce_type == BounceType.HARD:
                                   self.add_to_blacklist(record.email)
+                          # Помечаем как прочитанное — не обрабатывать повторно
+                          try:
+                              conn.uid("store", uid, "+FLAGS", "\\Seen")
+                          except Exception:
+                              pass
                   except Exception:
                       pass
 

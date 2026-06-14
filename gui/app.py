@@ -303,8 +303,6 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
         event.accept()
-        import os
-        os._exit(0)
 
     def _navigate(self, key: str):
         labels = {

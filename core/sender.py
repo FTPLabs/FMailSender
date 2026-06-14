@@ -87,32 +87,32 @@ class SmtpAccount:
         self._hour_reset: float = time.time()
 
     def _tick_hour_reset(self) -> None:
-          """Сбрасывает часовой счётчик если прошёл час. Вызывать только под self._lock."""
-          now = time.time()
-          if now - self._hour_reset >= 3600:
-              self.sent_this_hour = 0
-              self._hour_reset = now
+        """Сбрасывает часовой счётчик если прошёл час. Вызывать только под self._lock."""
+        now = time.time()
+        if now - self._hour_reset >= 3600:
+          self.sent_this_hour = 0
+          self._hour_reset = now
 
-      @property
-      def can_send(self) -> bool:
-          """Thread-safe read-only проверка лимитов (без побочных эффектов)."""
-          if not self.is_active:
-              return False
-          with self._lock:
-              self._tick_hour_reset()
-              return self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit
+    @property
+    def can_send(self) -> bool:
+        """Thread-safe read-only проверка лимитов (без побочных эффектов)."""
+        if not self.is_active:
+            return False
+        with self._lock:
+            self._tick_hour_reset()
+            return self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit
 
-      def try_increment(self) -> bool:
-          """Атомарная проверка+инкремент. Устраняет TOCTOU race condition."""
-          if not self.is_active:
-              return False
-          with self._lock:
-              self._tick_hour_reset()
-              if self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit:
-                  self.sent_today += 1
-                  self.sent_this_hour += 1
-                  return True
-              return False
+    def try_increment(self) -> bool:
+        """Атомарная проверка+инкремент. Устраняет TOCTOU race condition."""
+        if not self.is_active:
+            return False
+        with self._lock:
+            self._tick_hour_reset()
+            if self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit:
+                self.sent_today += 1
+                self.sent_this_hour += 1
+                return True
+            return False
   
     def personalize(self, recipient: Recipient) -> "EmailTemplate":
         subs = {
@@ -340,11 +340,10 @@ class SendingEngine:
         self._paused = False
         self._campaign_task = asyncio.current_task()
 
-        # Сбрасываем счётчики аккаунтов перед каждой новой рассылкой
+        # Сбрасываем только часовой счётчик — дневные лимиты накапливаются
         for _acct in self.accounts:
             if _acct.is_active:
                 with _acct._lock:
-                    _acct.sent_today = 0
                     _acct.sent_this_hour = 0
                     _acct._hour_reset = time.time()
 
@@ -396,6 +395,8 @@ class SendingEngine:
                 batch_results = await _process_batch(batch)
                 for result in batch_results:
                     if isinstance(result, Exception):
+                        with self._stats_lock:
+                            self._stats["errors"] += 1
                         continue
                     results.append(result)
                     with self._stats_lock:

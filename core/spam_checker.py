@@ -216,41 +216,21 @@ class SpamChecker:
         return result
 
     def _check_dns(self, domain: str, result: SpamCheckResult) -> None:
-        """Проверяет MX и SPF записи домена."""
-        try:
-            dns.resolver.resolve(domain, "MX")
-            result.passed.append("MX запись найдена")
-        except dns.resolver.NXDOMAIN:
-            result.score += 20
-            result.issues.append(f"Домен не существует: {domain}")
-            return
-        except dns.resolver.NoAnswer:
+        """Делегирует DNS-проверку check_dns_auth — убирает дублирование логики."""
+        status = check_dns_auth(domain)
+        if not status.mx_valid:
             result.warnings.append(f"MX запись отсутствует для: {domain}")
-        except Exception:
-            pass
-
-        try:
-            txt_records = dns.resolver.resolve(domain, "TXT")
-            spf_found = any("v=spf1" in str(r) for r in txt_records)
-            if spf_found:
-                result.passed.append("SPF запись найдена")
-            else:
-                result.warnings.append("SPF запись не найдена")
-                result.score += 5
-        except dns.resolver.NoAnswer:
-            result.warnings.append("TXT записей нет (SPF не проверить)")
-        except dns.resolver.NXDOMAIN:
-            pass
-        except Exception:
-            pass
-
-        try:
-            dns.resolver.resolve(domain, "A")
-            result.passed.append("A-запись домена найдена")
-        except dns.resolver.NoAnswer:
-            result.warnings.append("A-запись отсутствует")
-        except Exception:
-            pass
+        else:
+            result.passed.append("MX запись найдена")
+        if status.spf_valid:
+            result.passed.append("SPF запись найдена")
+        else:
+            result.warnings.append("SPF запись не найдена")
+            result.score += 5
+        if status.dmarc_valid:
+            result.passed.append("DMARC запись найдена")
+        else:
+            result.warnings.append("DMARC запись отсутствует")
 
     def _strip_html(self, html_str: str) -> str:
         text = re.sub(r"<[^>]+>", "", html_str)

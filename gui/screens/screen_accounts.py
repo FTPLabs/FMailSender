@@ -978,7 +978,7 @@
           worker.progress.connect(on_progress)
           worker.finished.connect(on_finished)
           worker.error.connect(on_error)
-          progress_dlg.canceled.connect(worker.terminate)
+          progress_dlg.canceled.connect(worker.quit)
           self._import_worker = worker
           worker.start()
   

@@ -565,9 +565,9 @@ async def cb_admin_stats(query: CallbackQuery):
         f"📊 <b>Статистика</b>\n\n"
         f"✅ Активных лицензий: <b>{stats.get('active', 0)}</b>\n"
         f"📦 Всего лицензий: <b>{stats.get('total', 0)}</b>\n"
-        f"💳 Оплаченных заказов: <b>{stats['paid_orders']}</b>\n"
+        f"💳 Оплаченных заказов: <b>{stats.get('paid', 0)}</b>\n"
         f"👥 Пользователей: <b>{stats.get('users', 0)}</b>\n"
-        f"💰 Выручка: <b>${0:.2f} USDT</b>"
+        f"💰 Выручка: <b>${stats.get('revenue_usdt', 0.0):.2f} USDT</b>"
     )
     await send_or_edit(query, text, reply_markup=kb_back_admin())
 
