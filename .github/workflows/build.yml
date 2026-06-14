@@ -34,7 +34,6 @@ jobs:
             --add-data "assets;assets" ^
             --add-data "data;data" ^
             --hidden-import "PyQt6.sip" ^
-            --hidden-import-if-present "PyQt6.QtWebEngineWidgets" ^
             --collect-all "PyQt6" ^
             main.py
 
