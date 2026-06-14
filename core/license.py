@@ -406,7 +406,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
 
     hwid = generate_hwid()
     if progress_callback:
-        progress_callback(20)
+        progress_callback(20, "Проверка ключа...")
 
     try:
         resp = requests.post(
@@ -419,7 +419,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
             },
         )
         if progress_callback:
-            progress_callback(70)
+            progress_callback(70, "Активация на сервере...")
 
         if resp.status_code == 200:
             data = resp.json()
@@ -434,7 +434,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
                 "last_verified_online": time.time(),
             })
             if progress_callback:
-                progress_callback(100)
+                progress_callback(100, "Готово!")
             payload = _decode_payload_unverified(token)
             plan = payload.get("plan", "?") if payload else "?"
             return True, f"Лицензия активирована! Тариф: {plan}"
