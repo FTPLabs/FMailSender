@@ -294,8 +294,11 @@ class LicenseInfo:
         self.max_threads: int = payload.get("max_threads", 999999)
         self.max_recipients: int = payload.get("max_recipients", 999999)
         exp = payload.get("exp", 0)
+        # FIX ERR-3: use timezone-aware UTC datetime to avoid TZ-offset license expiry bugs
+        from datetime import timezone as _tz
         self.expires_at: datetime = (
-            datetime.fromtimestamp(exp) if exp else datetime(2099, 12, 31)
+            datetime.fromtimestamp(exp, tz=_tz.utc).replace(tzinfo=None)
+            if exp else datetime(2099, 12, 31)
         )
         self.email: str = payload.get("email", "")
         self.hwid: str = payload.get("hwid", "")
@@ -308,6 +311,7 @@ class LicenseInfo:
 
     @property
     def is_expired(self) -> bool:
+        # Consistent with expires_at (local naive datetime after UTC conversion)
         return datetime.now() > self.expires_at
 
     def __repr__(self) -> str:
