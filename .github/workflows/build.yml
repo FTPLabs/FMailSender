@@ -23,7 +23,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller pillow
 
       - name: Build .exe
         shell: cmd
@@ -39,6 +39,7 @@ jobs:
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: FMailSender-windows-exe
           path: dist/FMailSender.exe
@@ -61,20 +62,16 @@ jobs:
 
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1
+        continue-on-error: true
         with:
           host: 31.76.100.190
           username: root
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
             DEPLOY_DIR=/opt/fmailsender
-            if [ ! -d "$DEPLOY_DIR/.git" ]; then
-              git clone https://github.com/FTPLabs/FMailSender.git $DEPLOY_DIR
-            fi
-            cd $DEPLOY_DIR
-            git fetch origin main
-            git reset --hard origin/main
-            cd server
-            pip3 install -r requirements.txt -q 2>&1 | tail -3
-            pkill -f "python3 bot.py" 2>/dev/null || true
+            [ -d "$DEPLOY_DIR/.git" ] || git clone https://github.com/FTPLabs/FMailSender.git "$DEPLOY_DIR"
+            cd "$DEPLOY_DIR" && git pull origin main
+            cd server && pip3 install -r requirements.txt -q
+            pkill -f "python3 bot.py" 2>/dev/null; sleep 1
             nohup python3 bot.py >> /var/log/fmailsender-bot.log 2>&1 &
-            echo "Deployed OK at $(date)"
+            echo "Deployed at $(date)"
