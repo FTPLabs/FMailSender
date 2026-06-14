@@ -26,7 +26,16 @@ pip install --quiet --upgrade pip
 pip install --quiet -r requirements.txt
 
 if [ ! -f /opt/fmailsender/server/.env ]; then
-    printf "BOT_TOKEN=8869596289:AAFN22KeV6yp8oVCWwDTxu34wEc7Z-HX4bI\nADMIN_IDS=8784635852\nCRYPTO_BOT_TOKEN=594916:AA6n54rTVfzrbCljPW33D49EVwHyDEpmW6f\nHWID_SALT=FMSND-PRODUCTION-SALT-X9K2-2026\nJWT_SECRET=fmsnd-jwt-2026-X9K2M7B4Q3F8W1T5R6Y9P0\nDB_PATH=/opt/fmailsender/server/licenses.db\nAPI_HOST=0.0.0.0\nAPI_PORT=8000\n" > /opt/fmailsender/server/.env
+    cat > /opt/fmailsender/server/.env << 'ENVEOF'
+BOT_TOKEN=REPLACE_WITH_BOT_TOKEN
+ADMIN_IDS=REPLACE_WITH_ADMIN_TELEGRAM_ID
+CRYPTO_BOT_TOKEN=REPLACE_WITH_CRYPTO_BOT_TOKEN
+HWID_SALT=REPLACE_WITH_RANDOM_SALT_STRING
+JWT_SECRET=REPLACE_WITH_MIN_32_CHAR_SECRET
+DB_PATH=/opt/fmailsender/server/licenses.db
+API_HOST=0.0.0.0
+API_PORT=8000
+ENVEOF
     chmod 600 /opt/fmailsender/server/.env
     echo ".env created"
 else
