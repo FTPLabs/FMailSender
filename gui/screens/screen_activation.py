@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QApplication
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
-from PyQt6.QtGui import QFont, QClipboard
+from PyQt6.QtGui import QFont, QClipboard, QPixmap, QPainter
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtCore import QByteArray
 

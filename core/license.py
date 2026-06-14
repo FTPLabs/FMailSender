@@ -38,13 +38,13 @@ HWID_SALT: str = os.environ.get("HWID_SALT", "")
 
 LICENSE_API_URL = os.environ.get(
     "LICENSE_API_URL",
-    "http://31.76.100.190:8000/v1/activate",
+    "https://31.76.100.190:8000/v1/activate",  # SECURITY: default changed to HTTPS; override via LICENSE_API_URL env
 )
 LICENSE_VERIFY_URL = os.environ.get(
     "LICENSE_VERIFY_URL",
-    "http://31.76.100.190:8000/v1/verify",
+    "https://31.76.100.190:8000/v1/verify",  # SECURITY: default changed to HTTPS; override via LICENSE_VERIFY_URL env
 )
-if LICENSE_API_URL.startswith("http://"):
+if LICENSE_API_URL.startswith("http://") and not LICENSE_API_URL.startswith("https://"):
     logger.warning("LICENSE_API_URL uses plain HTTP — data sent unencrypted! Set HTTPS URL in LICENSE_API_URL env var.")
 
 OFFLINE_GRACE_HOURS = 72

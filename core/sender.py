@@ -1005,15 +1005,20 @@ class SendingEngine:
                     use_tls=False, start_tls=account.use_tls, timeout=30,
                 )
             await smtp.connect()
-            await smtp.login(account.email, account.password)
-            await smtp.send_message(msg)
-            await smtp.quit()
-            return SendResult(
-                recipient_email=recipient.email,
-                success=True,
-                account_used=account.email,
-                message_id=msg.get("Message-ID", ""),
-            )
+            try:
+                await smtp.login(account.email, account.password)
+                await smtp.send_message(msg)
+                return SendResult(
+                    recipient_email=recipient.email,
+                    success=True,
+                    account_used=account.email,
+                    message_id=msg.get("Message-ID", ""),
+                )
+            finally:
+                try:
+                    await smtp.quit()
+                except Exception:
+                    pass
         except Exception as e:
             return SendResult(
                 recipient_email=recipient.email,

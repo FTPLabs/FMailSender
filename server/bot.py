@@ -295,8 +295,8 @@ def _get_active_license(licenses: list) -> Optional[dict]:
                 exp_dt = exp_dt.replace(tzinfo=timezone.utc)
             if now <= exp_dt:
                 return lic
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("Failed to parse license expiry: %s", _e)
     return None
 
 
@@ -691,8 +691,8 @@ async def cb_ticket_close(query: CallbackQuery):
             f"✅ <b>Тикет #{ticket_id} закрыт</b>\n\nЕсли вопрос остался — создай новый тикет.",
             reply_markup=kb_main(is_admin(user_id)),
         )
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("Failed to notify user about ticket close: %s", _e)
     await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"🔒 Тикет #{ticket_id} закрыт", callback_data="noop")]
     ]))
@@ -881,22 +881,13 @@ async def cb_check_pay(query: CallbackQuery, state: FSMContext):
     if not payment:
         await query.answer("❌ Платёж не найден.", show_alert=True)
         return
-    existing_license = await db.get_payment_license(invoice_id)
-    if existing_license:
-        await send_or_edit(
-            query,
-            f"✅ Оплата подтверждена!\n\n🔑 <b>Ваш ключ:</b>\n<code>{existing_license}</code>\n\n"
-            f"Введите его в программе на экране активации.",
-            reply_markup=kb_main(is_admin(query.from_user.id)),
-        )
-        await state.clear()
-        return
-    license_data = await db.create_license(
+    # Atomic + idempotent: если уже обработан — вернёт существующий ключ
+    license_data = await db.create_license_for_payment(
+        invoice_id=invoice_id,
         plan=payment["plan"],
         hwid=payment.get("hwid", ""),
         telegram_id=payment["telegram_id"],
     )
-    await db.mark_payment_paid(invoice_id, license_data["key"])
     await state.clear()
     text = (
         f"✅ <b>Оплата подтверждена!</b>\n\n"
