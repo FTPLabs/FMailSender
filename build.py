@@ -92,14 +92,7 @@ def build_spec() -> str:
         "    hookspath=[],\n"
         "    hooksconfig={},\n"
         "    runtime_hooks=[],\n"
-        "    excludes=[
-        'tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas',
-        'PIL', 'cv2', 'flask', 'django', 'tornado', 'IPython',
-        'notebook', 'pytest', 'setuptools', 'pkg_resources',
-        'multiprocessing', 'lib2to3', 'pydoc', 'doctest',
-        'unittest', 'xmlrpc', 'ftplib', 'telnetlib', 'imghdr',
-        'sndhdr', 'aifc', 'sunau', 'cgi', 'cgitb', 'email.generator',
-    ],\n"
+        "    excludes=['tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas', 'PIL', 'cv2', 'flask', 'django', 'tornado', 'IPython', 'notebook', 'pytest', 'setuptools', 'pkg_resources', 'multiprocessing', 'lib2to3', 'pydoc', 'doctest', 'unittest', 'xmlrpc', 'ftplib', 'telnetlib', 'imghdr', 'sndhdr', 'aifc', 'sunau'],\n"
         "    cipher=block_cipher,\n"
         "    noarchive=False,\n"
         ")\n"
