@@ -43,10 +43,15 @@ class JsonFileStorage(BaseStorage):
                 pass
         return {}
 
-    def _dump(self) -> None:
-        self._path.write_text(
-            json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+    def _dump_sync(self) -> None:
+        """Sync write — called only via asyncio.to_thread."""
+        tmp = self._path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(self._path)
+
+    async def _dump(self) -> None:
+        """Async dump — offloads file I/O to thread pool, never blocks event loop."""
+        await asyncio.to_thread(self._dump_sync)
 
     def _key(self, key: StorageKey) -> str:
         return f"{key.chat_id}:{key.user_id}"
@@ -56,7 +61,7 @@ class JsonFileStorage(BaseStorage):
         if k not in self._data:
             self._data[k] = {}
         self._data[k]["state"] = state.state if hasattr(state, "state") else state
-        self._dump()
+        await self._dump()
 
     async def get_state(self, key: StorageKey) -> Any:
         return self._data.get(self._key(key), {}).get("state")
@@ -66,13 +71,13 @@ class JsonFileStorage(BaseStorage):
         if k not in self._data:
             self._data[k] = {}
         self._data[k]["data"] = data
-        self._dump()
+        await self._dump()
 
     async def get_data(self, key: StorageKey) -> Dict[str, Any]:
         return self._data.get(self._key(key), {}).get("data", {})
 
     async def close(self) -> None:
-        self._dump()
+        await self._dump()
 
 
 from aiogram.types import (
@@ -87,6 +92,54 @@ from pydantic import BaseModel
 import database as db
 from config import ADMIN_IDS, API_HOST, API_PORT, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL
 from crypto_pay import crypto_client
+
+  # ─── GitHub Release Auto-Fetch ───────────────────────────────────────────────
+
+  GITHUB_REPO = "FTPLabs/FMailSender"
+  _release_cache: dict = {}
+  _release_cache_ts: float = 0.0
+  _RELEASE_CACHE_TTL = 300  # 5 minutes
+
+
+  async def fetch_latest_release() -> dict:
+      """Auto-fetch latest GitHub release info. Cached for 5 min."""
+      global _release_cache, _release_cache_ts
+      import time
+      if _release_cache and (time.time() - _release_cache_ts) < _RELEASE_CACHE_TTL:
+          return _release_cache
+      url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+      try:
+          async with aiohttp.ClientSession() as session:
+              async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                  if resp.status == 200:
+                      data = await resp.json()
+                      assets = data.get("assets", [])
+                      exe_asset = next(
+                          (a for a in assets if a.get("name", "").endswith(".exe")), None
+                      )
+                      _release_cache = {
+                          "tag": data.get("tag_name", ""),
+                          "html_url": data.get("html_url", ""),
+                          "download_url": (
+                              exe_asset["browser_download_url"]
+                              if exe_asset
+                              else data.get("html_url", DOWNLOAD_URL)
+                          ),
+                          "vt_url": _extract_vt_url(data.get("body", "")),
+                          "body": data.get("body", ""),
+                      }
+                      _release_cache_ts = time.time()
+                      return _release_cache
+      except Exception as e:
+          logger.warning("GitHub release fetch failed: %s", e)
+      return {"tag": "", "html_url": DOWNLOAD_URL, "download_url": DOWNLOAD_URL, "vt_url": "", "body": ""}
+
+
+  def _extract_vt_url(release_body: str) -> str:
+      """Extract VirusTotal URL from release notes if present."""
+      import re
+      m = re.search(r'https://www\.virustotal\.com/[^\s)\]]+', release_body)
+      return m.group(0) if m else ""
 
 logging.basicConfig(
     level=logging.INFO,
@@ -251,7 +304,8 @@ async def send_or_edit(message_or_query, text: str, reply_markup=None, **kwargs)
     if isinstance(message_or_query, CallbackQuery):
         try:
             await message_or_query.message.edit_text(text, reply_markup=reply_markup, **kwargs)
-        except Exception:
+        except Exception as _edit_err:
+            logger.debug("edit_text failed (%s), falling back to answer", _edit_err)
             await message_or_query.message.answer(text, reply_markup=reply_markup, **kwargs)
         await message_or_query.answer()
     else:
@@ -388,11 +442,16 @@ async def cb_menu_download(query: CallbackQuery):
         )
         return
 
+    # Auto-fetch latest release info from GitHub (cached 5 min); manual override takes priority
     try:
-        zip_url = await db.get_setting("zip_url")  or ""
-        vt_url  = await db.get_setting("vt_url")   or ""
-        dl_url  = await db.get_setting("download_url") or DOWNLOAD_URL
-    except Exception:
+        release = await fetch_latest_release()
+        zip_url    = await db.get_setting("zip_url")      or ""
+        manual_dl  = await db.get_setting("download_url") or ""
+        manual_vt  = await db.get_setting("vt_url")       or ""
+        dl_url = manual_dl or release.get("download_url") or DOWNLOAD_URL
+        vt_url = manual_vt or release.get("vt_url")       or ""
+    except Exception as _fetch_err:
+        logger.warning("Download info fetch error: %s", _fetch_err)
         zip_url = vt_url = ""
         dl_url = DOWNLOAD_URL
 
