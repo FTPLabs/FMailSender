@@ -192,77 +192,77 @@ async def mark_payment_paid(invoice_id: str, license_key: str) -> None:
 
 
 
-  async def create_license_for_payment(
-      invoice_id: str,
-      plan: str,
-      telegram_id: int = 0,
-      hwid: str = "",
-  ) -> dict:
-      """Atomic: create license + mark payment paid in one transaction.
-      
-      Returns existing license_key if payment was already processed (idempotent).
-      """
-      from config import PLANS, KEY_PREFIX
-      import secrets as _secrets, string as _string
+async def create_license_for_payment(
+    invoice_id: str,
+    plan: str,
+    telegram_id: int = 0,
+    hwid: str = "",
+) -> dict:
+    """Atomic: create license + mark payment paid in one transaction.
 
-      # First check if already processed (idempotent guard)
-      async with aiosqlite.connect(DB_PATH) as db:
-          db.row_factory = aiosqlite.Row
-          async with db.execute(
-              "SELECT license_key FROM payments WHERE invoice_id=? AND status='paid'",
-              (invoice_id,),
-          ) as cur:
-              row = await cur.fetchone()
-          if row and row["license_key"]:
-              # Already processed — return existing key
-              async with db.execute(
-                  "SELECT * FROM licenses WHERE key=?", (row["license_key"],)
-              ) as cur2:
-                  lic = await cur2.fetchone()
-              return dict(lic) if lic else {"key": row["license_key"]}
+    Returns existing license_key if payment was already processed (idempotent).
+    """
+    from config import PLANS, KEY_PREFIX
+    import secrets as _secrets, string as _string
 
-          # Not yet processed — create license and mark paid atomically
-          plan_data = PLANS.get(plan, list(PLANS.values())[1])
-          hours = plan_data.get("hours", 0)
-          days = plan_data.get("days", 30)
-          if hours and not days:
-              expires_at = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
-          else:
-              expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+    # First check if already processed (idempotent guard)
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT license_key FROM payments WHERE invoice_id=? AND status='paid'",
+            (invoice_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row and row["license_key"]:
+            # Already processed — return existing key
+            async with db.execute(
+                "SELECT * FROM licenses WHERE key=?", (row["license_key"],)
+            ) as cur2:
+                lic = await cur2.fetchone()
+            return dict(lic) if lic else {"key": row["license_key"]}
 
-          alphabet = _string.ascii_uppercase + _string.digits
-          suffix = "".join(_secrets.choice(alphabet) for _ in range(20))
-          key = f"{KEY_PREFIX}-{suffix[:5]}-{suffix[5:10]}-{suffix[10:15]}-{suffix[15:20]}"
-          now_str = _now()
+        # Not yet processed — create license and mark paid atomically
+        plan_data = PLANS.get(plan, list(PLANS.values())[1])
+        hours = plan_data.get("hours", 0)
+        days = plan_data.get("days", 30)
+        if hours and not days:
+            expires_at = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+        else:
+            expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
 
-          try:
-              await db.execute("BEGIN EXCLUSIVE")
-              await db.execute(
-                  """INSERT INTO licenses
-                     (key, plan, hwid, telegram_id, max_threads, max_recipients,
-                      days, activated_at, expires_at, created_at, is_active)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
-                  (
-                      key, plan, hwid, telegram_id,
-                      plan_data.get("max_threads", 5),
-                      plan_data.get("max_recipients", 1000),
-                      days, "", expires_at, now_str,
-                  ),
-              )
-              await db.execute(
-                  "UPDATE payments SET status='paid', license_key=?, paid_at=? WHERE invoice_id=?",
-                  (key, now_str, invoice_id),
-              )
-              await db.commit()
-          except Exception:
-              await db.rollback()
-              raise
+        alphabet = _string.ascii_uppercase + _string.digits
+        suffix = "".join(_secrets.choice(alphabet) for _ in range(20))
+        key = f"{KEY_PREFIX}-{suffix[:5]}-{suffix[5:10]}-{suffix[10:15]}-{suffix[15:20]}"
+        now_str = _now()
 
-          db.row_factory = aiosqlite.Row
-          async with db.execute("SELECT * FROM licenses WHERE key=?", (key,)) as cur3:
-              lic = await cur3.fetchone()
-          return dict(lic) if lic else {"key": key}
-  
+        try:
+            await db.execute("BEGIN EXCLUSIVE")
+            await db.execute(
+                """INSERT INTO licenses
+                   (key, plan, hwid, telegram_id, max_threads, max_recipients,
+                    days, activated_at, expires_at, created_at, is_active)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
+                (
+                    key, plan, hwid, telegram_id,
+                    plan_data.get("max_threads", 5),
+                    plan_data.get("max_recipients", 1000),
+                    days, "", expires_at, now_str,
+                ),
+            )
+            await db.execute(
+                "UPDATE payments SET status='paid', license_key=?, paid_at=? WHERE invoice_id=?",
+                (key, now_str, invoice_id),
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM licenses WHERE key=?", (key,)) as cur3:
+            lic = await cur3.fetchone()
+        return dict(lic) if lic else {"key": key}
+
 async def create_license(
     plan: str,
     telegram_id: int = 0,
