@@ -369,7 +369,7 @@ class ComposeScreen(QWidget):
           self.formatting_toolbar = FormattingToolbar(self.rich_editor)
           rich_layout.addWidget(self.formatting_toolbar)
           rich_layout.addWidget(self.rich_editor, 1)
-          self.editor_tabs.addTab(rich_tab, "✏  Редактор")
+          self.editor_tabs.addTab(rich_tab, "✏️ Редактор")
 
           # Вкладка 2: HTML-код
           self.html_editor = QTextEdit()
@@ -377,7 +377,7 @@ class ComposeScreen(QWidget):
           self.html_editor.setPlaceholderText("<!-- HTML-код письма -->")
           self.html_highlighter = HtmlHighlighter(self.html_editor.document())
           self.html_editor.textChanged.connect(self._on_html_changed)
-          self.editor_tabs.addTab(self.html_editor, "</>  HTML")
+          self.editor_tabs.addTab(self.html_editor, "</> HTML")
 
           # Вкладка 3: предпросмотр
           preview_container = QWidget()
@@ -403,7 +403,7 @@ class ComposeScreen(QWidget):
               self.preview = QTextBrowser()
               self.preview.setOpenExternalLinks(True)
           preview_layout.addWidget(self.preview, 1)
-          self.editor_tabs.addTab(preview_container, "👁  Предпросмотр")
+          self.editor_tabs.addTab(preview_container, "👁 Предпросмотр")
 
           self.editor_tabs.currentChanged.connect(self._on_tab_changed)
           layout.addWidget(self.editor_tabs, 1)
