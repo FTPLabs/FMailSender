@@ -1483,6 +1483,50 @@ async def health():
 
 # ─── Entry Point ─────────────────────────────────────────────────────────────
 
+async def _poll_pending_payments():
+    """FIX ERR-2: Background task — auto-confirms payments without user pressing 'Check'.
+    Polls CryptoPay every 60s for all pending invoices. Idempotent — safe to run always.
+    """
+    await asyncio.sleep(15)  # initial delay to let DB init complete
+    while True:
+        try:
+            pending = await db.get_pending_payments()
+            for payment in pending:
+                invoice_id = payment.get("invoice_id", "")
+                if not invoice_id:
+                    continue
+                try:
+                    paid = await crypto_client.check_invoice(invoice_id)
+                    if paid:
+                        license_data = await db.create_license_for_payment(
+                            invoice_id=invoice_id,
+                            plan=payment["plan"],
+                            hwid=payment.get("hwid", ""),
+                            telegram_id=payment["telegram_id"],
+                        )
+                        user_id = payment["telegram_id"]
+                        plan_name = PLANS.get(payment["plan"], {}).get("name", payment["plan"])
+                        try:
+                            await bot.send_message(
+                                user_id,
+                                f"✅ <b>Оплата подтверждена автоматически!</b>\n\n"
+                                f"📦 Тариф: <b>{plan_name}</b>\n\n"
+                                f"🔑 <b>Ваш лицензионный ключ:</b>\n<code>{license_data['key']}</code>\n\n"
+                                f"Введите его на экране активации программы.\n"
+                                f"💻 HWID: <code>{payment.get('hwid') or 'привязывается при первой активации'}</code>",
+                                reply_markup=kb_main(is_admin(user_id)),
+                                parse_mode="HTML",
+                            )
+                        except Exception as notify_err:
+                            logger.warning("Failed to notify user %d about auto payment: %s", user_id, notify_err)
+                        logger.info("Auto-confirmed payment invoice_id=%s for user=%d", invoice_id, user_id)
+                except Exception as e:
+                    logger.warning("poll_payment error for invoice %s: %s", invoice_id, e)
+        except Exception as e:
+            logger.error("Payment poller error: %s", e)
+        await asyncio.sleep(60)  # poll every 60 seconds
+
+
 async def main():
     await db.init_db()
     logger.info("Starting FMail Sender Bot + API v3.0.0...")
@@ -1496,6 +1540,7 @@ async def main():
     await asyncio.gather(
         dp.start_polling(bot, skip_updates=True),
         server.serve(),
+        _poll_pending_payments(),
     )
 
 
