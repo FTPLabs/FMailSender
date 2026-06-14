@@ -167,34 +167,34 @@ class MainWindow(QMainWindow):
         sidebar_layout.addStretch()
 
         _is_lifetime = self._license.plan.upper() in ("LIFETIME", "LIFE", "LTD", "LIFELONG")
-          _plan_frame = QFrame()
-          _plan_frame.setObjectName("plan_info_frame")
-          _plan_fl = QVBoxLayout(_plan_frame)
-          _plan_fl.setContentsMargins(8, 8, 8, 8)
-          _plan_fl.setSpacing(4)
+        _plan_frame = QFrame()
+        _plan_frame.setObjectName("plan_info_frame")
+        _plan_fl = QVBoxLayout(_plan_frame)
+        _plan_fl.setContentsMargins(8, 8, 8, 8)
+        _plan_fl.setSpacing(4)
 
-          if not _is_lifetime:
-              expiry_lbl = QLabel(f"до {self._license.expires_at.strftime('%d.%m.%Y')}")
-              expiry_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-              expiry_lbl.setStyleSheet(
-                  "color: rgba(139,92,246,0.65); font-size: 10px;"
-                  " font-weight: 400; letter-spacing: 0.5px;"
-                  " background: transparent; padding: 0;"
-              )
-              _plan_fl.addWidget(expiry_lbl)
+        if not _is_lifetime:
+            expiry_lbl = QLabel(f"до {self._license.expires_at.strftime('%d.%m.%Y')}")
+            expiry_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            expiry_lbl.setStyleSheet(
+                "color: rgba(139,92,246,0.65); font-size: 10px;"
+                " font-weight: 400; letter-spacing: 0.5px;"
+                " background: transparent; padding: 0;"
+            )
+            _plan_fl.addWidget(expiry_lbl)
 
-          plan_lbl = QLabel(("\u221e  " if _is_lifetime else "") + self._license.plan.lower())
-          plan_lbl.setObjectName("plan_badge")
-          plan_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-          _plan_fl.addWidget(plan_lbl)
+        plan_lbl = QLabel(("\u221e  " if _is_lifetime else "") + self._license.plan.lower())
+        plan_lbl.setObjectName("plan_badge")
+        plan_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _plan_fl.addWidget(plan_lbl)
 
-          dev_lbl = QLabel('<a href="https://lolz.live/ftpdev/" style="color:rgba(139,92,246,0.35);text-decoration:none;">@ftpdev_sup</a>')
-          dev_lbl.setOpenExternalLinks(True)
-          dev_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-          dev_lbl.setStyleSheet("font-size: 10px; background: transparent; padding: 0;")
-          _plan_fl.addWidget(dev_lbl)
+        dev_lbl = QLabel('<a href="https://lolz.live/ftpdev/" style="color:rgba(139,92,246,0.35);text-decoration:none;">@ftpdev_sup</a>')
+        dev_lbl.setOpenExternalLinks(True)
+        dev_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dev_lbl.setStyleSheet("font-size: 10px; background: transparent; padding: 0;")
+        _plan_fl.addWidget(dev_lbl)
 
-          sidebar_layout.addWidget(_plan_frame)
+        sidebar_layout.addWidget(_plan_frame)
         root.addWidget(sidebar)
 
         # Main area with animated background
