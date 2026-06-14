@@ -1,6 +1,25 @@
 # Changelog
 
-  All notable changes are documented here.
+## [3.0.1] — 2026-06-14
+
+  ### Исправлено (Bug Fixes)
+  - **core/ai_fixer.py**: Добавлен try/except вокруг `data["choices"][0]` и `json.loads()` — больше нет необработанных KeyError/IndexError при нестандартных ответах OpenAI
+  - **server/database.py**: Исправлен баг в `save_payment()` — INSERT OR IGNORE возвращал lastrowid=0 при дублирующемся invoice_id; теперь корректно возвращает ID существующей записи
+  - **server/bot.py**: `JsonFileStorage._dump()` переведён в асинхронный режим через `asyncio.to_thread()` — устранена блокировка event loop при каждом изменении состояния FSM
+  - **server/bot.py**: `send_or_edit()` теперь логирует ошибки `edit_text()` через DEBUG вместо молчаливого проглатывания
+  - **core/license.py**: Рефакторинг: дублирующийся WMI-код в `_get_cpu_id()`, `_get_disk_serial()`, `_get_board_id()` вынесен в единую вспомогательную функцию `_wmi_query()` (~180 строк → ~50 строк)
+
+  ### Новое (New Features)
+  - **Автоматизация Download URL**: Ссылка для скачивания теперь автоматически берётся из последнего GitHub Release (кэш 5 мин). Ручное переопределение через бот по-прежнему имеет приоритет
+  - **Автоматизация VirusTotal**: CI/CD теперь автоматически отправляет .exe на VirusTotal после каждого релиза и вставляет ссылку в Release Notes. Бот автоматически парсит её из описания релиза — ручное обновление не требуется
+  - **GitHub Actions**: Добавлен шаг VirusTotal в build.yml (требует секрет `VIRUSTOTAL_API_KEY`)
+
+  ### Рефакторинг
+  - Унифицирован WMI-helper, удалено ~130 строк дублирующегося кода в license.py
+
+  ---
+
+    All notable changes are documented here.
 
   ---
 
