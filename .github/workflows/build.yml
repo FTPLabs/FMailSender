@@ -123,7 +123,7 @@ jobs:
         with:
           host: 31.76.100.190
           username: root
-          password: ${{ secrets.VPS_PASSWORD }}
+          key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             DEPLOY_DIR=/opt/fmailsender
             [ -d "$DEPLOY_DIR/.git" ] || git clone https://github.com/FTPLabs/FMailSender.git "$DEPLOY_DIR"
