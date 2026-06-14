@@ -72,6 +72,6 @@ jobs:
             [ -d "$DEPLOY_DIR/.git" ] || git clone https://github.com/FTPLabs/FMailSender.git "$DEPLOY_DIR"
             cd "$DEPLOY_DIR" && git pull origin main
             cd server && pip3 install -r requirements.txt -q
-            pkill -f "python3 bot.py" 2>/dev/null; sleep 1
-            nohup python3 bot.py >> /var/log/fmailsender-bot.log 2>&1 &
+            pip3 install -r server/requirements.txt -q
+            systemctl restart fmailsender 2>/dev/null || (pkill -f "python3 bot.py" 2>/dev/null; sleep 1; nohup python3 bot.py >> /var/log/fmailsender-bot.log 2>&1 &)
             echo "Deployed at $(date)"
