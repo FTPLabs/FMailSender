@@ -114,14 +114,23 @@ class AiSpamFixer:
             body = e.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"OpenAI API ошибка {e.code}: {body[:300]}")
 
-        content = data["choices"][0]["message"]["content"]
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError) as exc:
+            raise RuntimeError(
+                f"OpenAI API вернул неожиданный ответ: {str(data)[:300]}"
+            ) from exc
+        _content_tmp = content  # alias
         # Extract JSON from markdown code block if present
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0].strip()
         elif "```" in content:
             content = content.split("```")[1].split("```")[0].strip()
 
-        parsed = json.loads(content)
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"OpenAI вернул невалидный JSON: {content[:300]}") from exc
         return AiFixResult(
             subject=parsed.get("subject", subject),
             body_html=parsed.get("body_html", body_html),
