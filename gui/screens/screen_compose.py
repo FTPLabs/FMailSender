@@ -203,36 +203,36 @@ class FormattingToolbar(QFrame):
 
     def _text_color(self):
         """Открывает диалог выбора цвета с полной русификацией."""
-          from PyQt6.QtWidgets import QLabel, QPushButton, QGroupBox
-          dialog = QColorDialog(parent=self)
-          dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
-          dialog.setWindowTitle("Выбрать цвет текста")
-          _RU = {
-              "Basic colors": "Основные цвета", "&Basic colors": "Основные цвета",
-              "Custom colors": "Пользовательские", "&Custom colors": "Пользовательские",
-              "Pick Screen Color": "Пипетка", "&Pick Screen Color": "Пипетка",
-              "Add to Custom Colors": "Добавить", "&Add to Custom Colors": "Добавить",
-              "Hue:": "Тон:", "Sat:": "Нас.:", "Val:": "Ярк.:",
-              "Red:": "R:", "Green:": "G:", "Blue:": "B:",
-              "HTML:": "HEX:", "Alpha channel:": "Прозрачность:",
-              "OK": "ОК", "&OK": "ОК", "Cancel": "Отмена", "&Cancel": "Отмена",
-          }
-          def _ru(w):
-              for lbl in w.findChildren(QLabel):
-                  lbl.setText(_RU.get(lbl.text(), lbl.text()))
-              for btn in w.findChildren(QPushButton):
-                  btn.setText(_RU.get(btn.text(), btn.text()))
-              for gb in w.findChildren(QGroupBox):
-                  gb.setTitle(_RU.get(gb.title(), gb.title()))
-          _ru(dialog)
-          from PyQt6.QtCore import QTimer
-          QTimer.singleShot(0, lambda: _ru(dialog))
-          if dialog.exec() == QColorDialog.DialogCode.Accepted:
-              color = dialog.selectedColor()
-              if color.isValid():
-                  fmt = QTextCharFormat()
-                  fmt.setForeground(color)
-                  self._editor.textCursor().mergeCharFormat(fmt)
+        from PyQt6.QtWidgets import QLabel, QPushButton, QGroupBox
+        dialog = QColorDialog(parent=self)
+        dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
+        dialog.setWindowTitle("Выбрать цвет текста")
+        _RU = {
+            "Basic colors": "Основные цвета", "&Basic colors": "Основные цвета",
+            "Custom colors": "Пользовательские", "&Custom colors": "Пользовательские",
+            "Pick Screen Color": "Пипетка", "&Pick Screen Color": "Пипетка",
+            "Add to Custom Colors": "Добавить", "&Add to Custom Colors": "Добавить",
+            "Hue:": "Тон:", "Sat:": "Нас.:", "Val:": "Ярк.:",
+            "Red:": "R:", "Green:": "G:", "Blue:": "B:",
+            "HTML:": "HEX:", "Alpha channel:": "Прозрачность:",
+            "OK": "ОК", "&OK": "ОК", "Cancel": "Отмена", "&Cancel": "Отмена",
+        }
+        def _ru(w):
+            for lbl in w.findChildren(QLabel):
+                lbl.setText(_RU.get(lbl.text(), lbl.text()))
+            for btn in w.findChildren(QPushButton):
+                btn.setText(_RU.get(btn.text(), btn.text()))
+            for gb in w.findChildren(QGroupBox):
+                gb.setTitle(_RU.get(gb.title(), gb.title()))
+        _ru(dialog)
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, lambda: _ru(dialog))
+        if dialog.exec() == QColorDialog.DialogCode.Accepted:
+            color = dialog.selectedColor()
+            if color.isValid():
+                fmt = QTextCharFormat()
+                fmt.setForeground(color)
+                self._editor.textCursor().mergeCharFormat(fmt)
   
     def _align(self, alignment):
         self._editor.setAlignment(alignment)
@@ -262,9 +262,9 @@ class FormattingToolbar(QFrame):
 
     def _insert_variable(self, text: str):
         """Немедленная вставка переменной при выборе из списка."""
-          if text.startswith("{{") and text.endswith("}}"):
-              self._editor.textCursor().insertText(text)
-              self._editor.setFocus()
+        if text.startswith("{{") and text.endswith("}}"):
+            self._editor.textCursor().insertText(text)
+            self._editor.setFocus()
   
 
 class SpamCheckWorker(QThread):
