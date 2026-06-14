@@ -419,6 +419,10 @@ QTableWidget {{
     selection-background-color: rgba(139, 92, 246, 0.18);
     outline: none;
 }}
+QTableWidget::item {{
+    padding: 4px 10px;
+    border: none;
+}}
 QTableWidget::item:selected {{ color: {c.TEXT_PRIMARY}; }}
 QHeaderView::section {{
     background: {c.BG_GLASS};

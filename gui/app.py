@@ -195,22 +195,29 @@ class MainWindow(QMainWindow):
         _social_row.setSpacing(6)
         _social_row.addStretch()
 
-        _TG_SVG = b'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z" fill="rgba(139,92,246,0.6)"/></svg>'
-        _tg_icon_lbl = QLabel()
+        # Иконки через Unicode — надёжнее SVG на всех платформах
+        _tg_icon_lbl = QLabel("\u2708")   # ✈ самолётик — символ Telegram
         _tg_icon_lbl.setFixedSize(18, 18)
+        _tg_icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _tg_icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        _tg_icon_lbl.setStyleSheet("background: transparent; border: none;")
-        _tg_icon_lbl.setPixmap(_svg_to_pixmap(_TG_SVG, 16))
+        _tg_icon_lbl.setStyleSheet(
+            "color: rgba(139,92,246,0.75); font-size: 12px;"
+            " background: transparent; border: none;"
+        )
         _tg_icon_lbl.setToolTip("Поддержка в Telegram")
         _tg_icon_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
         _social_row.addWidget(_tg_icon_lbl)
 
-        _LOLZ_SVG = b'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="rgba(139,92,246,0.6)" stroke-width="1.5"/><text x="12" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="rgba(139,92,246,0.6)" font-family="Arial">L</text></svg>'
-        _lolz_icon_lbl = QLabel()
+        _lolz_icon_lbl = QLabel("L")   # Lolz — буква в кружке через CSS
         _lolz_icon_lbl.setFixedSize(18, 18)
+        _lolz_icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _lolz_icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        _lolz_icon_lbl.setStyleSheet("background: transparent; border: none;")
-        _lolz_icon_lbl.setPixmap(_svg_to_pixmap(_LOLZ_SVG, 16))
+        _lolz_icon_lbl.setStyleSheet(
+            "color: rgba(139,92,246,0.75); font-size: 10px; font-weight: 700;"
+            " background: transparent;"
+            " border: 1.5px solid rgba(139,92,246,0.55);"
+            " border-radius: 9px;"
+        )
         _lolz_icon_lbl.setToolTip("Профиль на Lolz")
         _lolz_icon_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
         _social_row.addWidget(_lolz_icon_lbl)

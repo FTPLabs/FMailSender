@@ -357,6 +357,13 @@ class InboxScreen(QWidget):
         self._preview_body = QTextEdit()
         self._preview_body.setReadOnly(True)
         self._preview_body.setObjectName("card_inner")
+        self._preview_body.setStyleSheet(
+            f"background: {Colors.BG_SURFACE3};"
+            f" color: {Colors.TEXT_PRIMARY};"
+            f" border: 1px solid {Colors.BORDER};"
+            " border-radius: 8px;"
+            " padding: 10px;"
+        )
 
         preview_layout.addWidget(self._preview_from)
         preview_layout.addWidget(self._preview_subject)
