@@ -91,7 +91,6 @@ name: Build FMailSender .exe
             $filePath = "dist/FMailSender.exe"
             $fileHash = (Get-FileHash $filePath -Algorithm SHA256).Hash.ToLower()
             Write-Host "SHA256: $fileHash"
-            # Check if already scanned
             $headers = @{ "x-apikey" = $env:VT_API_KEY }
             $existing = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/files/$fileHash" -Headers $headers -Method GET -ErrorAction SilentlyContinue
             if ($existing -and $existing.data.id) {
@@ -100,9 +99,6 @@ name: Build FMailSender .exe
               echo "vt_url=$vtUrl" >> $env:GITHUB_OUTPUT
               exit 0
             }
-            # Upload for scan
-            $boundary = [System.Guid]::NewGuid().ToString()
-            $fileBytes = [System.IO.File]::ReadAllBytes($filePath)
             $uploadResp = Invoke-RestMethod `
               -Uri "https://www.virustotal.com/api/v3/files" `
               -Method POST `
