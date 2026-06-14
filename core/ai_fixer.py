@@ -120,7 +120,6 @@ class AiSpamFixer:
             raise RuntimeError(
                 f"OpenAI API вернул неожиданный ответ: {str(data)[:300]}"
             ) from exc
-        _content_tmp = content  # alias
         # Extract JSON from markdown code block if present
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0].strip()
