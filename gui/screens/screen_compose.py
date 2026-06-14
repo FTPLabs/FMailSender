@@ -161,17 +161,17 @@ class FormattingToolbar(QFrame):
         layout.addWidget(sep())
 
         # ── Переменные ───────────────────────────────────────────────────────
-        vars_combo = QComboBox()
-        vars_combo.setFixedWidth(148)
-        vars_combo.setFixedHeight(28)
-        vars_combo.addItem("∴ Переменная...")
-        vars_combo.addItems([
+        self._vars_combo = QComboBox()
+        self._vars_combo.setFixedWidth(148)
+        self._vars_combo.setFixedHeight(28)
+        self._vars_combo.addItem("∴ Переменная...")
+        self._vars_combo.addItems([
             "{{first_name}}", "{{last_name}}", "{{company}}",
             "{{custom_1}}", "{{custom_2}}", "{{custom_3}}",
             "{{custom_4}}", "{{custom_5}}", "{{email}}"
         ])
-        vars_combo.currentTextChanged.connect(self._insert_variable)
-        layout.addWidget(vars_combo)
+        self._vars_combo.currentIndexChanged.connect(self._insert_variable)
+        layout.addWidget(self._vars_combo)
 
         layout.addStretch()
 
@@ -260,11 +260,21 @@ class FormattingToolbar(QFrame):
                 cursor = self._editor.textCursor()
                 cursor.insertHtml(f'<a href="{url}">{text}</a>')
 
-    def _insert_variable(self, text: str):
-        """Немедленная вставка переменной при выборе из списка."""
+    def _insert_variable(self, index: int):
+        """Вставляет выбранную переменную и сбрасывает комбо на placeholder.
+        Принимает index (currentIndexChanged), что позволяет вставить одну
+        переменную несколько раз подряд.
+        """
+        if index <= 0:
+            return
+        text = self._vars_combo.itemText(index)
         if text.startswith("{{") and text.endswith("}}"):
             self._editor.textCursor().insertText(text)
             self._editor.setFocus()
+        # Сбрасываем обратно на placeholder, не вызывая рекурсию
+        self._vars_combo.blockSignals(True)
+        self._vars_combo.setCurrentIndex(0)
+        self._vars_combo.blockSignals(False)
   
 
 class SpamCheckWorker(QThread):
