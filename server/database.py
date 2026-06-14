@@ -182,6 +182,18 @@ async def get_payment_license(invoice_id: str) -> Optional[str]:
     return key if key else None
 
 
+async def get_pending_payments(limit: int = 50) -> list:
+    """FIX ERR-2: Returns all payments with status='pending' for background poller."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM payments WHERE status='pending' ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
 async def mark_payment_paid(invoice_id: str, license_key: str) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -202,9 +214,6 @@ async def create_license_for_payment(
 
     Returns existing license_key if payment was already processed (idempotent).
     """
-    from config import PLANS, KEY_PREFIX
-    import secrets as _secrets, string as _string
-
     # First check if already processed (idempotent guard)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -230,13 +239,12 @@ async def create_license_for_payment(
         else:
             expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
 
-        alphabet = _string.ascii_uppercase + _string.digits
-        suffix = "".join(_secrets.choice(alphabet) for _ in range(20))
-        key = f"{KEY_PREFIX}-{suffix[:5]}-{suffix[5:10]}-{suffix[10:15]}-{suffix[15:20]}"
+        # FIX КРИТ-1: use _generate_key() for consistent 6-char group format
+        # Old inline code produced 5-char groups that failed validate_key_format()
+        key = _generate_key()
         now_str = _now()
 
         try:
-            await db.execute("BEGIN EXCLUSIVE")
             await db.execute(
                 """INSERT INTO licenses
                    (key, plan, hwid, telegram_id, max_threads, max_recipients,
@@ -384,10 +392,12 @@ async def get_all_licenses(limit: int = 50, offset: int = 0) -> list:
 
 
 async def get_distinct_user_ids() -> list:
-    """Returns list of distinct telegram_ids that have at least one license."""
+    """Returns list of ALL registered user telegram_ids (from users table).
+    FIX ERR-1: was querying licenses only — excluded users who haven't bought yet.
+    """
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT DISTINCT telegram_id FROM licenses WHERE telegram_id > 0"
+            "SELECT telegram_id FROM users WHERE telegram_id > 0"
         ) as cur:
             rows = await cur.fetchall()
             return [row[0] for row in rows]
