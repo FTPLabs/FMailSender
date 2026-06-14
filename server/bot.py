@@ -893,7 +893,7 @@ async def msg_admin_broadcast(message: Message, state: FSMContext):
     text = message.text or ""
     await state.clear()
     # Собираем уникальные ID из всех пользователей с лицензиями
-    licenses = await db.get_all_licenses(limit=5000)
+    licenses = await db.get_all_licenses(limit=50000)
     user_ids = list({lic["telegram_id"] for lic in licenses if lic.get("telegram_id")})
     sent = 0
     failed = 0
@@ -1034,7 +1034,8 @@ async def msg_upload_file(message: Message, state: FSMContext):
                     await message.answer("❌ Не удалось скачать файл с Telegram.", reply_markup=kb_back_admin())
                     return
                 with open(save_path, "wb") as f:
-                    f.write(await resp.read())
+                    async for chunk in resp.content.iter_chunked(65536):
+                        f.write(chunk)
 
         server_host = os.environ.get("SERVER_HOST", "")
         if not server_host:
@@ -1187,7 +1188,6 @@ async def download_file(filename: str, key: str = ""):
     lic = await db.get_license(key.strip().upper())
     if not lic or not lic.get("is_active"):
         raise HTTPException(status_code=403, detail="Invalid or revoked license key")
-    from datetime import datetime, timezone
     try:
         exp = datetime.fromisoformat(lic["expires_at"].replace("Z", "+00:00"))
         if exp.tzinfo is None:
@@ -1217,7 +1217,7 @@ async def health():
   return {
       "status": "ok",
       "service": "FMail Sender License API",
-      "version": "2.7.0",
+      "version": "2.9.14",
       "active_licenses": stats.get('active', 0),
   }
 
@@ -1226,10 +1226,10 @@ async def health():
 
 async def main():
   await db.init_db()
-  logger.info("Starting FMail Sender Bot + API v2.7.0...")
+  logger.info("Starting FMail Sender Bot + API v2.9.14...")
 
   config = uvicorn.Config(
-      api_app, host="0.0.0.0", port=8000,
+      api_app, host=API_HOST, port=API_PORT,
       log_level="warning", loop="none",
   )
   server = uvicorn.Server(config)
