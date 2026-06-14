@@ -1,2 +1,2 @@
-APP_VERSION = "3.0.2"
+APP_VERSION = "3.1.0"
 APP_NAME = "FMail Sender"
