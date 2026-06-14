@@ -239,59 +239,64 @@ class BounceMonitor:
         self._save_blacklist()
 
     def check_bounces(self) -> List[BounceRecord]:
-        new_bounces = []
-        conn = None
-        try:
-            if self.use_ssl:
-                conn = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
-            else:
-                conn = imaplib.IMAP4(self.imap_host, self.imap_port)
+          new_bounces = []
+          seen_uids: set = set()
+          conn = None
+          try:
+              if self.use_ssl:
+                  conn = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+              else:
+                  conn = imaplib.IMAP4(self.imap_host, self.imap_port)
+              conn.login(self.email_addr, self.password)
+              conn.select("INBOX", readonly=True)
 
-            conn.login(self.email_addr, self.password)
-            conn.select("INBOX")
+              all_uids: set = set()
+              for search_query in _IMAP_SEARCHES:
+                  try:
+                      _, data = conn.uid("search", None, search_query)
+                      if data and data[0]:
+                          for uid in data[0].split():
+                              all_uids.add(uid)
+                  except Exception:
+                      pass
 
-            # FIX: перебираем все паттерны поиска, собираем уникальные ID
-            found_ids: Set[bytes] = set()
-            for search_query in _IMAP_SEARCHES:
-                try:
-                    _, msg_ids = conn.search(None, f'UNSEEN {search_query}')
-                    if msg_ids and msg_ids[0]:
-                        for mid in msg_ids[0].split():
-                            found_ids.add(mid)
-                except Exception:
-                    continue
+              for uid in all_uids:
+                  # Дедупликация по UID — каждое письмо обрабатываем только раз
+                  uid_key = uid.decode() if isinstance(uid, bytes) else str(uid)
+                  if uid_key in seen_uids:
+                      continue
+                  seen_uids.add(uid_key)
+                  try:
+                      _, msg_data = conn.uid("fetch", uid, "(RFC822)")
+                      if not msg_data or not msg_data[0]:
+                          continue
+                      raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
+                      record = _parse_dsn_message(raw)
+                      if record:
+                          # Дедупликация по email (не добавляем одно и то же дважды)
+                          already_known = any(
+                              r.email.lower() == record.email.lower()
+                              for r in self._bounce_records
+                          )
+                          if not already_known:
+                              new_bounces.append(record)
+                              self._bounce_records.append(record)
+                              if record.bounce_type == BounceType.HARD:
+                                  self.add_to_blacklist(record.email)
+                  except Exception:
+                      pass
 
-            for msg_id in found_ids:
-                try:
-                    _, data = conn.fetch(msg_id, "(RFC822)")
-                    raw = data[0][1]
-                    bounce = _parse_dsn_message(raw)
-                    if bounce:
-                        conn.store(msg_id, '+FLAGS', '\\Seen')
-                        new_bounces.append(bounce)
-                        self._bounce_records.append(bounce)
-                        if bounce.bounce_type == BounceType.HARD:
-                            self.add_to_blacklist(bounce.email)
-                            logger.info(f"Hard bounce → blacklist: {bounce.email}")
-                except Exception as e:
-                    logger.warning(f"Ошибка обработки сообщения {msg_id}: {e}")
-
-            if new_bounces:
-                self._save_bounces()
-
-        except imaplib.IMAP4.error as e:
-            logger.error(f"IMAP ошибка: {e}")
-        except Exception as e:
-            logger.error(f"Ошибка мониторинга bounces: {e}")
-        finally:
-            if conn is not None:
-                try:
-                    conn.logout()
-                except Exception:
-                    pass
-
-        return new_bounces
-
+              if new_bounces:
+                  self._save_bounces()
+          except Exception as e:
+              logger.error("IMAP bounce check failed: %s", e)
+          finally:
+              if conn:
+                  try:
+                      conn.logout()
+                  except Exception:
+                      pass
+          return new_bounces
     def filter_recipients(self, emails: List[str]) -> tuple:
         allowed = []
         blocked = []
