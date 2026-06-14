@@ -69,25 +69,29 @@ def check_for_update(timeout: float = 10.0) -> Optional[dict]:
 def start_background_check(
     on_update_found: Callable[[dict], None],
     delay_sec: float = 30.0,
-) -> None:
+) -> threading.Event:
     """
     Start a daemon thread that checks for updates after delay_sec,
-    then every CHECK_INTERVAL_SEC. Calls on_update_found(info) on the
-    calling thread is NOT guaranteed — wire it to a Qt signal for GUI use.
+    then every CHECK_INTERVAL_SEC. Returns a stop_event threading.Event;
+    set it to stop the background thread gracefully.
     """
+    stop_event = threading.Event()
+
     def _worker() -> None:
         import time
-        time.sleep(delay_sec)
+        if stop_event.wait(timeout=delay_sec):
+            return
         notified_tag: str = ""
-        while True:
+        while not stop_event.is_set():
             info = check_for_update()
             if info and info.get("tag_name") != notified_tag:
                 notified_tag = info.get("tag_name", "")
                 logger.info("New version available: %s", notified_tag)
                 try:
                     on_update_found(info)
-                except Exception:
-                    pass
-            time.sleep(CHECK_INTERVAL_SEC)
+                except Exception as e:
+                    logger.debug("on_update_found callback failed: %s", e)
+            stop_event.wait(timeout=CHECK_INTERVAL_SEC)
 
     threading.Thread(target=_worker, daemon=True, name="updater").start()
+    return stop_event
