@@ -25,6 +25,12 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pillow
 
+
+      - name: Syntax check (py_compile)
+        shell: cmd
+        run: |
+          for /r . %f in (*.py) do python -m py_compile "%f" || (echo FAIL: %f && exit 1)
+          echo All Python files OK
       - name: Build .exe
         shell: cmd
         run: |
@@ -33,8 +39,25 @@ jobs:
             --icon "assets/images/fmail_logo.png" ^
             --add-data "assets;assets" ^
             --add-data "data;data" ^
-            --hidden-import "PyQt6.sip" ^
             --collect-all "PyQt6" ^
+            --hidden-import "PyQt6.sip" ^
+            --collect-submodules "gui" ^
+            --collect-submodules "core" ^
+            --hidden-import "gui.screens.screen_accounts" ^
+            --hidden-import "gui.screens.screen_activation" ^
+            --hidden-import "gui.screens.screen_analytics" ^
+            --hidden-import "gui.screens.screen_compose" ^
+            --hidden-import "gui.screens.screen_dashboard" ^
+            --hidden-import "gui.screens.screen_inbox" ^
+            --hidden-import "gui.screens.screen_recipients" ^
+            --hidden-import "gui.screens.screen_sending" ^
+            --hidden-import "core.license" ^
+            --hidden-import "core.sender" ^
+            --hidden-import "core.bounce" ^
+            --hidden-import "core.spam_checker" ^
+            --hidden-import "core.warmup" ^
+            --hidden-import "core.ai_fixer" ^
+            --hidden-import "core.updater" ^
             main.py
 
       - name: Upload artifact
