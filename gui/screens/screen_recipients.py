@@ -230,10 +230,9 @@ class RecipientsScreen(QWidget):
         self._table_stack = _QSW()
         self._table_stack.addWidget(self.table)
         self._empty_label = QLabel(
-            "📭  Список получателей пуст
-
-"
-            "Импортируйте CSV / TXT / XLSX или введите email вручную"
+            "\u0421\u043f\u0438\u0441\u043e\u043a \u043f\u043e\u043b\u0443\u0447\u0430\u0442\u0435\u043b\u0435\u0439 \u043f\u0443\u0441\u0442\n\n"
+            "\u0418\u043c\u043f\u043e\u0440\u0442\u0438\u0440\u0443\u0439\u0442\u0435 CSV / TXT / XLSX "
+            "\u0438\u043b\u0438 \u0432\u0432\u0435\u0434\u0438\u0442\u0435 email \u0432\u0440\u0443\u0447\u043d\u0443\u044e"
         )
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setStyleSheet(
