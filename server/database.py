@@ -199,6 +199,7 @@ async def create_license(
                 await db.commit()
                 break
             except aiosqlite.IntegrityError:
+                await db.rollback()
                 key = _generate_key()
                 if _attempt == 9:
                     raise RuntimeError("Не удалось сгенерировать уникальный ключ после 10 попыток")

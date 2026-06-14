@@ -144,8 +144,8 @@ class SmtpAccount:
         """Сбрасывает часовой счётчик если прошёл час. Вызывать только под self._lock."""
         now = time.time()
         if now - self._hour_reset >= 3600:
-          self.sent_this_hour = 0
-          self._hour_reset = now
+            self.sent_this_hour = 0
+            self._hour_reset = now
 
     @property
     def can_send(self) -> bool:
@@ -308,12 +308,11 @@ class SendingEngine:
         log_queue: Optional[queue.Queue] = None,
         recipients: Optional[List[Recipient]] = None,
         template: Optional[EmailTemplate] = None,
-        result_queue: Optional[queue.Queue] = None,
         stop_event: Optional[threading.Event] = None,
     ):
         self.accounts = accounts
         self.config = config
-        self._log_queue: Optional[queue.Queue] = log_queue or result_queue
+        self._log_queue: Optional[queue.Queue] = log_queue
         self._recipients: List[Recipient] = recipients or []
         self._template: Optional[EmailTemplate] = template
         self.stop_event = stop_event or threading.Event()

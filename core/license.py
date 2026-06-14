@@ -44,6 +44,9 @@ LICENSE_VERIFY_URL = os.environ.get(
     "LICENSE_VERIFY_URL",
     "http://31.76.100.190:8000/v1/verify",
 )
+if LICENSE_API_URL.startswith("http://"):
+    logger.warning("LICENSE_API_URL uses plain HTTP — data sent unencrypted! Set HTTPS URL in LICENSE_API_URL env var.")
+
 OFFLINE_GRACE_HOURS = 72
 ONLINE_CHECK_INTERVAL_H = 24
 LICENSE_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "license.dat"
@@ -55,9 +58,10 @@ KEY_PREFIX = "FMSND"
 # Без него JWT без подписи будут приняты — это уязвимость.
 _JWT_SECRET_FALLBACK = os.environ.get("JWT_SECRET", "").strip()
 if not _JWT_SECRET_FALLBACK:
-    logger.warning(
-        "JWT_SECRET env var not set — offline JWT signature verification DISABLED. "
-        "Any token will be accepted offline. Set JWT_SECRET to the same value as the license server."
+    logger.error(
+        "SECURITY: JWT_SECRET not set — offline JWT verification DISABLED. "
+        "Without it, offline tokens are REJECTED and online check is required. "
+        "Set JWT_SECRET to the same value as the license server for offline support."
     )
 
 # ── Внутренний кэш HWID ───────────────────────────────────────────────────────
@@ -77,9 +81,11 @@ def _check_debugger() -> bool:
 
 
 def security_check() -> None:
-    """Быстрая проверка без блокировки UI."""
+    """Антиотладочная проверка — завершает процесс при обнаружении отладчика."""
     if _check_debugger():
-        logger.warning("Debugger detected — running in debug mode")
+        logger.error("Debugger detected — terminating process.")
+        import os as _os
+        _os.abort()  # Немедленное завершение, не перехватывается исключениями
 
 
 # ── Fernet-ключ ───────────────────────────────────────────────────────────────
@@ -476,20 +482,56 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
             logger.warning(f"JWT verification failed: {e}")
             return False, None, "Ошибка верификации лицензии. Повторите активацию."
     else:
-        # JWT_SECRET не задан — проверяем без подписи (небезопасно, но работает)
+        # JWT_SECRET не задан — обязательна онлайн-верификация (security fix)
+        hwid_check = generate_hwid()
+        key_check = data.get("key", "")
+        online_result = _verify_key_online(key_check, hwid_check)
+        if online_result is False:
+            try:
+                LICENSE_FILE.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False, None, "Лицензия отозвана. Обратитесь в поддержку."
+        elif online_result is None:
+            return False, None, (
+                "Сервер лицензий недоступен и JWT_SECRET не настроен.\n"
+                "Подключитесь к интернету или задайте JWT_SECRET для offline-режима."
+            )
         payload = _decode_payload_unverified(token)
         if not payload:
             return False, None, "Не удалось декодировать токен лицензии."
+        data["last_verified_online"] = time.time()
+        try:
+            _save_license_data(data)
+        except Exception:
+            pass
 
-    # Проверка grace period
-    activated_at = data.get("activated_at", 0)
-    last_online = data.get("last_verified_online", activated_at)
-    hours_offline = (time.time() - last_online) / 3600
-    if hours_offline > OFFLINE_GRACE_HOURS and not _JWT_SECRET_FALLBACK:
-        return False, None, (
-            f"Нет связи с сервером более {OFFLINE_GRACE_HOURS} ч.\n"
-            f"Подключитесь к интернету для проверки лицензии."
-        )
+    # Проверка grace period (только при JWT_SECRET — offline режим)
+    if _JWT_SECRET_FALLBACK:
+        activated_at = data.get("activated_at", 0)
+        last_online = data.get("last_verified_online", activated_at)
+        hours_offline = (time.time() - last_online) / 3600
+        if hours_offline > OFFLINE_GRACE_HOURS:
+            key_gp = data.get("key", "")
+            hwid_gp = generate_hwid()
+            gp_result = _verify_key_online(key_gp, hwid_gp)
+            if gp_result is False:
+                try:
+                    LICENSE_FILE.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return False, None, "Лицензия отозвана."
+            elif gp_result is None:
+                return False, None, (
+                    f"Нет связи с сервером более {OFFLINE_GRACE_HOURS} ч.\n"
+                    f"Подключитесь к интернету для проверки лицензии."
+                )
+            else:
+                data["last_verified_online"] = time.time()
+                try:
+                    _save_license_data(data)
+                except Exception:
+                    pass
 
     license_info = LicenseInfo(payload)
     if license_info.is_expired:
