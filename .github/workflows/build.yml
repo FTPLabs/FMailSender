@@ -25,12 +25,25 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pillow
 
-
       - name: Syntax check (py_compile)
-        shell: cmd
+        shell: pwsh
         run: |
-          for /r . %f in (*.py) do python -m py_compile "%f" || (echo FAIL: %f && exit 1)
-          echo All Python files OK
+          $files = Get-ChildItem -Recurse -Filter "*.py" -Exclude "__pycache__" | Where-Object { $_.FullName -notmatch "venv|site-packages|\.git" } | Select-Object -ExpandProperty FullName
+          $failed = @()
+          foreach ($f in $files) {
+            $out = python -m py_compile "$f" 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "FAIL: $f"
+              Write-Host $out
+              $failed += $f
+            }
+          }
+          if ($failed.Count -gt 0) {
+            Write-Error "Syntax errors found in $($failed.Count) file(s): $($failed -join ', ')"
+            exit 1
+          }
+          Write-Host "All $($files.Count) Python files passed syntax check"
+
       - name: Build .exe
         shell: cmd
         run: |
@@ -94,7 +107,6 @@ jobs:
             DEPLOY_DIR=/opt/fmailsender
             [ -d "$DEPLOY_DIR/.git" ] || git clone https://github.com/FTPLabs/FMailSender.git "$DEPLOY_DIR"
             cd "$DEPLOY_DIR" && git pull origin main
-            cd server && pip3 install -r requirements.txt -q
             pip3 install -r server/requirements.txt -q
             systemctl restart fmailsender 2>/dev/null || (pkill -f "python3 bot.py" 2>/dev/null; sleep 1; nohup python3 bot.py >> /var/log/fmailsender-bot.log 2>&1 &)
             echo "Deployed at $(date)"
