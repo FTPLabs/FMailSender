@@ -282,6 +282,7 @@ class MainWindow(QMainWindow):
         acct_screen.accounts_changed.connect(inbox_screen.set_accounts)
         if acct_screen._accounts:
             sending_screen.set_accounts(acct_screen._accounts)
+            inbox_screen.set_accounts(acct_screen._accounts)
         recip_screen.list_ready.connect(sending_screen.set_recipients)
         compose_screen.template_ready.connect(sending_screen.set_template)
         sending_screen.campaign_finished.connect(analytics_screen.on_results)
