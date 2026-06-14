@@ -202,7 +202,7 @@ class FormattingToolbar(QFrame):
         self._editor.textCursor().mergeCharFormat(fmt)
 
     def _text_color(self):
-          """Открывает диалог выбора цвета с полной русификацией."""
+        """Открывает диалог выбора цвета с полной русификацией."""
           from PyQt6.QtWidgets import QLabel, QPushButton, QGroupBox
           dialog = QColorDialog(parent=self)
           dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
@@ -261,7 +261,7 @@ class FormattingToolbar(QFrame):
                 cursor.insertHtml(f'<a href="{url}">{text}</a>')
 
     def _insert_variable(self, text: str):
-          """Немедленная вставка переменной при выборе из списка."""
+        """Немедленная вставка переменной при выборе из списка."""
           if text.startswith("{{") and text.endswith("}}"):
               self._editor.textCursor().insertText(text)
               self._editor.setFocus()
@@ -717,8 +717,8 @@ a {{ color: #6366F1; }}
               row = QHBoxLayout()
               row.addWidget(QLabel(cat))
               row.addStretch()
-              row.addWidget(QLabel(str(score)))
-              layout.addLayout(row)
+              row.addWidget(QLabel(str(cat_score)))
+              inner_layout.addLayout(row)
 
       # Проблемы
       if result.issues:
