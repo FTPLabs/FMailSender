@@ -1,82 +1,81 @@
 name: Build FMailSender .exe
 
-  on:
-    push:
-      branches: [main]
-      tags: ['v*']
-    workflow_dispatch:
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
 
-  jobs:
-    build-exe:
-      runs-on: windows-latest
-      permissions:
-        contents: write
-      steps:
-        - uses: actions/checkout@v4
+jobs:
+  build-exe:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
 
-        - uses: actions/setup-python@v5
-          with:
-            python-version: '3.11'
-            cache: 'pip'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
 
-        - name: Install dependencies
-          run: |
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt
-            pip install pyinstaller
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
 
-        - name: Build .exe
-          shell: cmd
-          run: |
-            pyinstaller --noconfirm --onefile --windowed ^
-              --name "FMailSender" ^
-              --icon "assets/images/fmail_logo.ico" ^
-              --add-data "assets;assets" ^
-              --add-data "data;data" ^
-              --hidden-import "PyQt6.sip" ^
-              --hidden-import "PyQt6.QtWebEngineWidgets" ^
-              --collect-all "PyQt6" ^
-              main.py
+      - name: Build .exe
+        shell: cmd
+        run: |
+          pyinstaller --noconfirm --onefile --windowed ^
+            --name "FMailSender" ^
+            --icon "assets/images/fmail_logo.ico" ^
+            --add-data "assets;assets" ^
+            --add-data "data;data" ^
+            --hidden-import "PyQt6.sip" ^
+            --hidden-import "PyQt6.QtWebEngineWidgets" ^
+            --collect-all "PyQt6" ^
+            main.py
 
-        - name: Upload artifact
-          uses: actions/upload-artifact@v4
-          with:
-            name: FMailSender-windows-exe
-            path: dist/FMailSender.exe
-            retention-days: 30
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMailSender-windows-exe
+          path: dist/FMailSender.exe
+          retention-days: 30
 
-        - name: Create Release
-          if: startsWith(github.ref, 'refs/tags/')
-          uses: softprops/action-gh-release@v2
-          with:
-            files: dist/FMailSender.exe
-            generate_release_notes: true
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/FMailSender.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    deploy-server:
-      runs-on: ubuntu-latest
-      if: github.ref == 'refs/heads/main'
-      steps:
-        - uses: actions/checkout@v4
+  deploy-server:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
 
-        - name: Deploy to VPS
-          uses: appleboy/ssh-action@v1
-          with:
-            host: 31.76.100.190
-            username: root
-            password: ${{ secrets.VPS_PASSWORD }}
-            script: |
-              DEPLOY_DIR=/opt/fmailsender
-              if [ ! -d "$DEPLOY_DIR/.git" ]; then
-                git clone https://github.com/FTPLabs/FMailSender.git $DEPLOY_DIR
-              fi
-              cd $DEPLOY_DIR
-              git fetch origin main
-              git reset --hard origin/main
-              cd server
-              pip3 install -r requirements.txt -q 2>&1 | tail -3
-              pkill -f "python3 bot.py" 2>/dev/null || true
-              nohup python3 bot.py >> /var/log/fmailsender-bot.log 2>&1 &
-              echo "Deployed OK at $(date)"
-  
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 31.76.100.190
+          username: root
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            DEPLOY_DIR=/opt/fmailsender
+            if [ ! -d "$DEPLOY_DIR/.git" ]; then
+              git clone https://github.com/FTPLabs/FMailSender.git $DEPLOY_DIR
+            fi
+            cd $DEPLOY_DIR
+            git fetch origin main
+            git reset --hard origin/main
+            cd server
+            pip3 install -r requirements.txt -q 2>&1 | tail -3
+            pkill -f "python3 bot.py" 2>/dev/null || true
+            nohup python3 bot.py >> /var/log/fmailsender-bot.log 2>&1 &
+            echo "Deployed OK at $(date)"
