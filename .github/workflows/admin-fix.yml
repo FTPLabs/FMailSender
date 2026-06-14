@@ -1,33 +1,21 @@
 name: Admin DB Fix
-  on:
-    workflow_dispatch:
-      inputs:
-        license_key:
-          description: 'License key to reset HWID for'
-          required: true
-          default: 'FMSND-U5DIXQ-7B6M84-GTA1NQ-YQ1ITF'
-  jobs:
-    db-fix:
-      runs-on: ubuntu-latest
-      steps:
-        - name: Reset HWID on VPS
-          uses: appleboy/ssh-action@v1
-          with:
-            host: 31.76.100.190
-            username: root
-            password: ${{ secrets.VPS_PASSWORD }}
-            script: |
-              KEY="${{ inputs.license_key }}"
-              DB=/opt/fmailsender/licenses.db
-              if [ ! -f "$DB" ]; then
-                echo "DB not found at $DB, searching..."
-                DB=$(find /opt /home /root -name "licenses.db" 2>/dev/null | head -1)
-              fi
-              echo "Using DB: $DB"
-              echo "Before:"
-              sqlite3 "$DB" "SELECT key, hwid, plan, expires_at, is_active FROM licenses WHERE key='$KEY';"
-              sqlite3 "$DB" "UPDATE licenses SET hwid='' WHERE key='$KEY';"
-              echo "After (hwid reset):"
-              sqlite3 "$DB" "SELECT key, hwid, plan, expires_at, is_active FROM licenses WHERE key='$KEY';"
-              echo "Done."
-  
+on:
+  workflow_dispatch:
+jobs:
+  db-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reset HWID on VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 31.76.100.190
+          username: root
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            set -e
+            DB=$(find /opt /home /root /srv -name "licenses.db" 2>/dev/null | head -1)
+            echo "DB: $DB"
+            sqlite3 "$DB" "SELECT key, hwid, plan, expires_at FROM licenses WHERE key='FMSND-U5DIXQ-7B6M84-GTA1NQ-YQ1ITF';"
+            sqlite3 "$DB" "UPDATE licenses SET hwid='' WHERE key='FMSND-U5DIXQ-7B6M84-GTA1NQ-YQ1ITF';"
+            echo "HWID reset done."
+            sqlite3 "$DB" "SELECT key, hwid FROM licenses WHERE key='FMSND-U5DIXQ-7B6M84-GTA1NQ-YQ1ITF';"
