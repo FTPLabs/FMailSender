@@ -382,15 +382,17 @@ async def get_all_licenses(limit: int = 50, offset: int = 0) -> list:
             return [dict(r) for r in rows]
 
 
-  async def get_distinct_user_ids() -> list:
-      """Returns list of distinct telegram_ids that have at least one license."""
-      async with aiosqlite.connect(DB_PATH) as db:
-          async with db.execute(
-              "SELECT DISTINCT telegram_id FROM licenses WHERE telegram_id > 0"
-          ) as cur:
-              rows = await cur.fetchall()
-              return [row[0] for row in rows]
-  
+
+async def get_distinct_user_ids() -> list:
+    """Returns list of distinct telegram_ids that have at least one license."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT DISTINCT telegram_id FROM licenses WHERE telegram_id > 0"
+        ) as cur:
+            rows = await cur.fetchall()
+            return [row[0] for row in rows]
+
+
 
 async def get_license_by_telegram(telegram_id: int) -> list:
     async with aiosqlite.connect(DB_PATH) as db:
