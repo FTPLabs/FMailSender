@@ -25,7 +25,7 @@ class CryptoPayClient:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def _request(self, method: str, **params) -> dict:
+    async def _request(self, method: str, use_post: bool = False, **params) -> dict:
         session = await self._get_session()
         url = f"{CRYPTO_BOT_API}/{method}"
         # Convert Python booleans to lowercase strings for the API
@@ -36,9 +36,12 @@ class CryptoPayClient:
             elif v is not None and v != "":
                 cleaned[k] = v
         try:
-            async with session.get(
-                url, params=cleaned, timeout=aiohttp.ClientTimeout(total=15)
-            ) as resp:
+            req_ctx = (
+                session.post(url, json=cleaned, timeout=aiohttp.ClientTimeout(total=15))
+                if use_post
+                else session.get(url, params=cleaned, timeout=aiohttp.ClientTimeout(total=15))
+            )
+            async with req_ctx as resp:
                 data = await resp.json()
                 if not data.get("ok"):
                     error = data.get("error", {})
@@ -68,7 +71,7 @@ class CryptoPayClient:
             kwargs["description"] = description[:1023]
         if payload:
             kwargs["payload"] = payload
-        result = await self._request("createInvoice", **kwargs)
+        result = await self._request("createInvoice", use_post=True, **kwargs)
         return result
 
     async def get_invoice(self, invoice_id: str) -> Optional[dict]:
