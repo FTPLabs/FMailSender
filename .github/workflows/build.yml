@@ -1,123 +1,86 @@
-name: Build FMail Sender EXE
+name: Build FMailSender .exe
 
-on:
-  push:
-    tags:
-      - "v*"
-  workflow_dispatch:
+  on:
+    push:
+      branches: [main]
+      tags: ['v*']
+    workflow_dispatch:
 
-jobs:
-  build-windows:
-    runs-on: windows-latest
-    permissions:
-      contents: write
+  jobs:
+    build-exe:
+      runs-on: windows-latest
+      permissions:
+        contents: write
+      steps:
+        - uses: actions/checkout@v4
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+        - uses: actions/setup-python@v5
+          with:
+            python-version: '3.11'
 
-      - name: Setup Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+        - name: Install dependencies
+          run: |
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+            pip install pyinstaller
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller pyinstaller-hooks-contrib pillow
+        - name: Build .exe with PyInstaller
+          run: |
+            pyinstaller --noconfirm --onefile --windowed ^
+              --name "FMailSender" ^
+              --icon "assets/images/fmail_logo.ico" ^
+              --add-data "assets;assets" ^
+              --add-data "data;data" ^
+              --add-data "i18n;i18n" ^
+              --hidden-import "PyQt6.sip" ^
+              --hidden-import "PyQt6.QtWebEngineWidgets" ^
+              --collect-all "PyQt6" ^
+              main.py
+          shell: cmd
 
-      - name: Get version
-        id: get_version
-        shell: python
-        run: |
-          import sys, os
-          sys.path.insert(0, ".")
-          from core._version import APP_VERSION
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"version={APP_VERSION}\n")
+        - name: Upload artifact
+          uses: actions/upload-artifact@v4
+          with:
+            name: FMailSender-exe
+            path: dist/FMailSender.exe
+            retention-days: 30
 
-      - name: Generate ICO icon from PNG
-        shell: python
-        run: |
-          from PIL import Image
-          from pathlib import Path
-          png = Path("assets/images/fmail_logo.png")
-          ico = Path("assets/images/fmail_logo.ico")
-          if png.exists():
-              img = Image.open(png).convert("RGBA")
-              img.save(str(ico), format="ICO",
-                       sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
-              print(f"Created {ico}")
-          else:
-              print("fmail_logo.png not found, skipping")
+        - name: Create GitHub Release
+          if: startsWith(github.ref, 'refs/tags/')
+          uses: softprops/action-gh-release@v2
+          with:
+            files: dist/FMailSender.exe
+            generate_release_notes: true
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Syntax check
-        shell: python
-        run: |
-          import compileall, sys, re
-          ok = compileall.compile_dir(".", quiet=0, force=True,
-                                      rx=re.compile(r"venv|dist|build|\.git"))
-          if not ok:
-              print("Syntax errors found - aborting")
-              sys.exit(1)
-          print("All Python files OK")
+    deploy-server:
+      runs-on: ubuntu-latest
+      if: github.ref == 'refs/heads/main'
+      steps:
+        - uses: actions/checkout@v4
 
-      - name: Build EXE
-        env:
-          HWID_SALT: ${{ secrets.HWID_SALT }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          LICENSE_API_URL: ${{ secrets.LICENSE_API_URL }}
-          PYTHONIOENCODING: utf-8
-          PYTHONUTF8: "1"
-        run: |
-          python -X utf8 build.py
-
-      - name: Verify EXE
-        run: |
-          $exe = Get-Item "dist\FMailSender.exe"
-          Write-Host "EXE size: $($exe.Length / 1MB)MB"
-          if ($exe.Length -lt 1MB) { exit 1 }
-        shell: pwsh
-
-      - name: Create ZIP and compute checksums
-        id: checksums
-        shell: pwsh
-        run: |
-          $version = "${{ steps.get_version.outputs.version }}"
-          $exePath  = "dist\FMailSender.exe"
-          $zipName  = "FMailSender_v$version.zip"
-          $zipPath  = "dist\$zipName"
-          Compress-Archive -Path $exePath -DestinationPath $zipPath
-          $sha256 = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLower()
-          $vtUrl  = "https://www.virustotal.com/gui/file/$sha256"
-          "sha256=$sha256"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "vt_url=$vtUrl"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "ZIP: $zipPath"
-          Write-Host "SHA256: $sha256"
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: "FMail Sender ${{ steps.get_version.outputs.version }}"
-          draft: false
-          prerelease: false
-          files: |
-            dist/FMailSender.exe
-            dist/${{ steps.checksums.outputs.zip_name }}
-          body: |
-            ## FMail Sender ${{ steps.get_version.outputs.version }}
-
-            ### Установка
-            1. Скачайте `${{ steps.checksums.outputs.zip_name }}`
-            2. Распакуйте и запустите `FMailSender.exe`
-            3. Введите лицензионный ключ (получить в боте @FMailSenderBot)
-
-            ---
-            | Файл | SHA-256 |
-            |------|---------|
-            | FMailSender.exe | `${{ steps.checksums.outputs.sha256 }}` |
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        - name: Deploy server to VPS via SSH
+          uses: appleboy/ssh-action@v1
+          with:
+            host: 31.76.100.190
+            username: root
+            password: ${{ secrets.VPS_PASSWORD }}
+            script: |
+              set -e
+              DEPLOY_DIR=/opt/fmailsender
+              if [ ! -d "$DEPLOY_DIR/.git" ]; then
+                git clone https://github.com/FTPLabs/FMailSender.git $DEPLOY_DIR
+              fi
+              cd $DEPLOY_DIR
+              git fetch origin main
+              git reset --hard origin/main
+              cd server
+              pip3 install -r requirements.txt -q
+              if systemctl is-active --quiet fmailsender-bot; then
+                systemctl restart fmailsender-bot
+              else
+                nohup python3 bot.py >> /var/log/fmailsender.log 2>&1 &
+              fi
+              echo "Deployed at $(date)"
+  
