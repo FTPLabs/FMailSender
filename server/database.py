@@ -359,14 +359,13 @@ async def delete_all_licenses() -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("PRAGMA journal_mode=WAL")
         try:
-            await db.execute("BEGIN")
             cur = await db.execute("SELECT COUNT(*) FROM licenses")
             count = (await cur.fetchone())[0]
             await db.execute("DELETE FROM licenses")
             await db.execute("DELETE FROM payments")
-            await db.execute("COMMIT")
+            await db.commit()
         except Exception:
-            await db.execute("ROLLBACK")
+            await db.rollback()
             raise
     logger.warning("All licenses and payments deleted. Count: %d", count)
     return count
@@ -382,6 +381,16 @@ async def get_all_licenses(limit: int = 50, offset: int = 0) -> list:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
+
+  async def get_distinct_user_ids() -> list:
+      """Returns list of distinct telegram_ids that have at least one license."""
+      async with aiosqlite.connect(DB_PATH) as db:
+          async with db.execute(
+              "SELECT DISTINCT telegram_id FROM licenses WHERE telegram_id > 0"
+          ) as cur:
+              rows = await cur.fetchall()
+              return [row[0] for row in rows]
+  
 
 async def get_license_by_telegram(telegram_id: int) -> list:
     async with aiosqlite.connect(DB_PATH) as db:
