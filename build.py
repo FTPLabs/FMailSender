@@ -92,7 +92,14 @@ def build_spec() -> str:
         "    hookspath=[],\n"
         "    hooksconfig={},\n"
         "    runtime_hooks=[],\n"
-        "    excludes=[],\n"
+        "    excludes=[
+        'tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas',
+        'PIL', 'cv2', 'flask', 'django', 'tornado', 'IPython',
+        'notebook', 'pytest', 'setuptools', 'pkg_resources',
+        'multiprocessing', 'lib2to3', 'pydoc', 'doctest',
+        'unittest', 'xmlrpc', 'ftplib', 'telnetlib', 'imghdr',
+        'sndhdr', 'aifc', 'sunau', 'cgi', 'cgitb', 'email.generator',
+    ],\n"
         "    cipher=block_cipher,\n"
         "    noarchive=False,\n"
         ")\n"
@@ -109,8 +116,8 @@ def build_spec() -> str:
         "    name='FMailSender',\n"
         "    debug=False,\n"
         "    bootloader_ignore_signals=False,\n"
-        "    strip=False,\n"
-        "    upx=False,\n"
+        "    strip=True,\n"
+        "    upx=True,\n"
         "    runtime_tmpdir=None,\n"
         "    console=False,\n"
         "    disable_windowed_traceback=False,\n"
@@ -145,6 +152,7 @@ def main():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--clean",
+        "--optimize=2",
         "--noconfirm",
         "--distpath", str(DIST),
         "--workpath", str(BUILD),
