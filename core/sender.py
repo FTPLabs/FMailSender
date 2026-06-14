@@ -631,7 +631,7 @@ class SmtpAccount:
         self._hour_reset: float = time.time()
         self._day_reset: float = time.time()
 
-    def _tick_hour_reset(self) -> None:  # noqa: alias for _tick_resets
+    def _tick_hour_reset(self) -> None:  # noqa: DEPRECATED — use _tick_resets(); kept for compatibility
         """Сбрасывает часовой счётчик если прошёл час. Вызывать только под self._lock."""
         now = time.time()
         if now - self._hour_reset >= 3600:
@@ -656,7 +656,7 @@ class SmtpAccount:
         if not self.is_active:
             return False
         with self._lock:
-            self._tick_hour_reset()
+            self._tick_resets()
             return self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit
 
     def try_increment(self) -> bool:
@@ -664,7 +664,7 @@ class SmtpAccount:
         if not self.is_active:
             return False
         with self._lock:
-            self._tick_hour_reset()
+            self._tick_resets()
             if self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit:
                 self.sent_today += 1
                 self.sent_this_hour += 1
