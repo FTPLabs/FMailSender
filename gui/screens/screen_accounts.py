@@ -591,7 +591,7 @@ class AccountsScreen(QWidget):
 
         select_all_btn = QPushButton("Выделить всё")
         select_all_btn.setObjectName("btn_icon")
-        select_all_btn.clicked.connect(self.table.selectAll)
+        select_all_btn.clicked.connect(lambda: self.table.selectAll())
         toolbar.addWidget(select_all_btn)
 
         del_btn = QPushButton("Удалить выбранный")
