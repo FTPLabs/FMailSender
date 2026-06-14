@@ -74,13 +74,6 @@ jobs:
             --hidden-import "core.updater" ^
             main.py
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: FMailSender-windows-exe
-          path: dist/FMailSender.exe
-          retention-days: 30
-
       - name: Create Release (tag push)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -109,6 +102,14 @@ jobs:
             Скачайте **FMailSender.exe** ниже и запустите — установка не нужна.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMailSender-windows-exe
+          path: dist/FMailSender.exe
+          retention-days: 30
 
   deploy-server:
     runs-on: ubuntu-latest
