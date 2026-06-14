@@ -17,6 +17,7 @@ name: Build FMailSender .exe
         - uses: actions/setup-python@v5
           with:
             python-version: '3.11'
+            cache: 'pip'
 
         - name: Install dependencies
           run: |
@@ -24,28 +25,27 @@ name: Build FMailSender .exe
             pip install -r requirements.txt
             pip install pyinstaller
 
-        - name: Build .exe with PyInstaller
+        - name: Build .exe
+          shell: cmd
           run: |
             pyinstaller --noconfirm --onefile --windowed ^
               --name "FMailSender" ^
               --icon "assets/images/fmail_logo.ico" ^
               --add-data "assets;assets" ^
               --add-data "data;data" ^
-              --add-data "i18n;i18n" ^
               --hidden-import "PyQt6.sip" ^
               --hidden-import "PyQt6.QtWebEngineWidgets" ^
               --collect-all "PyQt6" ^
               main.py
-          shell: cmd
 
         - name: Upload artifact
           uses: actions/upload-artifact@v4
           with:
-            name: FMailSender-exe
+            name: FMailSender-windows-exe
             path: dist/FMailSender.exe
             retention-days: 30
 
-        - name: Create GitHub Release
+        - name: Create Release
           if: startsWith(github.ref, 'refs/tags/')
           uses: softprops/action-gh-release@v2
           with:
@@ -60,14 +60,13 @@ name: Build FMailSender .exe
       steps:
         - uses: actions/checkout@v4
 
-        - name: Deploy server to VPS via SSH
+        - name: Deploy to VPS
           uses: appleboy/ssh-action@v1
           with:
             host: 31.76.100.190
             username: root
             password: ${{ secrets.VPS_PASSWORD }}
             script: |
-              set -e
               DEPLOY_DIR=/opt/fmailsender
               if [ ! -d "$DEPLOY_DIR/.git" ]; then
                 git clone https://github.com/FTPLabs/FMailSender.git $DEPLOY_DIR
@@ -76,11 +75,8 @@ name: Build FMailSender .exe
               git fetch origin main
               git reset --hard origin/main
               cd server
-              pip3 install -r requirements.txt -q
-              if systemctl is-active --quiet fmailsender-bot; then
-                systemctl restart fmailsender-bot
-              else
-                nohup python3 bot.py >> /var/log/fmailsender.log 2>&1 &
-              fi
-              echo "Deployed at $(date)"
+              pip3 install -r requirements.txt -q 2>&1 | tail -3
+              pkill -f "python3 bot.py" 2>/dev/null || true
+              nohup python3 bot.py >> /var/log/fmailsender-bot.log 2>&1 &
+              echo "Deployed OK at $(date)"
   
