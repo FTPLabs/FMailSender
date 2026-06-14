@@ -31,6 +31,7 @@ ICONS: dict[str, bytes] = {
     "recipients": b'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="COLOR" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
     "sending":    b'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="COLOR" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
     "analytics":  b'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="COLOR" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+    "inbox":      b'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="COLOR" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
 }
 
 
@@ -170,8 +171,8 @@ class MainWindow(QMainWindow):
         _plan_frame = QFrame()
         _plan_frame.setObjectName("plan_info_frame")
         _plan_fl = QVBoxLayout(_plan_frame)
-        _plan_fl.setContentsMargins(8, 8, 8, 8)
-        _plan_fl.setSpacing(4)
+        _plan_fl.setContentsMargins(10, 10, 10, 10)
+        _plan_fl.setSpacing(6)
 
         if not _is_lifetime:
             expiry_lbl = QLabel(f"до {self._license.expires_at.strftime('%d.%m.%Y')}")
@@ -188,11 +189,39 @@ class MainWindow(QMainWindow):
         plan_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _plan_fl.addWidget(plan_lbl)
 
-        dev_lbl = QLabel('<a href="https://lolz.live/ftpdev/" style="color:rgba(139,92,246,0.35);text-decoration:none;">@ftpdev_sup</a>')
+        # Премиум: иконки Telegram и Lolz с ссылками
+        _social_row = QHBoxLayout()
+        _social_row.setContentsMargins(0, 2, 0, 0)
+        _social_row.setSpacing(6)
+        _social_row.addStretch()
+
+        _TG_SVG = b'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z" fill="rgba(139,92,246,0.6)"/></svg>'
+        _tg_icon_lbl = QLabel()
+        _tg_icon_lbl.setFixedSize(18, 18)
+        _tg_icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        _tg_icon_lbl.setStyleSheet("background: transparent; border: none;")
+        _tg_icon_lbl.setPixmap(_svg_to_pixmap(_TG_SVG, 16))
+        _tg_icon_lbl.setToolTip("Поддержка в Telegram")
+        _tg_icon_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        _social_row.addWidget(_tg_icon_lbl)
+
+        _LOLZ_SVG = b'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="rgba(139,92,246,0.6)" stroke-width="1.5"/><text x="12" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="rgba(139,92,246,0.6)" font-family="Arial">L</text></svg>'
+        _lolz_icon_lbl = QLabel()
+        _lolz_icon_lbl.setFixedSize(18, 18)
+        _lolz_icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        _lolz_icon_lbl.setStyleSheet("background: transparent; border: none;")
+        _lolz_icon_lbl.setPixmap(_svg_to_pixmap(_LOLZ_SVG, 16))
+        _lolz_icon_lbl.setToolTip("Профиль на Lolz")
+        _lolz_icon_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        _social_row.addWidget(_lolz_icon_lbl)
+
+        dev_lbl = QLabel('<a href="https://t.me/ftpdev_sup" style="color:rgba(139,92,246,0.5);text-decoration:none;font-size:10px;">@ftpdev_sup</a>')
         dev_lbl.setOpenExternalLinks(True)
         dev_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dev_lbl.setStyleSheet("font-size: 10px; background: transparent; padding: 0;")
-        _plan_fl.addWidget(dev_lbl)
+        _social_row.addWidget(dev_lbl)
+        _social_row.addStretch()
+        _plan_fl.addLayout(_social_row)
 
         sidebar_layout.addWidget(_plan_frame)
         root.addWidget(sidebar)
@@ -275,6 +304,7 @@ class MainWindow(QMainWindow):
             "dashboard": "Обзор", "accounts": "Аккаунты",
             "compose": "Письмо", "recipients": "Получатели",
             "sending": "Рассылка", "analytics": "Аналитика",
+            "inbox": "Ответы",
         }
         if key not in self._screens:
             return

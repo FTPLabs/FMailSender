@@ -266,6 +266,7 @@ async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
                 hostname=account.host, port=account.port,
                 use_tls=True, start_tls=False, timeout=20,
             )
+            await smtp.connect()
         else:
             smtp = aiosmtplib.SMTP(
                 hostname=account.host, port=account.port,

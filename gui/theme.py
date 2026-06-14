@@ -369,15 +369,23 @@ QLabel#demo_badge {{
     font-weight: {Typography.WEIGHT_BOLD};
     letter-spacing: 1px;
 }}
+QFrame#plan_info_frame {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(124,58,237,0.18), stop:1 rgba(6,182,212,0.08));
+    border: 1px solid rgba(139,92,246,0.35);
+    border-radius: 12px;
+    margin: 0px 2px 2px 2px;
+}}
 QLabel#plan_badge {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 rgba(124,58,237,0.25), stop:1 rgba(6,182,212,0.15));
+        stop:0 rgba(124,58,237,0.35), stop:1 rgba(6,182,212,0.22));
     color: {c.ACCENT};
-    border: 1px solid {c.BORDER};
+    border: 1px solid rgba(139,92,246,0.55);
     border-radius: {r.PILL};
-    padding: 3px 12px;
-    font-size: {Typography.SIZE_XS}px;
+    padding: 5px 14px;
+    font-size: {Typography.SIZE_SM}px;
     font-weight: {Typography.WEIGHT_BOLD};
+    letter-spacing: 0.5px;
 }}
 QLabel#label_title {{
     font-size: {Typography.SIZE_XL}px;

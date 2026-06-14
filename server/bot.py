@@ -274,7 +274,15 @@ async def cb_menu_download(query: CallbackQuery):
           zip_url = vt_url = ""
           dl_url = DOWNLOAD_URL
 
-      final_url = zip_url or dl_url
+      # Добавляем license key в URL для серверной проверки
+      _lic_key = active_lic.get("key", "")
+      def _url_with_key(url: str, key: str) -> str:
+          if not key or not url.startswith("http"):
+              return url
+          sep = "&" if "?" in url else "?"
+          return f"{url}{sep}key={key}"
+
+      final_url = _url_with_key(zip_url or dl_url, _lic_key)
       buttons = [
           [InlineKeyboardButton(text="📦 Скачать .zip архив", url=final_url)],
       ]
@@ -1120,9 +1128,25 @@ from fastapi.responses import FileResponse
 
 
 @api_app.get("/v1/download/{filename}")
-async def download_file(filename: str):
-    """Выдаёт загруженный файл пользователю с активной лицензией."""
+async def download_file(filename: str, key: str = ""):
+    """Выдаёт загруженный файл только пользователям с активной лицензией."""
     import os
+    if not key:
+        raise HTTPException(status_code=401, detail="License key required: ?key=YOUR_KEY")
+    lic = await db.get_license(key.strip().upper())
+    if not lic or not lic.get("is_active"):
+        raise HTTPException(status_code=403, detail="Invalid or revoked license key")
+    from datetime import datetime, timezone
+    try:
+        exp = datetime.fromisoformat(lic["expires_at"].replace("Z", "+00:00"))
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > exp:
+            raise HTTPException(status_code=403, detail="License expired")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Invalid expiry date")
     safe = "".join(c for c in filename if c.isalnum() or c in "._-")
     if not safe or ".." in safe:
         raise HTTPException(status_code=400, detail="Invalid filename")

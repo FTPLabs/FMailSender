@@ -224,7 +224,24 @@ class RecipientsScreen(QWidget):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(True)
-        layout.addWidget(self.table, 1)
+
+        # Empty state overlay
+        from PyQt6.QtWidgets import QStackedWidget as _QSW
+        self._table_stack = _QSW()
+        self._table_stack.addWidget(self.table)
+        self._empty_label = QLabel(
+            "📭  Список получателей пуст
+
+"
+            "Импортируйте CSV / TXT / XLSX или введите email вручную"
+        )
+        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_label.setStyleSheet(
+            "color: rgba(136,136,187,0.45); font-size: 14px; "
+            "line-height: 1.8; background: transparent;"
+        )
+        self._table_stack.addWidget(self._empty_label)
+        layout.addWidget(self._table_stack, 1)
 
         # ── Нижняя панель ─────────────────────────
         bottom_row = QHBoxLayout()
@@ -738,6 +755,10 @@ class RecipientsScreen(QWidget):
 
         self.table.blockSignals(False)
         self.table.setUpdatesEnabled(True)
+
+        # Показываем empty state если нет данных
+        if hasattr(self, '_table_stack'):
+            self._table_stack.setCurrentIndex(0 if display_count > 0 else 1)
 
         self.total_label.setText(f"Всего: {total}" + (f" (показано {_TABLE_PAGE})" if total > _TABLE_PAGE else ""))
         self.valid_label.setText(f"Валидных: {valid_count}")
