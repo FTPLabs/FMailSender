@@ -17,6 +17,7 @@ from gui.screens.screen_compose import ComposeScreen
 from gui.screens.screen_recipients import RecipientsScreen
 from gui.screens.screen_sending import SendingScreen
 from gui.screens.screen_analytics import AnalyticsScreen
+  from gui.screens.screen_inbox import InboxScreen
 from gui.widgets.animated_bg import AnimatedBackground
 from core.license import LicenseInfo
 from core.updater import start_background_check
@@ -152,6 +153,7 @@ class MainWindow(QMainWindow):
             ("recipients", "Получатели"),
             ("sending",    "Рассылка"),
             ("analytics",  "Аналитика"),
+            ("inbox",      "Ответы"),
         ]
         self._nav_buttons: list[SidebarButton] = []
         self._nav_keys: list[str] = []
@@ -164,21 +166,35 @@ class MainWindow(QMainWindow):
 
         sidebar_layout.addStretch()
 
-        expiry_lbl = QLabel(
-            f"до {self._license.expires_at.strftime('%d.%m.%Y')}"
-        )
-        expiry_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        expiry_lbl.setStyleSheet(
-            "color: rgba(139,92,246,0.55); font-size: 11px;"
-            " font-weight: 400; letter-spacing: 0.5px;"
-            " background: transparent; padding: 2px 8px;"
-        )
-        sidebar_layout.addWidget(expiry_lbl)
+        _is_lifetime = self._license.plan.upper() in ("LIFETIME", "LIFE", "LTD", "LIFELONG")
+          _plan_frame = QFrame()
+          _plan_frame.setObjectName("plan_info_frame")
+          _plan_fl = QVBoxLayout(_plan_frame)
+          _plan_fl.setContentsMargins(8, 8, 8, 8)
+          _plan_fl.setSpacing(4)
 
-        plan_lbl = QLabel(self._license.plan)
-        plan_lbl.setObjectName("plan_badge")
-        plan_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sidebar_layout.addWidget(plan_lbl)
+          if not _is_lifetime:
+              expiry_lbl = QLabel(f"до {self._license.expires_at.strftime('%d.%m.%Y')}")
+              expiry_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+              expiry_lbl.setStyleSheet(
+                  "color: rgba(139,92,246,0.65); font-size: 10px;"
+                  " font-weight: 400; letter-spacing: 0.5px;"
+                  " background: transparent; padding: 0;"
+              )
+              _plan_fl.addWidget(expiry_lbl)
+
+          plan_lbl = QLabel(("\u221e  " if _is_lifetime else "") + self._license.plan.lower())
+          plan_lbl.setObjectName("plan_badge")
+          plan_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+          _plan_fl.addWidget(plan_lbl)
+
+          dev_lbl = QLabel('<a href="https://lolz.live/ftpdev/" style="color:rgba(139,92,246,0.35);text-decoration:none;">@ftpdev_sup</a>')
+          dev_lbl.setOpenExternalLinks(True)
+          dev_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+          dev_lbl.setStyleSheet("font-size: 10px; background: transparent; padding: 0;")
+          _plan_fl.addWidget(dev_lbl)
+
+          sidebar_layout.addWidget(_plan_frame)
         root.addWidget(sidebar)
 
         # Main area with animated background
@@ -212,6 +228,7 @@ class MainWindow(QMainWindow):
             ("recipients", RecipientsScreen()),
             ("sending",    SendingScreen()),
             ("analytics",  AnalyticsScreen()),
+            ("inbox",      InboxScreen()),
         ]
         for key, screen in screen_map:
             self._stack.addWidget(screen)
@@ -224,7 +241,11 @@ class MainWindow(QMainWindow):
         analytics_screen = self._screens["analytics"]
         dashboard_screen = self._screens["dashboard"]
 
-        acct_screen.accounts_changed.connect(sending_screen.set_accounts)
+        inbox_screen: InboxScreen = self._screens["inbox"]
+          inbox_screen: InboxScreen = self._screens["inbox"]
+          acct_screen.accounts_changed.connect(sending_screen.set_accounts)
+          acct_screen.accounts_changed.connect(inbox_screen.set_accounts)
+          acct_screen.accounts_changed.connect(inbox_screen.set_accounts)
         if acct_screen._accounts:
             sending_screen.set_accounts(acct_screen._accounts)
         recip_screen.list_ready.connect(sending_screen.set_recipients)

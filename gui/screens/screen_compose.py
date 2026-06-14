@@ -95,7 +95,7 @@ class FormattingToolbar(QFrame):
         self.setFixedHeight(40)
 
         try:
-            from gui.icons import make_icon, BOLD, ITALIC, UNDERLINE, ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, LINK, TEXT_COLOR_ICON
+            from gui.icons import make_icon, BOLD, ITALIC, UNDERLINE, ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, LINK, PALETTE
             _has_icons = True
         except ImportError:
             _has_icons = False
@@ -103,7 +103,7 @@ class FormattingToolbar(QFrame):
         def fbtn(label: str, callback, tooltip: str = "", obj: str = "btn_fmt", icon_key: str = "") -> QPushButton:
             _SVG_MAP = {"bold": "BOLD", "italic": "ITALIC", "underline": "UNDERLINE",
                         "align_left": "ALIGN_LEFT", "align_center": "ALIGN_CENTER",
-                        "align_right": "ALIGN_RIGHT", "link": "LINK", "color": "TEXT_COLOR_ICON"}
+                        "align_right": "ALIGN_RIGHT", "link": "LINK", "color": "PALETTE"}
             b = QPushButton()
             b.setObjectName(obj)
             b.setFixedSize(26, 26)
@@ -111,7 +111,9 @@ class FormattingToolbar(QFrame):
             b.clicked.connect(callback)
             if _has_icons and icon_key in _SVG_MAP:
                 import gui.icons as _ic
-                svg_str = getattr(_ic, _SVG_MAP[icon_key])
+                svg_str = getattr(_ic, _SVG_MAP[icon_key], None)
+                if svg_str is None:
+                    svg_str = getattr(_ic, "PALETTE", "")
                 from PyQt6.QtCore import QSize as _QSize
                 b.setIcon(make_icon(svg_str, 14))
                 b.setIconSize(_QSize(14, 14))
@@ -200,11 +202,33 @@ class FormattingToolbar(QFrame):
         self._editor.textCursor().mergeCharFormat(fmt)
 
     def _text_color(self):
-        color = QColorDialog.getColor(parent=self)
-        if color.isValid():
-            fmt = QTextCharFormat()
-            fmt.setForeground(color)
-            self._editor.textCursor().mergeCharFormat(fmt)
+        from PyQt6.QtWidgets import QLabel, QPushButton
+        dialog = QColorDialog(parent=self)
+        dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
+        dialog.setWindowTitle("Выбрать цвет текста")
+        _RU = {
+            "Basic colors": "Базовые цвета",
+            "Custom colors": "Свои цвета",
+            "Pick Screen Color": "Пипетка",
+            "&Pick Screen Color": "Пипетка",
+            "Add to Custom Colors": "Сохранить",
+            "&Add to Custom Colors": "Сохранить",
+            "Hue:": "Тон:", "Sat:": "Нас.:", "Val:": "Ярк.:",
+            "Red:": "R:", "Green:": "G:", "Blue:": "B:", "HTML:": "HEX:",
+            "OK": "ОК", "&OK": "ОК", "Cancel": "Отмена", "&Cancel": "Отмена",
+        }
+        for lbl in dialog.findChildren(QLabel):
+            if lbl.text() in _RU:
+                lbl.setText(_RU[lbl.text()])
+        for btn in dialog.findChildren(QPushButton):
+            if btn.text() in _RU:
+                btn.setText(_RU[btn.text()])
+        if dialog.exec() == QColorDialog.DialogCode.Accepted:
+            color = dialog.selectedColor()
+            if color.isValid():
+                fmt = QTextCharFormat()
+                fmt.setForeground(color)
+                self._editor.textCursor().mergeCharFormat(fmt)
 
     def _align(self, alignment):
         self._editor.setAlignment(alignment)

@@ -133,7 +133,7 @@ QStackedWidget {{ background-color: {c.BG_BASE}; }}
         stop:0 rgba(139,92,246,0.20), stop:1 rgba(6,182,212,0.08));
     color: {c.ACCENT};
     border-left: 2px solid {c.ACCENT};
-    border-radius: 0px;
+    border-radius: {r.SMALL};
     padding-left: 12px;
 }}
 
