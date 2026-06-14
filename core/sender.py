@@ -766,24 +766,34 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
 
 
 async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
+    """
+    Проверяет SMTP-подключение.
+    aiosmtplib >= 3.x: используем start_tls=True в конструкторе (вместо ручного starttls()).
+    Если aiosmtplib недоступен — синхронный fallback через smtplib.
+    """
     if not _HAS_AIOSMTPLIB:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _test_smtp_sync, account)
     try:
         if account.use_ssl:
+            # Port 465: TLS с первого байта
             smtp = aiosmtplib.SMTP(
                 hostname=account.host, port=account.port,
-                use_tls=True, start_tls=False, timeout=20,
+                use_tls=True, timeout=20,
             )
-            await smtp.connect()
+        elif account.use_tls:
+            # Port 587: STARTTLS — передаём start_tls=True, connect() делает EHLO + STARTTLS сам
+            smtp = aiosmtplib.SMTP(
+                hostname=account.host, port=account.port,
+                start_tls=True, timeout=20,
+            )
         else:
+            # Plain SMTP (редко)
             smtp = aiosmtplib.SMTP(
                 hostname=account.host, port=account.port,
-                use_tls=False, timeout=20,
+                timeout=20,
             )
-            await smtp.connect()
-            if account.use_tls:
-                await smtp.starttls()
+        await smtp.connect()
         await smtp.login(account.email, account.password)
         await smtp.quit()
         return True, f"OK — SMTP {account.host}:{account.port} авторизация успешна"
