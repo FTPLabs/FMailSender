@@ -12,10 +12,10 @@ jobs:
           username: root
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
-            set -e
+            apt-get install -y sqlite3 -q 2>/dev/null || true
             DB=$(find /opt /home /root /srv -name "licenses.db" 2>/dev/null | head -1)
-            echo "DB: $DB"
+            echo "Using DB: $DB"
             sqlite3 "$DB" "SELECT key, hwid, plan, expires_at FROM licenses WHERE key='FMSND-U5DIXQ-7B6M84-GTA1NQ-YQ1ITF';"
             sqlite3 "$DB" "UPDATE licenses SET hwid='' WHERE key='FMSND-U5DIXQ-7B6M84-GTA1NQ-YQ1ITF';"
-            echo "HWID reset done."
-            sqlite3 "$DB" "SELECT key, hwid FROM licenses WHERE key='FMSND-U5DIXQ-7B6M84-GTA1NQ-YQ1ITF';"
+            echo "HWID cleared."
+            sqlite3 "$DB" "SELECT key, hwid, is_active FROM licenses WHERE key='FMSND-U5DIXQ-7B6M84-GTA1NQ-YQ1ITF';"
