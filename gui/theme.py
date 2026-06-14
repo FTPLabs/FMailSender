@@ -477,7 +477,27 @@ QScrollBar::handle:horizontal {{
 }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 
-/* ═══ Checkboxes ════════════════════════════════════════════════════════ */
+/* ═══ QTableWidget corner button (black square fix) ══════════════════ */
+  QTableWidget QAbstractButton {{
+      background-color: {c.BG_SURFACE};
+      border: 1px solid {c.BORDER};
+  }}
+  QTableWidget QAbstractButton:pressed {{
+      background-color: {c.BG_SURFACE2};
+  }}
+  QTableWidget QAbstractButton::indicator {{
+      width: 14px; height: 14px;
+      border: 1px solid {c.BORDER};
+      border-radius: {r.SMALL};
+      background: {c.BG_GLASS};
+  }}
+  QTableWidget QAbstractButton::indicator:checked {{
+      background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+          stop:0 {c.GRAD_START}, stop:1 {c.GRAD_END});
+      border-color: {c.ACCENT};
+  }}
+
+  /* ═══ Checkboxes ════════════════════════════════════════════════════════ */
 QCheckBox {{
     spacing: 8px;
     color: {c.TEXT_SECONDARY};

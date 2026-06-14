@@ -71,6 +71,8 @@ def _generate_key() -> str:
 
 async def init_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
         await db.executescript(CREATE_SQL)
         for plan_id, plan in PLANS.items():
             await db.execute(

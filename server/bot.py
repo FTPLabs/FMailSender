@@ -10,7 +10,7 @@ import sys
 from dotenv import load_dotenv
 load_dotenv()  # Load .env before config imports
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import jwt
 import uvicorn
@@ -20,9 +20,7 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.base import BaseStorage, StorageKey
-from typing import Any, Dict
 import json
 from pathlib import Path
 
