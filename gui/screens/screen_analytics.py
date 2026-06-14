@@ -89,6 +89,13 @@ class AnalyticsScreen(QWidget):
         header_row.addWidget(title)
         header_row.addStretch()
 
+        self.campaign_combo = QComboBox()
+        self.campaign_combo.setMinimumWidth(220)
+        self.campaign_combo.setToolTip("История кампаний")
+        self.campaign_combo.addItem("Текущая кампания")
+        self.campaign_combo.currentIndexChanged.connect(self._load_campaign)
+        header_row.addWidget(self.campaign_combo)
+
         refresh_btn = QPushButton("Обновить")
         refresh_btn.setObjectName("btn_secondary")
         refresh_btn.clicked.connect(self._refresh)
@@ -208,6 +215,7 @@ class AnalyticsScreen(QWidget):
         self._refresh_results_table()
         self._refresh_summary()
         self._save_campaign(results)
+        self._refresh_campaign_combo()
 
     def _refresh_results_table(self):
         results = self._current_results
@@ -289,9 +297,24 @@ class AnalyticsScreen(QWidget):
 
     def _refresh(self):
         self._data = _load_analytics()
+        self._refresh_campaign_combo()
         self._refresh_results_table()
         self._refresh_summary()
         self._refresh_bounce_table()
+
+    def _refresh_campaign_combo(self) -> None:
+        """Обновляет список кампаний в выпадающем меню."""
+        self.campaign_combo.blockSignals(True)
+        current = self.campaign_combo.currentIndex()
+        self.campaign_combo.clear()
+        self.campaign_combo.addItem("Текущая кампания")
+        campaigns = self._data.get("campaigns", [])
+        for camp in reversed(campaigns):
+            label = f"{camp.get('date', '—')}  ({camp.get('success', 0)}/{camp.get('total', 0)} ✓)"
+            self.campaign_combo.addItem(label)
+        idx = min(current, self.campaign_combo.count() - 1)
+        self.campaign_combo.setCurrentIndex(idx)
+        self.campaign_combo.blockSignals(False)
 
     def _refresh_bounce_table(self):
         bounces = self._data.get("bounces", [])

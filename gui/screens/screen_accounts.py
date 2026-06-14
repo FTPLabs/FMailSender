@@ -296,6 +296,7 @@ class TestWorker(QThread):
 
     def run(self):
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             ok, msg = loop.run_until_complete(test_smtp_connection(self._account))
         finally:
@@ -588,6 +589,11 @@ class AccountsScreen(QWidget):
         self.test_all_btn.clicked.connect(self._test_all)
         toolbar.addWidget(self.test_all_btn)
 
+        select_all_btn = QPushButton("Выделить всё")
+        select_all_btn.setObjectName("btn_icon")
+        select_all_btn.clicked.connect(self.table.selectAll)
+        toolbar.addWidget(select_all_btn)
+
         del_btn = QPushButton("Удалить выбранный")
         del_btn.setObjectName("btn_danger")
         del_btn.clicked.connect(self._delete_selected)
@@ -702,6 +708,8 @@ class AccountsScreen(QWidget):
                 item.setText("✓ OK" if ok else "✗ Ошибка")
                 item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
                 item.setToolTip(msg)
+            if 0 <= r < len(self._accounts):
+                self._accounts[r].last_test_ok = ok
 
         w.result_ready.connect(on_result)
         self._test_workers.append(w)
@@ -732,6 +740,8 @@ class AccountsScreen(QWidget):
                     item.setText("✓ OK" if ok else "✗ Ошибка")
                     item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
                     item.setToolTip(msg)
+                if 0 <= r < len(self._accounts):
+                    self._accounts[r].last_test_ok = ok
                 completed[0] += 1
                 if completed[0] >= total:
                     self.test_all_btn.setEnabled(True)

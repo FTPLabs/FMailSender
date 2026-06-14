@@ -623,6 +623,7 @@ class SmtpAccount:
     imap_host: str = ""
     imap_port: int = 993
     imap_ssl: bool = True
+    last_test_ok: Optional[bool] = field(default=None)
 
     def __post_init__(self):
         self._lock = threading.Lock()
@@ -766,7 +767,7 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
 
 async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
     if not _HAS_AIOSMTPLIB:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _test_smtp_sync, account)
     try:
         if account.use_ssl:
@@ -954,7 +955,7 @@ class SendingEngine:
 
     def _pick_account(self) -> Optional[SmtpAccount]:
         """Pick first account that passes atomic try_increment check."""
-        active = [a for a in self.accounts if a.is_active]
+        active = [a for a in self.accounts if a.is_active and a.last_test_ok is not False]
         if self.config.rotate_accounts:
             random.shuffle(active)
         for account in active:
@@ -982,7 +983,7 @@ class SendingEngine:
         async with sem:
             if _HAS_AIOSMTPLIB:
                 return await self._send_aiosmtp(account, recipient, personalized)
-            return await asyncio.get_event_loop().run_in_executor(
+            return await asyncio.get_running_loop().run_in_executor(
                 None, self._send_sync, account, recipient, personalized
             )
 
