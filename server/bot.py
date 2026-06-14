@@ -93,53 +93,53 @@ import database as db
 from config import ADMIN_IDS, API_HOST, API_PORT, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL
 from crypto_pay import crypto_client
 
-  # ─── GitHub Release Auto-Fetch ───────────────────────────────────────────────
+# ─── GitHub Release Auto-Fetch ───────────────────────────────────────────────
 
-  GITHUB_REPO = "FTPLabs/FMailSender"
-  _release_cache: dict = {}
-  _release_cache_ts: float = 0.0
-  _RELEASE_CACHE_TTL = 300  # 5 minutes
-
-
-  async def fetch_latest_release() -> dict:
-      """Auto-fetch latest GitHub release info. Cached for 5 min."""
-      global _release_cache, _release_cache_ts
-      import time
-      if _release_cache and (time.time() - _release_cache_ts) < _RELEASE_CACHE_TTL:
-          return _release_cache
-      url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-      try:
-          async with aiohttp.ClientSession() as session:
-              async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                  if resp.status == 200:
-                      data = await resp.json()
-                      assets = data.get("assets", [])
-                      exe_asset = next(
-                          (a for a in assets if a.get("name", "").endswith(".exe")), None
-                      )
-                      _release_cache = {
-                          "tag": data.get("tag_name", ""),
-                          "html_url": data.get("html_url", ""),
-                          "download_url": (
-                              exe_asset["browser_download_url"]
-                              if exe_asset
-                              else data.get("html_url", DOWNLOAD_URL)
-                          ),
-                          "vt_url": _extract_vt_url(data.get("body", "")),
-                          "body": data.get("body", ""),
-                      }
-                      _release_cache_ts = time.time()
-                      return _release_cache
-      except Exception as e:
-          logger.warning("GitHub release fetch failed: %s", e)
-      return {"tag": "", "html_url": DOWNLOAD_URL, "download_url": DOWNLOAD_URL, "vt_url": "", "body": ""}
+GITHUB_REPO = "FTPLabs/FMailSender"
+_release_cache: dict = {}
+_release_cache_ts: float = 0.0
+_RELEASE_CACHE_TTL = 300  # 5 minutes
 
 
-  def _extract_vt_url(release_body: str) -> str:
-      """Extract VirusTotal URL from release notes if present."""
-      import re
-      m = re.search(r'https://www\.virustotal\.com/[^\s)\]]+', release_body)
-      return m.group(0) if m else ""
+async def fetch_latest_release() -> dict:
+    """Auto-fetch latest GitHub release info. Cached for 5 min."""
+    global _release_cache, _release_cache_ts
+    import time
+    if _release_cache and (time.time() - _release_cache_ts) < _RELEASE_CACHE_TTL:
+        return _release_cache
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    assets = data.get("assets", [])
+                    exe_asset = next(
+                        (a for a in assets if a.get("name", "").endswith(".exe")), None
+                    )
+                    _release_cache = {
+                        "tag": data.get("tag_name", ""),
+                        "html_url": data.get("html_url", ""),
+                        "download_url": (
+                            exe_asset["browser_download_url"]
+                            if exe_asset
+                            else data.get("html_url", DOWNLOAD_URL)
+                        ),
+                        "vt_url": _extract_vt_url(data.get("body", "")),
+                        "body": data.get("body", ""),
+                    }
+                    _release_cache_ts = time.time()
+                    return _release_cache
+    except Exception as e:
+        logger.warning("GitHub release fetch failed: %s", e)
+    return {"tag": "", "html_url": DOWNLOAD_URL, "download_url": DOWNLOAD_URL, "vt_url": "", "body": ""}
+
+
+def _extract_vt_url(release_body: str) -> str:
+    """Extract VirusTotal URL from release notes if present."""
+    import re
+    m = re.search(r'https://www\.virustotal\.com/[^\s)\]]+', release_body)
+    return m.group(0) if m else ""
 
 logging.basicConfig(
     level=logging.INFO,
