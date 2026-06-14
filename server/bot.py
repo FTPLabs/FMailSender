@@ -21,62 +21,62 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-  from aiogram.fsm.storage.base import BaseStorage, StorageKey
-  from typing import Any, Dict
-  import json
-  from pathlib import Path
+from aiogram.fsm.storage.base import BaseStorage, StorageKey
+from typing import Any, Dict
+import json
+from pathlib import Path
 
 
-  class JsonFileStorage(BaseStorage):
-      """Persistent FSM storage backed by a JSON file. Survives bot restarts."""
+class JsonFileStorage(BaseStorage):
+    """Persistent FSM storage backed by a JSON file. Survives bot restarts."""
 
-      def __init__(self, path: str = "fsm_storage.json"):
-          self._path = Path(path)
-          self._data: Dict[str, Any] = self._load()
+    def __init__(self, path: str = "fsm_storage.json"):
+        self._path = Path(path)
+        self._data: Dict[str, Any] = self._load()
 
-      def _load(self) -> Dict[str, Any]:
-          if self._path.exists():
-              try:
-                  return json.loads(self._path.read_text(encoding="utf-8"))
-              except Exception:
-                  pass
-          return {}
+    def _load(self) -> Dict[str, Any]:
+        if self._path.exists():
+            try:
+                return json.loads(self._path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {}
 
-      def _dump(self) -> None:
-          self._path.write_text(
-              json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8"
-          )
+    def _dump(self) -> None:
+        self._path.write_text(
+            json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
-      def _key(self, key: StorageKey) -> str:
-          return f"{key.chat_id}:{key.user_id}"
+    def _key(self, key: StorageKey) -> str:
+        return f"{key.chat_id}:{key.user_id}"
 
-      async def set_state(self, key: StorageKey, state: Any = None) -> None:
-          k = self._key(key)
-          if k not in self._data:
-              self._data[k] = {}
-          self._data[k]["state"] = state.state if hasattr(state, "state") else state
-          self._dump()
+    async def set_state(self, key: StorageKey, state: Any = None) -> None:
+        k = self._key(key)
+        if k not in self._data:
+            self._data[k] = {}
+        self._data[k]["state"] = state.state if hasattr(state, "state") else state
+        self._dump()
 
-      async def get_state(self, key: StorageKey) -> Any:
-          return self._data.get(self._key(key), {}).get("state")
+    async def get_state(self, key: StorageKey) -> Any:
+        return self._data.get(self._key(key), {}).get("state")
 
-      async def set_data(self, key: StorageKey, data: Dict[str, Any]) -> None:
-          k = self._key(key)
-          if k not in self._data:
-              self._data[k] = {}
-          self._data[k]["data"] = data
-          self._dump()
+    async def set_data(self, key: StorageKey, data: Dict[str, Any]) -> None:
+        k = self._key(key)
+        if k not in self._data:
+            self._data[k] = {}
+        self._data[k]["data"] = data
+        self._dump()
 
-      async def get_data(self, key: StorageKey) -> Dict[str, Any]:
-          return self._data.get(self._key(key), {}).get("data", {})
+    async def get_data(self, key: StorageKey) -> Dict[str, Any]:
+        return self._data.get(self._key(key), {}).get("data", {})
 
-      async def close(self) -> None:
-          self._dump()
+    async def close(self) -> None:
+        self._dump()
 from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message,
+  CallbackQuery,
+  InlineKeyboardButton,
+  InlineKeyboardMarkup,
+  Message,
 )
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -86,9 +86,9 @@ from config import ADMIN_IDS, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD
 from crypto_pay import crypto_client
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-7s | %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+  level=logging.INFO,
+  format="%(asctime)s | %(levelname)-7s | %(name)s: %(message)s",
+  handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("bot")
 
