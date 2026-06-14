@@ -202,34 +202,38 @@ class FormattingToolbar(QFrame):
         self._editor.textCursor().mergeCharFormat(fmt)
 
     def _text_color(self):
-        from PyQt6.QtWidgets import QLabel, QPushButton
-        dialog = QColorDialog(parent=self)
-        dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
-        dialog.setWindowTitle("Выбрать цвет текста")
-        _RU = {
-            "Basic colors": "Базовые цвета",
-            "Custom colors": "Свои цвета",
-            "Pick Screen Color": "Пипетка",
-            "&Pick Screen Color": "Пипетка",
-            "Add to Custom Colors": "Сохранить",
-            "&Add to Custom Colors": "Сохранить",
-            "Hue:": "Тон:", "Sat:": "Нас.:", "Val:": "Ярк.:",
-            "Red:": "R:", "Green:": "G:", "Blue:": "B:", "HTML:": "HEX:",
-            "OK": "ОК", "&OK": "ОК", "Cancel": "Отмена", "&Cancel": "Отмена",
-        }
-        for lbl in dialog.findChildren(QLabel):
-            if lbl.text() in _RU:
-                lbl.setText(_RU[lbl.text()])
-        for btn in dialog.findChildren(QPushButton):
-            if btn.text() in _RU:
-                btn.setText(_RU[btn.text()])
-        if dialog.exec() == QColorDialog.DialogCode.Accepted:
-            color = dialog.selectedColor()
-            if color.isValid():
-                fmt = QTextCharFormat()
-                fmt.setForeground(color)
-                self._editor.textCursor().mergeCharFormat(fmt)
-
+          """Открывает диалог выбора цвета с полной русификацией."""
+          from PyQt6.QtWidgets import QLabel, QPushButton, QGroupBox
+          dialog = QColorDialog(parent=self)
+          dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
+          dialog.setWindowTitle("Выбрать цвет текста")
+          _RU = {
+              "Basic colors": "Основные цвета", "&Basic colors": "Основные цвета",
+              "Custom colors": "Пользовательские", "&Custom colors": "Пользовательские",
+              "Pick Screen Color": "Пипетка", "&Pick Screen Color": "Пипетка",
+              "Add to Custom Colors": "Добавить", "&Add to Custom Colors": "Добавить",
+              "Hue:": "Тон:", "Sat:": "Нас.:", "Val:": "Ярк.:",
+              "Red:": "R:", "Green:": "G:", "Blue:": "B:",
+              "HTML:": "HEX:", "Alpha channel:": "Прозрачность:",
+              "OK": "ОК", "&OK": "ОК", "Cancel": "Отмена", "&Cancel": "Отмена",
+          }
+          def _ru(w):
+              for lbl in w.findChildren(QLabel):
+                  lbl.setText(_RU.get(lbl.text(), lbl.text()))
+              for btn in w.findChildren(QPushButton):
+                  btn.setText(_RU.get(btn.text(), btn.text()))
+              for gb in w.findChildren(QGroupBox):
+                  gb.setTitle(_RU.get(gb.title(), gb.title()))
+          _ru(dialog)
+          from PyQt6.QtCore import QTimer
+          QTimer.singleShot(0, lambda: _ru(dialog))
+          if dialog.exec() == QColorDialog.DialogCode.Accepted:
+              color = dialog.selectedColor()
+              if color.isValid():
+                  fmt = QTextCharFormat()
+                  fmt.setForeground(color)
+                  self._editor.textCursor().mergeCharFormat(fmt)
+  
     def _align(self, alignment):
         self._editor.setAlignment(alignment)
 
@@ -257,20 +261,11 @@ class FormattingToolbar(QFrame):
                 cursor.insertHtml(f'<a href="{url}">{text}</a>')
 
     def _insert_variable(self, text: str):
-        if text.startswith("{{"):
-            self._editor.textCursor().insertText(text)
-
-
-# ──────────────────────────────────────────────
-# Основной экран
-# ──────────────────────────────────────────────
-
-
-class SpamCheckWorker(QThread):
-    """Runs spam check in background thread — prevents UI freeze/crash."""
-    finished = pyqtSignal(object)
-    error = pyqtSignal(str)
-
+          """Немедленная вставка переменной при выборе из списка."""
+          if text.startswith("{{") and text.endswith("}}"):
+              self._editor.textCursor().insertText(text)
+              self._editor.setFocus()
+  
     def __init__(self, subject: str, html: str, parent=None):
         super().__init__(parent)
         self.subject = subject
@@ -767,31 +762,45 @@ a {{ color: #6366F1; }}
       self.template_ready.emit(template)
 
     def _save_template(self):
-      TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-      name, ok = self._ask_template_name()
-      if not ok or not name:
-          return
-      path = TEMPLATES_DIR / f"{name}.json"
-      import json
-      with open(path, "w", encoding="utf-8") as f:
-          json.dump({
-              "subject": self.subject_input.text(),
-              "body_html": self.html_editor.toPlainText() or self.rich_editor.toHtml(),
-          }, f, ensure_ascii=False, indent=2)
-
+          """Сохраняет шаблон — имя через QInputDialog."""
+          TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+          from PyQt6.QtWidgets import QInputDialog
+          default = self.subject_input.text()[:40].strip().replace("/", "_") or "шаблон"
+          name, ok = QInputDialog.getText(self, "Сохранить шаблон", "Имя шаблона:", text=default)
+          if not ok or not name.strip():
+              return
+          import json as _json
+          path = TEMPLATES_DIR / f"{name.strip()}.json"
+          with open(path, "w", encoding="utf-8") as f:
+              _json.dump({
+                  "subject": self.subject_input.text(),
+                  "body_html": self.html_editor.toPlainText() or self.rich_editor.toHtml(),
+              }, f, ensure_ascii=False, indent=2)
+  
     def _load_template(self):
-      TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-      path, _ = QFileDialog.getOpenFileName(
-          self, "Загрузить шаблон", str(TEMPLATES_DIR), "JSON files (*.json)"
-      )
-      if path:
-          import json
-          with open(path, "r", encoding="utf-8") as f:
-              data = json.load(f)
-          self.subject_input.setText(data.get("subject", ""))
-          self.html_editor.setPlainText(data.get("body_html", ""))
-          self._update_preview()
-
+          """Загружает шаблон (JSON/HTML) без лишних диалогов подтверждения."""
+          TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+          path, _ = QFileDialog.getOpenFileName(
+              self, "Загрузить шаблон", str(TEMPLATES_DIR),
+              "JSON шаблоны (*.json);;HTML файлы (*.html *.htm);;Все файлы (*)"
+          )
+          if not path:
+              return
+          import json as _json
+          try:
+              if path.lower().endswith((".html", ".htm")):
+                  self.html_editor.setPlainText(
+                      Path(path).read_text(encoding="utf-8", errors="replace")
+                  )
+              else:
+                  with open(path, "r", encoding="utf-8") as f:
+                      data = _json.load(f)
+                  self.subject_input.setText(data.get("subject", ""))
+                  self.html_editor.setPlainText(data.get("body_html", ""))
+              self._update_preview()
+          except Exception as e:
+              QMessageBox.warning(self, "Ошибка загрузки", str(e))
+  
     def _ask_template_name(self):
       from PyQt6.QtWidgets import QInputDialog
       return QInputDialog.getText(self, "Название шаблона", "Введите имя шаблона:")
