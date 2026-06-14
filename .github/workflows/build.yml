@@ -28,21 +28,48 @@ jobs:
       - name: Syntax check (py_compile)
         shell: pwsh
         run: |
-          $files = Get-ChildItem -Recurse -Filter "*.py" -Exclude "__pycache__" | Where-Object { $_.FullName -notmatch "venv|site-packages|\.git" } | Select-Object -ExpandProperty FullName
+          $files = Get-ChildItem -Recurse -Filter "*.py" | Where-Object { $_.FullName -notmatch "venv|site-packages|\.git" } | Select-Object -ExpandProperty FullName
           $failed = @()
           foreach ($f in $files) {
             $out = python -m py_compile "$f" 2>&1
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "FAIL: $f"
-              Write-Host $out
-              $failed += $f
-            }
+            if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: $f"; Write-Host $out; $failed += $f }
           }
-          if ($failed.Count -gt 0) {
-            Write-Error "Syntax errors found in $($failed.Count) file(s): $($failed -join ', ')"
-            exit 1
-          }
+          if ($failed.Count -gt 0) { Write-Error "Syntax errors in: $($failed -join ', ')"; exit 1 }
           Write-Host "All $($files.Count) Python files passed syntax check"
+
+      - name: Import check (core modules)
+        shell: pwsh
+        run: |
+          python -c @"
+import sys
+sys.path.insert(0, '.')
+errors = []
+modules = [
+    'core._version', 'core.sender', 'core.bounce',
+    'core.spam_checker', 'core.warmup', 'core.updater', 'core.ai_fixer',
+]
+for mod in modules:
+    try:
+        m = __import__(mod, fromlist=[''])
+        print(f'OK: {mod}')
+    except Exception as e:
+        print(f'FAIL: {mod}: {e}')
+        errors.append(mod)
+
+# Проверяем конкретные имена которые импортируют экраны
+from core.sender import (
+    Recipient, EmailTemplate, SmtpAccount, SendingEngine,
+    CampaignConfig, SendResult, get_smtp_config_for_domain,
+    validate_email_format, test_smtp_connection
+)
+from core.license import activate_license, generate_hwid, LicenseInfo, KEY_PREFIX
+print('Named imports OK')
+
+if errors:
+    print(f'FAILED modules: {errors}')
+    sys.exit(1)
+print('All import checks passed!')
+"@
 
       - name: Build .exe
         shell: cmd

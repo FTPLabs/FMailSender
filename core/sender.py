@@ -59,6 +59,60 @@ _SMTP_CONFIGS: dict[str, dict] = {
 }
 
 
+@dataclass
+class Recipient:
+    """Один получатель рассылки с полями персонализации."""
+    email: str
+    first_name: str = ""
+    last_name: str = ""
+    company: str = ""
+    custom_1: str = ""
+    custom_2: str = ""
+    custom_3: str = ""
+    custom_4: str = ""
+    custom_5: str = ""
+
+
+@dataclass
+class EmailTemplate:
+    """Шаблон письма с поддержкой персонализации через {{placeholders}}."""
+    subject: str
+    body_html: str
+    body_text: str = ""
+    attachments: List[str] = field(default_factory=list)
+    reply_to: str = ""
+    cc: List[str] = field(default_factory=list)
+
+    def personalize(self, recipient: Recipient) -> "EmailTemplate":
+        """Возвращает копию шаблона с заменёнными плейсхолдерами для получателя."""
+        subs = {
+            "{{email}}":      recipient.email,
+            "{{first_name}}": recipient.first_name,
+            "{{last_name}}":  recipient.last_name,
+            "{{company}}":    recipient.company,
+            "{{custom_1}}":   recipient.custom_1,
+            "{{custom_2}}":   recipient.custom_2,
+            "{{custom_3}}":   recipient.custom_3,
+            "{{custom_4}}":   recipient.custom_4,
+            "{{custom_5}}":   recipient.custom_5,
+            "{{full_name}}":  f"{recipient.first_name} {recipient.last_name}".strip(),
+        }
+
+        def sub(text: str) -> str:
+            for k, v in subs.items():
+                text = text.replace(k, v)
+            return text
+
+        return EmailTemplate(
+            subject=sub(self.subject),
+            body_html=sub(self.body_html),
+            body_text=sub(self.body_text),
+            attachments=self.attachments,
+            reply_to=self.reply_to,
+            cc=self.cc,
+        )
+
+
 def get_smtp_config_for_domain(domain: str) -> Optional[dict]:
     return _SMTP_CONFIGS.get(domain.lower().strip())
 
@@ -114,33 +168,6 @@ class SmtpAccount:
                 return True
             return False
   
-    def personalize(self, recipient: Recipient) -> "EmailTemplate":
-        subs = {
-            "{{email}}":      recipient.email,
-            "{{first_name}}": recipient.first_name,
-            "{{last_name}}":  recipient.last_name,
-            "{{company}}":    recipient.company,
-            "{{custom_1}}":   recipient.custom_1,
-            "{{custom_2}}":   recipient.custom_2,
-            "{{custom_3}}":   recipient.custom_3,
-            "{{custom_4}}":   recipient.custom_4,
-            "{{custom_5}}":   recipient.custom_5,
-            "{{full_name}}":  f"{recipient.first_name} {recipient.last_name}".strip(),
-        }
-
-        def sub(text: str) -> str:
-            for k, v in subs.items():
-                text = text.replace(k, v)
-            return text
-
-        return EmailTemplate(
-            subject=sub(self.subject),
-            body_html=sub(self.body_html),
-            body_text=sub(self.body_text),
-            attachments=self.attachments,
-            reply_to=self.reply_to,
-            cc=self.cc,
-        )
 
 
 @dataclass
