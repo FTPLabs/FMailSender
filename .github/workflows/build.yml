@@ -30,11 +30,11 @@ jobs:
         run: |
           pyinstaller --noconfirm --onefile --windowed ^
             --name "FMailSender" ^
-            --icon "assets/images/fmail_logo.ico" ^
+            --icon "assets/images/fmail_logo.png" ^
             --add-data "assets;assets" ^
             --add-data "data;data" ^
             --hidden-import "PyQt6.sip" ^
-            --hidden-import "PyQt6.QtWebEngineWidgets" ^
+            --hidden-import-if-present "PyQt6.QtWebEngineWidgets" ^
             --collect-all "PyQt6" ^
             main.py
 
