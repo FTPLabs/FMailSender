@@ -33,10 +33,15 @@ def check_for_update(timeout: float = 10.0) -> Optional[dict]:
     Returns dict with keys: tag_name, html_url, body — or None if no update / error.
     """
     try:
+        import os as _os
+        _gh_token = _os.environ.get("GITHUB_TOKEN", "")
+        _headers = {"User-Agent": f"FMailSender/{APP_VERSION}"}
+        if _gh_token:
+            _headers["Authorization"] = f"Bearer {_gh_token}"
         resp = requests.get(
             GITHUB_API_URL,
             timeout=timeout,
-            headers={"User-Agent": f"FMailSender/{APP_VERSION}"},
+            headers=_headers,
         )
         if resp.status_code != 200:
             return None
