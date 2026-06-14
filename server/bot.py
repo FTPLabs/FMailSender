@@ -1165,7 +1165,8 @@ async def msg_upload_file(message: Message, state: FSMContext):
         server_host = os.environ.get("SERVER_HOST", "")
         if not server_host:
             server_host = f"{API_HOST}:{API_PORT}" if API_HOST != "0.0.0.0" else f"localhost:{API_PORT}"
-        download_url = f"http://{server_host}/v1/download/{fname}"
+        scheme = "https" if os.environ.get("SERVER_HTTPS") else "http"
+        download_url = f"{scheme}://{server_host}/v1/download/{fname}"
         await db.set_setting("download_url", download_url)
         await state.clear()
         await message.answer(
@@ -1302,8 +1303,7 @@ async def msg_admin_broadcast(message: Message, state: FSMContext):
         return
     text = message.text or ""
     await state.clear()
-    licenses = await db.get_all_licenses(limit=50000)
-    user_ids = list({lic["telegram_id"] for lic in licenses if lic.get("telegram_id")})
+    user_ids = await db.get_distinct_user_ids()
     sent = 0
     failed = 0
     for uid in user_ids:
