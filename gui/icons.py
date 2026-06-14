@@ -61,3 +61,12 @@ EDIT = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" 
 INBOX = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>'
 REPLY = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>'
 REFRESH = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
+
+# ── Custom brand icons ────────────────────────────────────────────────────────
+
+# Telegram: official paper-plane style icon (filled)
+TELEGRAM = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.93 6.36l-1.686 7.948c-.127.567-.46.708-.933.44l-2.573-1.895-1.241 1.195c-.137.137-.252.252-.517.252l.185-2.62 4.773-4.311c.207-.185-.045-.288-.322-.103L8.118 14.36l-2.53-.79c-.55-.172-.56-.55.114-.815l9.867-3.803c.458-.165.858.113.361.808z"/></svg>'
+
+# Lolz Market (lolz.live) — stylised rounded-square "L" logo
+LOLZ = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect fill="currentColor" x="2" y="2" width="20" height="20" rx="5.5"/><path fill="white" d="M7.5 6.5h2.8v8.2h4.2v2.3H7.5V6.5z"/></svg>'
+
