@@ -17,7 +17,7 @@ from gui.screens.screen_compose import ComposeScreen
 from gui.screens.screen_recipients import RecipientsScreen
 from gui.screens.screen_sending import SendingScreen
 from gui.screens.screen_analytics import AnalyticsScreen
-  from gui.screens.screen_inbox import InboxScreen
+from gui.screens.screen_inbox import InboxScreen
 from gui.widgets.animated_bg import AnimatedBackground
 from core.license import LicenseInfo
 from core.updater import start_background_check
