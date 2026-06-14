@@ -82,7 +82,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 import database as db
-from config import ADMIN_IDS, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL
+from config import ADMIN_IDS, API_HOST, API_PORT, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL
 from crypto_pay import crypto_client
 
 logging.basicConfig(
