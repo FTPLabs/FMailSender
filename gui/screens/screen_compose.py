@@ -710,37 +710,41 @@ a {{ color: #6366F1; }}
       inner_layout = QVBoxLayout(inner)
       inner_layout.setSpacing(Spacing.SM)
 
-      # Категории
-      categories = getattr(result, "categories", {})
-      for cat, cat_score in categories.items():
-          if cat_score > 0:
-              row = QHBoxLayout()
-              row.addWidget(QLabel(cat))
-              row.addStretch()
-              row.addWidget(QLabel(str(cat_score)))
-              inner_layout.addLayout(row)
+      # Спам-слова из details (SpamCheckResult не имеет поля categories)
+      details = getattr(result, "details", {})
+      spam_words_found = details.get("spam_words_found", [])
+      if spam_words_found:
+          row = QHBoxLayout()
+          row.addWidget(QLabel("Найдено спам-слов:"))
+          row.addStretch()
+          row.addWidget(QLabel(str(len(spam_words_found))))
+          inner_layout.addLayout(row)
 
       # Проблемы
       if result.issues:
           issues_label = QLabel("Проблемы:")
           issues_label.setObjectName("label_subtitle")
-          layout.addWidget(issues_label)
+          inner_layout.addWidget(issues_label)
           for issue in result.issues[:5]:
               lbl = QLabel(f"• {issue}")
               lbl.setStyleSheet(f"color: {Colors.ERROR};")
               lbl.setWordWrap(True)
-              layout.addWidget(lbl)
+              inner_layout.addWidget(lbl)
 
       # Рекомендации
       if result.warnings:
           sugg_label = QLabel("Рекомендации:")
           sugg_label.setObjectName("label_subtitle")
-          layout.addWidget(sugg_label)
+          inner_layout.addWidget(sugg_label)
           for s in result.warnings[:3]:
               lbl = QLabel(f"• {s}")
               lbl.setStyleSheet(f"color: {Colors.WARNING};")
               lbl.setWordWrap(True)
-              layout.addWidget(lbl)
+              inner_layout.addWidget(lbl)
+
+      inner_layout.addStretch()
+      scroll.setWidget(inner)
+      layout.addWidget(scroll, 1)
 
       close_btn = QPushButton("Закрыть")
       close_btn.setObjectName("btn_primary")

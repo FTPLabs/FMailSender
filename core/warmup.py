@@ -22,7 +22,7 @@ def get_warmup_limit(day: int) -> int:
     return min(limit, 500)
 
 
-WARMUP_SCHEDULE = {day: get_warmup_limit(day) for day in range(1, 61)}
+WARMUP_SCHEDULE = {day: get_warmup_limit(day) for day in range(0, 61)}
 
 
 @dataclass

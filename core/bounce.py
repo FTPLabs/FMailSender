@@ -35,23 +35,23 @@ class BounceRecord:
 
     def to_dict(self) -> dict:
         return {
-            "email": self.email,
-            "bounce_type": self.bounce_type.value,
-            "code": self.code,
-            "message": self.message,
-            "received_at": self.received_at,
-            "original_subject": self.original_subject,
+          "email": self.email,
+          "bounce_type": self.bounce_type.value,
+          "code": self.code,
+          "message": self.message,
+          "received_at": self.received_at,
+          "original_subject": self.original_subject,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "BounceRecord":
         return cls(
-            email=d["email"],
-            bounce_type=BounceType(d.get("bounce_type", "unknown")),
-            code=d.get("code", ""),
-            message=d.get("message", ""),
-            received_at=d.get("received_at", ""),
-            original_subject=d.get("original_subject", ""),
+          email=d["email"],
+          bounce_type=BounceType(d.get("bounce_type", "unknown")),
+          code=d.get("code", ""),
+          message=d.get("message", ""),
+          received_at=d.get("received_at", ""),
+          original_subject=d.get("original_subject", ""),
         )
 
 
@@ -110,27 +110,27 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
     for part in msg.walk():
         content_type = part.get_content_type()
         if content_type == "message/delivery-status":
-            try:
-                payload = part.get_payload()
-                if isinstance(payload, list):
-                    status_text = "\n".join(
-                        sub.as_string() if hasattr(sub, "as_string") else str(sub)
-                        for sub in payload
-                    )
-                elif isinstance(payload, bytes):
-                    status_text = payload.decode("utf-8", errors="replace")
-                elif isinstance(payload, str):
-                    status_text = payload
-            except Exception:
-                pass
+          try:
+              payload = part.get_payload()
+              if isinstance(payload, list):
+                  status_text = "\n".join(
+                      sub.as_string() if hasattr(sub, "as_string") else str(sub)
+                      for sub in payload
+                  )
+              elif isinstance(payload, bytes):
+                  status_text = payload.decode("utf-8", errors="replace")
+              elif isinstance(payload, str):
+                  status_text = payload
+          except Exception:
+              pass
         elif content_type == "text/plain":
-            try:
-                text = part.get_payload(decode=True)
-                if isinstance(text, bytes):
-                    text = text.decode("utf-8", errors="replace")
-                dsn_message += text + "\n"
-            except Exception:
-                pass
+          try:
+              text = part.get_payload(decode=True)
+              if isinstance(text, bytes):
+                  text = text.decode("utf-8", errors="replace")
+              dsn_message += text + "\n"
+          except Exception:
+              pass
 
     combined = (status_text + "\n" + dsn_message).lower()
 
@@ -142,9 +142,9 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
     else:
         emails = EMAIL_PATTERN.findall(dsn_message + status_text)
         for e in emails:
-            if "mailer-daemon" not in e.lower() and "postmaster" not in e.lower():
-                original_recipient = e
-                break
+          if "mailer-daemon" not in e.lower() and "postmaster" not in e.lower():
+              original_recipient = e
+              break
 
     if not original_recipient:
         return None
@@ -160,15 +160,15 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
     bounce_type = BounceType.UNKNOWN
     if smtp_code:
         if smtp_code.startswith("5"):
-            bounce_type = BounceType.HARD
+          bounce_type = BounceType.HARD
         elif smtp_code.startswith("4"):
-            bounce_type = BounceType.SOFT
+          bounce_type = BounceType.SOFT
 
     if bounce_type == BounceType.UNKNOWN:
         if HARD_BOUNCE_CODES.search(combined):
-            bounce_type = BounceType.HARD
+          bounce_type = BounceType.HARD
         elif SOFT_BOUNCE_CODES.search(combined):
-            bounce_type = BounceType.SOFT
+          bounce_type = BounceType.SOFT
 
     return BounceRecord(
         email=original_recipient,
@@ -197,7 +197,7 @@ class BounceMonitor:
         self.password = password
         self.use_ssl = use_ssl
         self.blacklist_path = blacklist_path or (
-            Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "blacklist.json"
+          Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "blacklist.json"
         )
         self.bounce_log_path = bounce_log_path or Path("data/bounces.json")
         self._blacklist: Set[str] = self._load_blacklist()
@@ -205,31 +205,31 @@ class BounceMonitor:
 
     def _load_blacklist(self) -> Set[str]:
         if self.blacklist_path.exists():
-            try:
-                with open(self.blacklist_path, "r", encoding="utf-8") as f:
-                    return set(json.load(f))
-            except Exception:
-                pass
+          try:
+              with open(self.blacklist_path, "r", encoding="utf-8") as f:
+                  return set(json.load(f))
+          except Exception:
+              pass
         return set()
 
     def _save_blacklist(self) -> None:
         self.blacklist_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.blacklist_path, "w", encoding="utf-8") as f:
-            json.dump(list(self._blacklist), f, ensure_ascii=False, indent=2)
+          json.dump(list(self._blacklist), f, ensure_ascii=False, indent=2)
 
     def _load_bounces(self) -> List[BounceRecord]:
         if self.bounce_log_path.exists():
-            try:
-                with open(self.bounce_log_path, "r", encoding="utf-8") as f:
-                    return [BounceRecord.from_dict(d) for d in json.load(f)]
-            except Exception:
-                pass
+          try:
+              with open(self.bounce_log_path, "r", encoding="utf-8") as f:
+                  return [BounceRecord.from_dict(d) for d in json.load(f)]
+          except Exception:
+              pass
         return []
 
     def _save_bounces(self) -> None:
         self.bounce_log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.bounce_log_path, "w", encoding="utf-8") as f:
-            json.dump([r.to_dict() for r in self._bounce_records], f, ensure_ascii=False, indent=2)
+          json.dump([r.to_dict() for r in self._bounce_records], f, ensure_ascii=False, indent=2)
 
     def is_blacklisted(self, email_addr: str) -> bool:
         return email_addr.lower() in self._blacklist
@@ -239,77 +239,77 @@ class BounceMonitor:
         self._save_blacklist()
 
     def check_bounces(self) -> List[BounceRecord]:
-          new_bounces = []
-          seen_uids: set = set()
-          conn = None
-          try:
-              if self.use_ssl:
-                  conn = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
-              else:
-                  conn = imaplib.IMAP4(self.imap_host, self.imap_port)
-              conn.login(self.email_addr, self.password)
-              conn.select("INBOX", readonly=False)
+        new_bounces = []
+        seen_uids: set = set()
+        conn = None
+        try:
+            if self.use_ssl:
+                conn = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+            else:
+                conn = imaplib.IMAP4(self.imap_host, self.imap_port)
+            conn.login(self.email_addr, self.password)
+            conn.select("INBOX", readonly=False)
 
-              all_uids: set = set()
-              for search_query in _IMAP_SEARCHES:
-                  try:
-                      _, data = conn.uid("search", None, search_query)
-                      if data and data[0]:
-                          for uid in data[0].split():
-                              all_uids.add(uid)
-                  except Exception:
-                      pass
+            all_uids: set = set()
+            for search_query in _IMAP_SEARCHES:
+                try:
+                    _, data = conn.uid("search", None, search_query)
+                    if data and data[0]:
+                        for uid in data[0].split():
+                            all_uids.add(uid)
+                except Exception:
+                    pass
 
-              for uid in all_uids:
-                  # Дедупликация по UID — каждое письмо обрабатываем только раз
-                  uid_key = uid.decode() if isinstance(uid, bytes) else str(uid)
-                  if uid_key in seen_uids:
-                      continue
-                  seen_uids.add(uid_key)
-                  try:
-                      _, msg_data = conn.uid("fetch", uid, "(RFC822)")
-                      if not msg_data or not msg_data[0]:
-                          continue
-                      raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
-                      record = _parse_dsn_message(raw)
-                      if record:
-                          # Дедупликация по email (не добавляем одно и то же дважды)
-                          already_known = any(
-                              r.email.lower() == record.email.lower()
-                              for r in self._bounce_records
-                          )
-                          if not already_known:
-                              new_bounces.append(record)
-                              self._bounce_records.append(record)
-                              if record.bounce_type == BounceType.HARD:
-                                  self.add_to_blacklist(record.email)
-                          # Помечаем как прочитанное — не обрабатывать повторно
-                          try:
-                              conn.uid("store", uid, "+FLAGS", "\\Seen")
-                          except Exception:
-                              pass
-                  except Exception:
-                      pass
+            for uid in all_uids:
+                # Дедупликация по UID — каждое письмо обрабатываем только раз
+                uid_key = uid.decode() if isinstance(uid, bytes) else str(uid)
+                if uid_key in seen_uids:
+                    continue
+                seen_uids.add(uid_key)
+                try:
+                    _, msg_data = conn.uid("fetch", uid, "(RFC822)")
+                    if not msg_data or not msg_data[0]:
+                        continue
+                    raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
+                    record = _parse_dsn_message(raw)
+                    if record:
+                        # Дедупликация по email (не добавляем одно и то же дважды)
+                        already_known = any(
+                            r.email.lower() == record.email.lower()
+                            for r in self._bounce_records
+                        )
+                        if not already_known:
+                            new_bounces.append(record)
+                            self._bounce_records.append(record)
+                            if record.bounce_type == BounceType.HARD:
+                                self.add_to_blacklist(record.email)
+                        # Помечаем как прочитанное — не обрабатывать повторно
+                        try:
+                            conn.uid("store", uid, "+FLAGS", "\\Seen")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
-              if new_bounces:
-                  self._save_bounces()
-          except Exception as e:
-              logger.error("IMAP bounce check failed: %s", e)
-          finally:
-              if conn:
-                  try:
-                      conn.logout()
-                  except Exception:
-                      pass
-          return new_bounces
+            if new_bounces:
+                self._save_bounces()
+        except Exception as e:
+            logger.error("IMAP bounce check failed: %s", e)
+        finally:
+            if conn:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        return new_bounces
     def filter_recipients(self, emails: List[str]) -> tuple:
         allowed = []
         blocked = []
         for e in emails:
-            if self.is_blacklisted(e):
-                blocked.append(e)
-            else:
-                allowed.append(e)
+          if self.is_blacklisted(e):
+              blocked.append(e)
+          else:
+              allowed.append(e)
         return allowed, blocked
 
     @property
@@ -326,8 +326,8 @@ class BounceMonitor:
 
     def get_bounce_summary(self) -> dict:
         return {
-            "total": len(self._bounce_records),
-            "hard": self.hard_bounce_count,
-            "soft": self.soft_bounce_count,
-            "blacklist_size": self.blacklist_count,
+          "total": len(self._bounce_records),
+          "hard": self.hard_bounce_count,
+          "soft": self.soft_bounce_count,
+          "blacklist_size": self.blacklist_count,
         }

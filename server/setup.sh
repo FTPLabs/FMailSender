@@ -15,7 +15,12 @@ if [ -d "fmailsender" ]; then
     git reset --hard origin/main
 else
     echo "Cloning repository..."
-    git clone https://github.com/FTPLabs/FMailSender.git fmailsender
+    if [ -z "$GH_TOKEN" ]; then
+        echo "ERROR: GH_TOKEN env var is required to clone private repo."
+        echo "Export it: export GH_TOKEN=your_github_token"
+        exit 1
+    fi
+    git clone "https://${GH_TOKEN}@github.com/FTPLabs/FMailSender.git" fmailsender
     cd fmailsender
 fi
 

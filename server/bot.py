@@ -1077,9 +1077,8 @@ async def msg_admin_set_download_url(message: Message, state: FSMContext):
     if not url.startswith("http"):
         await message.answer("❌ Некорректная ссылка. Должна начинаться с http(s)://", reply_markup=kb_admin())
         return
-    await db.set_setting("zip_url", url)
     await db.set_setting("download_url", url)
-    await message.answer(f"✅ ZIP-ссылка обновлена:\n<code>{url}</code>", reply_markup=kb_admin())
+    await message.answer(f"✅ Ссылка скачивания обновлена:\n<code>{url}</code>", reply_markup=kb_admin())
 
 
 # ─── Admin Set VirusTotal URL ─────────────────────────────────────────────────

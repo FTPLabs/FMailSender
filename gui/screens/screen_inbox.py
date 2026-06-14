@@ -258,12 +258,13 @@ class ReplyDialog(QDialog):
         use_ssl  = acc.get("use_ssl", False)
         use_tls  = acc.get("use_tls", True)
 
+        ctx = ssl.create_default_context()
         if use_ssl:
-            server = smtplib.SMTP_SSL(host, port)
+            server = smtplib.SMTP_SSL(host, port, context=ctx)
         else:
             server = smtplib.SMTP(host, port)
             if use_tls:
-                server.starttls()
+                server.starttls(context=ctx)
 
         server.login(login, password)
         server.sendmail(login, [to_addr], msg.as_bytes())

@@ -349,6 +349,7 @@ def _verify_key_online(key: str, hwid: str) -> Optional[bool]:
             LICENSE_VERIFY_URL,
             json={"key": key, "hwid": hwid},
             timeout=5,
+            verify=False,
             headers={
                 "Content-Type": "application/json",
                 "User-Agent": f"FMailSender/{APP_VERSION}",
@@ -411,6 +412,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
     try:
         resp = requests.post(
             LICENSE_API_URL,
+            verify=False,
             json={"key": key_upper, "hwid": hwid},
             timeout=10,
             headers={
