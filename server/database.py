@@ -56,6 +56,28 @@ CREATE TABLE IF NOT EXISTS users (
     registered_at TEXT NOT NULL,
     last_seen TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT DEFAULT '',
+    first_name TEXT DEFAULT '',
+    status TEXT DEFAULT 'open',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ticket_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER NOT NULL,
+    sender_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    text TEXT DEFAULT '',
+    file_id TEXT DEFAULT '',
+    file_type TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(ticket_id) REFERENCES tickets(id)
+);
 """
 
 
@@ -255,13 +277,18 @@ async def delete_all_licenses() -> int:
     Deletes ALL licenses and payments inside a single transaction.
     WARNING: irreversible — admin confirmation is required before calling.
     """
-    async with aiosqlite.connect(DB_PATH, isolation_level=None) as db:
-        await db.execute("BEGIN")
-        cur = await db.execute("SELECT COUNT(*) FROM licenses")
-        count = (await cur.fetchone())[0]
-        await db.execute("DELETE FROM licenses")
-        await db.execute("DELETE FROM payments")
-        await db.execute("COMMIT")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA journal_mode=WAL")
+        try:
+            await db.execute("BEGIN")
+            cur = await db.execute("SELECT COUNT(*) FROM licenses")
+            count = (await cur.fetchone())[0]
+            await db.execute("DELETE FROM licenses")
+            await db.execute("DELETE FROM payments")
+            await db.execute("COMMIT")
+        except Exception:
+            await db.execute("ROLLBACK")
+            raise
     logger.warning("All licenses and payments deleted. Count: %d", count)
     return count
 
@@ -299,10 +326,15 @@ async def get_stats() -> dict:
         active = await _count("SELECT COUNT(*) FROM licenses WHERE is_active=1")
         paid = await _count("SELECT COUNT(*) FROM payments WHERE status='paid'")
         users = await _count("SELECT COUNT(*) FROM users")
+        open_tickets = await _count("SELECT COUNT(*) FROM tickets WHERE status='open'")
         async with db.execute("SELECT COALESCE(SUM(amount), 0.0) FROM payments WHERE status='paid'") as cur:
             row = await cur.fetchone()
             revenue = float(row[0]) if row else 0.0
-        return {"total": total, "active": active, "paid": paid, "paid_orders": paid, "users": users, "revenue_usdt": revenue}
+        return {
+            "total": total, "active": active, "paid": paid,
+            "paid_orders": paid, "users": users, "revenue_usdt": revenue,
+            "open_tickets": open_tickets,
+        }
 
 
 async def search_license(query: str) -> list:
@@ -334,3 +366,84 @@ async def set_setting(key: str, value: str) -> None:
         )
         await db.commit()
 
+
+async def get_plan_price(plan_id: str) -> float:
+    val = await get_setting(f"price_{plan_id}")
+    if val:
+        try:
+            return float(val)
+        except ValueError:
+            pass
+    return PLANS.get(plan_id, {}).get("price_usdt", 0.0)
+
+
+# ─── Tickets ─────────────────────────────────────────────────────────────────
+
+async def create_ticket(user_id: int, username: str, first_name: str) -> int:
+    now = _now()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT INTO tickets (user_id, username, first_name, status, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+            (user_id, username or "", first_name or "", "open", now, now),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def add_ticket_message(
+    ticket_id: int,
+    sender_id: int,
+    role: str,
+    text: str = "",
+    file_id: str = "",
+    file_type: str = "",
+) -> None:
+    now = _now()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO ticket_messages (ticket_id, sender_id, role, text, file_id, file_type, created_at) VALUES (?,?,?,?,?,?,?)",
+            (ticket_id, sender_id, role, text or "", file_id or "", file_type or "", now),
+        )
+        await db.execute(
+            "UPDATE tickets SET updated_at=? WHERE id=?", (now, ticket_id)
+        )
+        await db.commit()
+
+
+async def get_ticket(ticket_id: int) -> Optional[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def get_open_tickets(limit: int = 20) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM tickets WHERE status='open' ORDER BY updated_at DESC LIMIT ?",
+            (limit,),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def close_ticket(ticket_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE tickets SET status='closed', updated_at=? WHERE id=?",
+            (_now(), ticket_id),
+        )
+        await db.commit()
+
+
+async def get_ticket_messages(ticket_id: int) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY created_at ASC",
+            (ticket_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]

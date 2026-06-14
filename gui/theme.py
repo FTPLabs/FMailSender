@@ -479,7 +479,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 
 /* ═══ QTableWidget corner button (black square fix) ══════════════════ */
   QTableWidget QAbstractButton {{
-      background-color: {c.BG_SURFACE};
+      background-color: {c.BG_SURFACE1};
       border: 1px solid {c.BORDER};
   }}
   QTableWidget QAbstractButton:pressed {{
