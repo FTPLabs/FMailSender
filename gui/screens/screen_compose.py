@@ -266,6 +266,12 @@ class FormattingToolbar(QFrame):
               self._editor.textCursor().insertText(text)
               self._editor.setFocus()
   
+
+class SpamCheckWorker(QThread):
+    """Воркер для асинхронной проверки спам-балла в отдельном потоке."""
+    finished = pyqtSignal(object)
+    error = pyqtSignal(str)
+
     def __init__(self, subject: str, html: str, parent=None):
         super().__init__(parent)
         self.subject = subject
