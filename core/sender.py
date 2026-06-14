@@ -86,56 +86,34 @@ class SmtpAccount:
         self.sent_this_hour: int = 0
         self._hour_reset: float = time.time()
 
-    @property
-    def can_send(self) -> bool:
-        """Thread-safe check. Resets hourly counter if window expired (intentional side effect)."""
-        if not self.is_active:
-            return False
-        with self._lock:
-            now = time.time()
-            if now - self._hour_reset >= 3600:
-                self.sent_this_hour = 0
-                self._hour_reset = now
-            return self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit
+    def _tick_hour_reset(self) -> None:
+          """Сбрасывает часовой счётчик если прошёл час. Вызывать только под self._lock."""
+          now = time.time()
+          if now - self._hour_reset >= 3600:
+              self.sent_this_hour = 0
+              self._hour_reset = now
 
-    def try_increment(self) -> bool:
-        """Atomically check limits AND increment. Eliminates TOCTOU race condition."""
-        if not self.is_active:
-            return False
-        with self._lock:
-            now = time.time()
-            if now - self._hour_reset >= 3600:
-                self.sent_this_hour = 0
-                self._hour_reset = now
-            if self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit:
-                self.sent_today += 1
-                self.sent_this_hour += 1
-                return True
-            return False
+      @property
+      def can_send(self) -> bool:
+          """Thread-safe read-only проверка лимитов (без побочных эффектов)."""
+          if not self.is_active:
+              return False
+          with self._lock:
+              self._tick_hour_reset()
+              return self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit
 
-
-@dataclass
-class Recipient:
-    email: str
-    first_name: str = ""
-    last_name: str = ""
-    company: str = ""
-    custom_1: str = ""
-    custom_2: str = ""
-    custom_3: str = ""
-    custom_4: str = ""
-    custom_5: str = ""
-
-
-@dataclass
-class EmailTemplate:
-    subject: str
-    body_html: str = ""
-    body_text: str = ""
-    attachments: List[str] = field(default_factory=list)
-    reply_to: str = ""
-    cc: List[str] = field(default_factory=list)
-
+      def try_increment(self) -> bool:
+          """Атомарная проверка+инкремент. Устраняет TOCTOU race condition."""
+          if not self.is_active:
+              return False
+          with self._lock:
+              self._tick_hour_reset()
+              if self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit:
+                  self.sent_today += 1
+                  self.sent_this_hour += 1
+                  return True
+              return False
+  
     def personalize(self, recipient: Recipient) -> "EmailTemplate":
         subs = {
             "{{email}}":      recipient.email,
