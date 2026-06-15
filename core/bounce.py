@@ -60,13 +60,13 @@ HARD_BOUNCE_CODES = re.compile(
     r"(user.?unknown|no.?such.?user|invalid.?address|does.?not.?exist|"
     r"mailbox.?not.?found|address.?rejected|bad.?destination|"
     r"permanent.?failure|undeliverable)",
-    re.IGNORECASE,
+    re.IGNORECASE | re.DOTALL,
 )
 SOFT_BOUNCE_CODES = re.compile(
     r"\b(4[0-9]{2})\b.*"
     r"(temporarily|try.?again|over.?quota|mailbox.?full|"
     r"service.?unavailable|deferred|too.?many)",
-    re.IGNORECASE,
+    re.IGNORECASE | re.DOTALL,
 )
 EMAIL_PATTERN = re.compile(
     r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"
