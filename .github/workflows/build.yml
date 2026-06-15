@@ -1,101 +1,100 @@
 name: Release FMailSender .exe
 
-  on:
-    workflow_dispatch:
-      inputs:
-        tag_name:
-          description: 'Release tag (e.g. v2.8.1)'
-          required: true
-          default: 'v2.8.1'
-    push:
-      tags: ['v*']
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g. v2.8.2)'
+        required: true
+        default: 'v2.8.2'
+  push:
+    tags: ['v*']
 
-  jobs:
-    build-release:
-      runs-on: windows-latest
-      permissions:
-        contents: write
-      steps:
-        - uses: actions/checkout@v4
-          with:
-            fetch-depth: 0
+jobs:
+  build-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-        - uses: actions/setup-python@v5
-          with:
-            python-version: '3.11'
-            cache: 'pip'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
 
-        - name: Install dependencies
-          run: |
-            python -m pip install --upgrade pip
-            pip install PyQt6 PyQt6-Qt6 aiosmtplib cryptography PyJWT dnspython openpyxl reportlab psutil requests Pillow pyinstaller wmi pywin32
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6 PyQt6-Qt6 aiosmtplib cryptography PyJWT dnspython openpyxl reportlab psutil requests Pillow pyinstaller wmi pywin32
 
-        - name: Build .exe
-          shell: cmd
-          run: |
-            pyinstaller --noconfirm --onefile --windowed ^
-              --name "FMailSender" ^
-              --add-data "assets;assets" ^
-              --add-data "data;data" ^
-              --add-data "i18n;i18n" ^
-              --collect-all "PyQt6" ^
-              --collect-submodules "gui" ^
-              --collect-submodules "core" ^
-              --hidden-import "gui.screens.screen_accounts" ^
-              --hidden-import "gui.screens.screen_activation" ^
-              --hidden-import "gui.screens.screen_analytics" ^
-              --hidden-import "gui.screens.screen_compose" ^
-              --hidden-import "gui.screens.screen_dashboard" ^
-              --hidden-import "gui.screens.screen_inbox" ^
-              --hidden-import "gui.screens.screen_recipients" ^
-              --hidden-import "gui.screens.screen_sending" ^
-              --hidden-import "core.license" ^
-              --hidden-import "core.sender" ^
-              --hidden-import "core.bounce" ^
-              --hidden-import "core.spam_checker" ^
-              --hidden-import "core.warmup" ^
-              --hidden-import "core.ai_fixer" ^
-              --hidden-import "core.updater" ^
-              --hidden-import "wmi" ^
-              --hidden-import "win32api" ^
-              --hidden-import "win32con" ^
-              main.py
+      - name: Build .exe
+        shell: cmd
+        run: |
+          pyinstaller --noconfirm --onefile --windowed ^
+            --name "FMailSender" ^
+            --add-data "assets;assets" ^
+            --add-data "data;data" ^
+            --add-data "i18n;i18n" ^
+            --collect-all "PyQt6" ^
+            --collect-submodules "gui" ^
+            --collect-submodules "core" ^
+            --hidden-import "gui.screens.screen_accounts" ^
+            --hidden-import "gui.screens.screen_activation" ^
+            --hidden-import "gui.screens.screen_analytics" ^
+            --hidden-import "gui.screens.screen_compose" ^
+            --hidden-import "gui.screens.screen_dashboard" ^
+            --hidden-import "gui.screens.screen_inbox" ^
+            --hidden-import "gui.screens.screen_recipients" ^
+            --hidden-import "gui.screens.screen_sending" ^
+            --hidden-import "core.license" ^
+            --hidden-import "core.sender" ^
+            --hidden-import "core.bounce" ^
+            --hidden-import "core.spam_checker" ^
+            --hidden-import "core.warmup" ^
+            --hidden-import "core.ai_fixer" ^
+            --hidden-import "core.updater" ^
+            --hidden-import "wmi" ^
+            --hidden-import "win32api" ^
+            --hidden-import "win32con" ^
+            main.py
 
-        - name: Rename exe with version
-          shell: pwsh
-          run: |
-            $tag = if ("${{ github.event.inputs.tag_name }}" -ne "") { "${{ github.event.inputs.tag_name }}" } else { "${{ github.ref_name }}" }
-            Copy-Item "dist\FMailSender.exe" "dist\FMailSender_${tag}.exe"
-            Write-Host "Built: FMailSender_${tag}.exe ($(((Get-Item dist\FMailSender.exe).Length / 1MB).ToString('F1')) MB)"
+      - name: Rename exe with version
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.event.inputs.tag_name }}" -ne "") { "${{ github.event.inputs.tag_name }}" } else { "${{ github.ref_name }}" }
+          Copy-Item "dist\FMailSender.exe" "dist\FMailSender_${tag}.exe"
+          Write-Host "Built: FMailSender_${tag}.exe ($(((Get-Item dist\FMailSender.exe).Length / 1MB).ToString('F1')) MB)"
 
-        - name: Create GitHub Release
-          uses: softprops/action-gh-release@v2
-          with:
-            tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-            name: "FMail Sender ${{ github.event.inputs.tag_name || github.ref_name }}"
-            files: |
-              dist/FMailSender.exe
-            body: |
-              ## FMail Sender ${{ github.event.inputs.tag_name || github.ref_name }}
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          name: "FMail Sender ${{ github.event.inputs.tag_name || github.ref_name }}"
+          files: |
+            dist/FMailSender.exe
+          body: |
+            ## FMail Sender ${{ github.event.inputs.tag_name || github.ref_name }}
 
-              ### Что нового в v2.8.1 (Security & Bug Fix Release)
-              - U0001F512 SSL-верификация: управляется через LICENSE_SSL_VERIFY (env var)
-              - ⚠️ HWID_SALT: уровень warning повышен до WARNING (был DEBUG)
-              - U0001F512 asyncio.Lock в кэше GitHub Releases (race condition fix)
-              - ✅ IndexError fix в AI Spam Fixer (JSON парсинг)
-              - ⏱ IMAP timeout 15 сек (защита от зависания потока)
-              - U0001F4E6 i18n файлы добавлены в сборку
+            ### Что нового в v2.8.x (Security & Bug Fix Release)
+            - SSL-верификация: управляется через LICENSE_SSL_VERIFY (env var)
+            - HWID_SALT: уровень лога повышен до WARNING
+            - asyncio.Lock в кеше GitHub Releases (race condition fix)
+            - IndexError fix в AI Spam Fixer (JSON парсинг)
+            - IMAP timeout 15 сек (защита от зависания потока)
+            - i18n + wmi добавлены в сборку
 
-              ### Установка
-              Скачайте **FMailSender.exe** и запустите — установка не требуется.
-            fail_on_unmatched_files: false
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ### Установка
+            Скачайте **FMailSender.exe** и запустите — установка не требуется.
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-        - name: Upload artifact (30 days)
-          uses: actions/upload-artifact@v4
-          with:
-            name: FMailSender-windows-${{ github.event.inputs.tag_name || github.ref_name }}
-            path: dist/FMailSender.exe
-            retention-days: 30
-  
+      - name: Upload artifact (30 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMailSender-windows-${{ github.event.inputs.tag_name || github.ref_name }}
+          path: dist/FMailSender.exe
+          retention-days: 30
