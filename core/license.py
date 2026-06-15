@@ -356,7 +356,7 @@ def _verify_key_online(key: str, hwid: str) -> Optional[bool]:
             LICENSE_VERIFY_URL,
             json={"key": key, "hwid": hwid},
             timeout=5,
-            verify=False,  # TODO: set LICENSE_SSL_VERIFY env to enable; replaced below
+            verify=_ssl_v,
 
             headers={
                 "Content-Type": "application/json",
@@ -414,6 +414,10 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
         )
 
     hwid = generate_hwid()
+    _ssl_env = os.environ.get("LICENSE_SSL_VERIFY", "").strip()
+    _ssl_v: bool | str = True if _ssl_env == "1" else (_ssl_env if _ssl_env not in ("", "0") else False)
+    if _ssl_v is False:
+        logger.warning("SECURITY: SSL verify DISABLED for activation. Set LICENSE_SSL_VERIFY=1 or CA-cert path.")
     if progress_callback:
         progress_callback(20, "Проверка ключа...")
 
