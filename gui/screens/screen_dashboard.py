@@ -88,9 +88,9 @@ class ActivityChart(QWidget):
 
         w = self.width()
         h = self.height()
-        pad_left = 40
-        pad_right = 10
-        pad_top = 10
+        pad_left = 48
+        pad_right = 16
+        pad_top = 12
         pad_bottom = 30
 
         chart_w = w - pad_left - pad_right
@@ -101,74 +101,86 @@ class ActivityChart(QWidget):
         # Фон
         painter.fillRect(self.rect(), QColor(Colors.BG_SURFACE1))
 
-        # Сетка
-        grid_pen = QPen(QColor(Colors.BORDER))
+        # Dashed grid
+        grid_pen = QPen(QColor(50, 50, 80, 55))
+        grid_pen.setStyle(Qt.PenStyle.DashLine)
+        grid_pen.setDashPattern([4.0, 6.0])
         grid_pen.setWidth(1)
         painter.setPen(grid_pen)
 
         for i in range(4):
             y = pad_top + chart_h * i // 3
             painter.drawLine(pad_left, y, pad_left + chart_w, y)
-
-            # Y-метки
             val = int(max_val * (3 - i) / 3)
             painter.setPen(QColor(Colors.TEXT_MUTED))
-            painter.drawText(2, y + 4, f"{val}")
+            if val >= 1000:
+                painter.drawText(2, y + 4, f"{val//1000}k")
+            else:
+                painter.drawText(2, y + 4, str(val))
             painter.setPen(grid_pen)
 
         # X-метки (часы)
         hour_now = datetime.now().hour
+        painter.setPen(QColor(Colors.TEXT_MUTED))
         for i in range(0, 24, 6):
             x = pad_left + chart_w * i // 23
             hour = (hour_now - 23 + i) % 24
-            painter.setPen(QColor(Colors.TEXT_MUTED))
-            painter.drawText(x - 10, h - 4, f"{hour:02d}:00")
+            painter.drawText(x - 12, h - 4, f"{hour:02d}:00")
 
-        # Строим точки графика
         if len(self._data) < 2:
             return
 
-        points = []
+        # Координаты точек
+        pts = []
         for i, val in enumerate(self._data):
             x = pad_left + chart_w * i // (len(self._data) - 1)
             y = pad_top + chart_h - int(chart_h * val / max_val)
-            points.append(QPoint(x, y))
+            pts.append((float(x), float(y)))
 
-        # Градиентная заливка под линией
-        fill_path = QPainterPath()
-        fill_path.moveTo(points[0].x(), pad_top + chart_h)
-        for p in points:
-            fill_path.lineTo(p.x(), p.y())
-        fill_path.lineTo(points[-1].x(), pad_top + chart_h)
+        # Smooth cubic bezier path
+        line_path = QPainterPath()
+        line_path.moveTo(pts[0][0], pts[0][1])
+        for i in range(len(pts) - 1):
+            x0, y0 = pts[i]
+            x1, y1 = pts[i + 1]
+            cp1x = x0 + (x1 - x0) / 3.0
+            cp1y = y0
+            cp2x = x0 + 2.0 * (x1 - x0) / 3.0
+            cp2y = y1
+            line_path.cubicTo(cp1x, cp1y, cp2x, cp2y, x1, y1)
+
+        # Gradient fill
+        fill_path = QPainterPath(line_path)
+        fill_path.lineTo(pts[-1][0], float(pad_top + chart_h))
+        fill_path.lineTo(float(pad_left), float(pad_top + chart_h))
         fill_path.closeSubpath()
 
         from PyQt6.QtGui import QLinearGradient
         grad = QLinearGradient(0, pad_top, 0, pad_top + chart_h)
-        grad.setColorAt(0.0, QColor(99, 102, 241, 60))
-        grad.setColorAt(1.0, QColor(99, 102, 241, 0))
+        grad.setColorAt(0.0, QColor(139, 92, 246, 72))
+        grad.setColorAt(0.55, QColor(6, 182, 212, 25))
+        grad.setColorAt(1.0, QColor(6, 182, 212, 0))
         painter.fillPath(fill_path, QBrush(grad))
 
-        # Линия графика
+        # Stroke — violet→cyan
         line_pen = QPen(QColor(Colors.ACCENT))
         line_pen.setWidth(2)
         line_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         line_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(line_pen)
+        painter.strokePath(line_path, line_pen)
 
-        for i in range(len(points) - 1):
-            painter.drawLine(points[i], points[i+1])
-
-        # Точки на линии
+        # Glow dot на последней точке
+        lx, ly = pts[-1]
+        painter.setPen(Qt.PenStyle.NoPen)
+        for radius, alpha in [(12, 10), (7, 32), (4, 80)]:
+            painter.setBrush(QBrush(QColor(139, 92, 246, alpha)))
+            painter.drawEllipse(int(lx) - radius, int(ly) - radius, radius * 2, radius * 2)
         painter.setBrush(QBrush(QColor(Colors.ACCENT)))
-        painter.setPen(QPen(QColor(Colors.BG_SURFACE1), 2))
-        for i, p in enumerate(points):
-            if self._data[i] > 0:
-                painter.drawEllipse(p.x() - 3, p.y() - 3, 6, 6)
+        painter.setPen(QPen(QColor(Colors.BG_BASE), 2))
+        painter.drawEllipse(int(lx) - 4, int(ly) - 4, 8, 8)
 
         painter.end()
 
-
-class DashboardScreen(QWidget):
     """Главный экран — KPI + график активности."""
 
     def __init__(self, parent=None):
@@ -194,7 +206,7 @@ class DashboardScreen(QWidget):
 
         # ── Заголовок ────────────────────────────
         header_row = QHBoxLayout()
-        title = QLabel("Обзор")
+        title = QLabel("Дашборд")
         title.setObjectName("section_header")
         header_row.addWidget(title)
         header_row.addStretch()
