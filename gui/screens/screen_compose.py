@@ -202,37 +202,110 @@ class FormattingToolbar(QFrame):
         self._editor.textCursor().mergeCharFormat(fmt)
 
     def _text_color(self):
-        """Открывает диалог выбора цвета с полной русификацией."""
-        from PyQt6.QtWidgets import QLabel, QPushButton, QGroupBox
-        dialog = QColorDialog(parent=self)
-        dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
-        dialog.setWindowTitle("Выбрать цвет текста")
-        _RU = {
-            "Basic colors": "Основные цвета", "&Basic colors": "Основные цвета",
-            "Custom colors": "Пользовательские", "&Custom colors": "Пользовательские",
-            "Pick Screen Color": "Пипетка", "&Pick Screen Color": "Пипетка",
-            "Add to Custom Colors": "Добавить", "&Add to Custom Colors": "Добавить",
-            "Hue:": "Тон:", "Sat:": "Нас.:", "Val:": "Ярк.:",
-            "Red:": "R:", "Green:": "G:", "Blue:": "B:",
-            "HTML:": "HEX:", "Alpha channel:": "Прозрачность:",
-            "OK": "ОК", "&OK": "ОК", "Cancel": "Отмена", "&Cancel": "Отмена",
-        }
-        def _ru(w):
-            for lbl in w.findChildren(QLabel):
-                lbl.setText(_RU.get(lbl.text(), lbl.text()))
-            for btn in w.findChildren(QPushButton):
-                btn.setText(_RU.get(btn.text(), btn.text()))
-            for gb in w.findChildren(QGroupBox):
-                gb.setTitle(_RU.get(gb.title(), gb.title()))
-        _ru(dialog)
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(0, lambda: _ru(dialog))
-        if dialog.exec() == QColorDialog.DialogCode.Accepted:
-            color = dialog.selectedColor()
-            if color.isValid():
-                fmt = QTextCharFormat()
-                fmt.setForeground(color)
-                self._editor.textCursor().mergeCharFormat(fmt)
+        """Premium цветовой пикер — сетка 24 preset + custom кнопка."""        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton,
+            QLabel, QFrame, QLineEdit
+        )
+        from PyQt6.QtGui import QColor
+        from PyQt6.QtCore import Qt
+
+        _PRESETS = [
+            # Тёмные
+            "#000000", "#1F2937", "#374151", "#6B7280",
+            # Светлые / нейтральные
+            "#FFFFFF", "#F9FAFB", "#E5E7EB", "#D1D5DB",
+            # Красные / оранжевые
+            "#EF4444", "#F97316", "#F59E0B", "#EAB308",
+            # Зелёные
+            "#22C55E", "#10B981", "#14B8A6", "#06B6D4",
+            # Синие / фиолетовые
+            "#3B82F6", "#6366F1", "#8B5CF6", "#A855F7",
+            # Розовые / акценты
+            "#EC4899", "#F43F5E", "#7C3AED", "#0EA5E9",
+        ]
+
+        dialog = QDialog(self._editor.window() if self._editor.window() else None)
+        dialog.setWindowTitle("Цвет текста")
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        dialog.setFixedSize(276, 200)
+        dialog.setStyleSheet(
+            "QDialog { background: #0F0F22; border: 1px solid rgba(139,92,246,0.3); border-radius: 12px; }"
+            "QPushButton#color_swatch { border-radius: 4px; border: 1px solid rgba(255,255,255,0.12); }"
+            "QPushButton#color_swatch:hover { border: 2px solid rgba(139,92,246,0.9); }"
+            "QLabel { color: #8888BB; font-size: 11px; background: transparent; }"
+            "QLineEdit { background: rgba(255,255,255,0.06); border: 1px solid rgba(139,92,246,0.25);"
+            "            border-radius: 6px; color: #E8E8FF; font-size: 12px; padding: 3px 8px; }"
+            "QPushButton#btn_custom { background: rgba(139,92,246,0.15); color: #A78BFA;"
+            "  border: 1px solid rgba(139,92,246,0.35); border-radius: 6px; font-size: 11px; }"
+            "QPushButton#btn_custom:hover { background: rgba(139,92,246,0.28); }"
+        )
+
+        lay = QVBoxLayout(dialog)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(8)
+
+        hdr = QLabel("Выберите цвет текста")
+        hdr.setStyleSheet("color: #E8E8FF; font-size: 12px; font-weight: 600;")
+        lay.addWidget(hdr)
+
+        grid = QGridLayout()
+        grid.setSpacing(5)
+        _chosen_color = [None]
+
+        def _pick(hex_color):
+            _chosen_color[0] = QColor(hex_color)
+            dialog.accept()
+
+        for i, hex_c in enumerate(_PRESETS):
+            btn = QPushButton()
+            btn.setObjectName("color_swatch")
+            btn.setFixedSize(26, 26)
+            btn.setStyleSheet(
+                f"QPushButton#color_swatch {{ background-color: {hex_c}; }}"
+                f"QPushButton#color_swatch:hover {{ border: 2px solid rgba(255,255,255,0.9); }}"            )
+            btn.setToolTip(hex_c)
+            btn.clicked.connect(lambda _=False, c=hex_c: _pick(c))
+            grid.addWidget(btn, i // 6, i % 6)
+
+        lay.addLayout(grid)
+
+        # HEX-ввод + custom picker
+        hex_row = QHBoxLayout()
+        hex_row.setSpacing(6)
+        hex_input = QLineEdit()
+        hex_input.setPlaceholderText("#RRGGBB")
+        hex_input.setFixedHeight(28)
+        hex_row.addWidget(hex_input)
+
+        custom_btn = QPushButton("⬛ Своя")
+        custom_btn.setObjectName("btn_custom")
+        custom_btn.setFixedHeight(28)
+        def _open_custom():
+            std = QColorDialog.getColor(Qt.GlobalColor.white, dialog, "Цвет текста")
+            if std.isValid():
+                hex_input.setText(std.name())
+                _chosen_color[0] = std
+                dialog.accept()
+        custom_btn.clicked.connect(_open_custom)
+        hex_row.addWidget(custom_btn)
+        lay.addLayout(hex_row)
+
+        def _apply_hex():
+            text = hex_input.text().strip()
+            if not text.startswith("#"):
+                text = "#" + text
+            c = QColor(text)
+            if c.isValid():
+                _chosen_color[0] = c
+                dialog.accept()
+        hex_input.returnPressed.connect(_apply_hex)
+
+        dialog.exec()
+
+        if _chosen_color[0] and _chosen_color[0].isValid():
+            fmt = QTextCharFormat()
+            fmt.setForeground(_chosen_color[0])
+            self._editor.textCursor().mergeCharFormat(fmt)
   
     def _align(self, alignment):
         self._editor.setAlignment(alignment)
