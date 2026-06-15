@@ -922,7 +922,7 @@ class SendingEngine:
                 batch = recipients[i:i + batch_size]
                 batch_results = await _process_batch(batch)
                 for result in batch_results:
-                    if isinstance(result, Exception):
+                    if isinstance(result, BaseException):
                         with self._stats_lock:
                             self._stats["errors"] += 1
                         continue
