@@ -189,44 +189,67 @@ class MainWindow(QMainWindow):
         plan_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _plan_fl.addWidget(plan_lbl)
 
-        # Премиум: иконки Telegram и Lolz с ссылками
+        # Кнопки Telegram и Lolzteam через SVG из gui.icons
+        from gui.icons import make_icon, TELEGRAM, LOLZ
+        import webbrowser
+
+        _by_lbl = QLabel("by ftpdev")
+        _by_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _by_lbl.setStyleSheet(
+            "color: rgba(139,92,246,0.55); font-size: 10px; font-weight: 500;"
+            " letter-spacing: 0.5px; background: transparent; padding: 0 0 2px 0;"
+        )
+        _plan_fl.addWidget(_by_lbl)
+
         _social_row = QHBoxLayout()
         _social_row.setContentsMargins(0, 2, 0, 0)
-        _social_row.setSpacing(6)
+        _social_row.setSpacing(8)
         _social_row.addStretch()
 
-        # Иконки через Unicode — надёжнее SVG на всех платформах
-        _tg_icon_lbl = QLabel("\u2708")   # ✈ самолётик — символ Telegram
-        _tg_icon_lbl.setFixedSize(18, 18)
-        _tg_icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _tg_icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        _tg_icon_lbl.setStyleSheet(
-            "color: rgba(139,92,246,0.75); font-size: 12px;"
-            " background: transparent; border: none;"
+        _tg_btn = QPushButton()
+        _tg_btn.setFixedSize(80, 32)
+        _tg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        _tg_btn.setToolTip("Поддержка в Telegram")
+        _tg_btn.setIcon(make_icon(TELEGRAM, 16, "#2AABEE"))
+        _tg_btn.setText("  Telegram")
+        _tg_btn.setStyleSheet(
+            "QPushButton {"
+            " background: rgba(42,171,238,0.12);"
+            " border: 1px solid rgba(42,171,238,0.35);"
+            " border-radius: 8px;"
+            " color: rgba(42,171,238,0.9);"
+            " font-size: 11px; font-weight: 600;"
+            "}"
+            "QPushButton:hover {"
+            " background: rgba(42,171,238,0.22);"
+            " border-color: rgba(42,171,238,0.6);"
+            "}"
         )
-        _tg_icon_lbl.setToolTip("Поддержка в Telegram")
-        _tg_icon_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
-        _social_row.addWidget(_tg_icon_lbl)
+        _tg_btn.clicked.connect(lambda: webbrowser.open("https://t.me/ftpdev_sup"))
+        _social_row.addWidget(_tg_btn)
 
-        _lolz_icon_lbl = QLabel("L")   # Lolz — буква в кружке через CSS
-        _lolz_icon_lbl.setFixedSize(18, 18)
-        _lolz_icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _lolz_icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        _lolz_icon_lbl.setStyleSheet(
-            "color: rgba(139,92,246,0.75); font-size: 10px; font-weight: 700;"
-            " background: transparent;"
-            " border: 1.5px solid rgba(139,92,246,0.55);"
-            " border-radius: 9px;"
+        _lolz_btn = QPushButton()
+        _lolz_btn.setFixedSize(80, 32)
+        _lolz_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        _lolz_btn.setToolTip("Профиль на Lolzteam")
+        _lolz_btn.setIcon(make_icon(LOLZ, 16, "#F97316"))
+        _lolz_btn.setText("  Lolzteam")
+        _lolz_btn.setStyleSheet(
+            "QPushButton {"
+            " background: rgba(249,115,22,0.12);"
+            " border: 1px solid rgba(249,115,22,0.35);"
+            " border-radius: 8px;"
+            " color: rgba(249,115,22,0.9);"
+            " font-size: 11px; font-weight: 600;"
+            "}"
+            "QPushButton:hover {"
+            " background: rgba(249,115,22,0.22);"
+            " border-color: rgba(249,115,22,0.6);"
+            "}"
         )
-        _lolz_icon_lbl.setToolTip("Профиль на Lolz")
-        _lolz_icon_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
-        _social_row.addWidget(_lolz_icon_lbl)
+        _lolz_btn.clicked.connect(lambda: webbrowser.open("https://lolz.live/ftpdev"))
+        _social_row.addWidget(_lolz_btn)
 
-        dev_lbl = QLabel('<a href="https://t.me/ftpdev_sup" style="color:rgba(139,92,246,0.5);text-decoration:none;font-size:10px;">@ftpdev_sup</a>')
-        dev_lbl.setOpenExternalLinks(True)
-        dev_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        dev_lbl.setStyleSheet("font-size: 10px; background: transparent; padding: 0;")
-        _social_row.addWidget(dev_lbl)
         _social_row.addStretch()
         _plan_fl.addLayout(_social_row)
 
