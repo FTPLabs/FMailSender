@@ -138,6 +138,17 @@ def check_dns_auth(domain: str) -> DnsAuthStatus:
 class SpamChecker:
     def __init__(self, spam_words_path: Optional[Path] = None):
         self._spam_words = list(DEFAULT_SPAM_WORDS)
+        # BUG FIX #2: auto-locate spam_words.json if path not provided
+        if spam_words_path is None:
+            import sys as _sys
+            for _candidate in [
+                Path(__file__).parent.parent / "data" / "spam_words.json",
+                Path(_sys.executable).parent / "data" / "spam_words.json",
+                Path("data/spam_words.json"),
+            ]:
+                if _candidate.exists():
+                    spam_words_path = _candidate
+                    break
         if spam_words_path and spam_words_path.exists():
             try:
                 with open(spam_words_path, "r", encoding="utf-8") as f:
@@ -227,10 +238,17 @@ class SpamChecker:
         else:
             result.warnings.append("SPF запись не найдена")
             result.score += 5
+        # BUG FIX #3: DKIM не влиял на score — добавлен штраф +8
+        if status.dkim_valid:
+            result.passed.append("DKIM подпись настроена")
+        else:
+            result.warnings.append("DKIM подпись не настроена — высокий риск попадания в спам")
+            result.score += 8
         if status.dmarc_valid:
             result.passed.append("DMARC запись найдена")
         else:
             result.warnings.append("DMARC запись отсутствует")
+            result.score += 3
 
     def _strip_html(self, html_str: str) -> str:
         text = re.sub(r"<[^>]+>", "", html_str)
