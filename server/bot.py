@@ -101,12 +101,17 @@ _release_cache_ts: float = 0.0
 _RELEASE_CACHE_TTL = 300  # 5 minutes
 
 
+_release_cache_lock: asyncio.Lock | None = None  # FIX: asyncio.Lock против race condition
+
 async def fetch_latest_release() -> dict:
-    """Auto-fetch latest GitHub release info. Cached for 5 min."""
-    global _release_cache, _release_cache_ts
+    """Auto-fetch latest GitHub release info. Cached for 5 min. FIX: asyncio.Lock."""
+    global _release_cache, _release_cache_ts, _release_cache_lock
     import time
-    if _release_cache and (time.time() - _release_cache_ts) < _RELEASE_CACHE_TTL:
-        return _release_cache
+    if _release_cache_lock is None:
+        _release_cache_lock = asyncio.Lock()
+    async with _release_cache_lock:
+        if _release_cache and (time.time() - _release_cache_ts) < _RELEASE_CACHE_TTL:
+            return _release_cache
     url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
     try:
         async with aiohttp.ClientSession() as session:
