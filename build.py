@@ -62,12 +62,7 @@ def build_spec() -> str:
         "# -*- mode: python ; coding: utf-8 -*-",
         "from PyInstaller.utils.hooks import collect_submodules",
         "",
-        "# PyInstaller 6.x removed cipher support — keep variable for backwards compat with spec template
-try:
-    from PyInstaller.compat import is_win  # noqa: F401 — confirms PyInstaller is importable
-except ImportError:
-    pass
-block_cipher = None",
+        "block_cipher = None",
         "",
         "extra_hidden = collect_submodules('PyQt6') + collect_submodules('cryptography')",
         "",
@@ -105,7 +100,6 @@ block_cipher = None",
         "        'lib2to3', 'pydoc', 'doctest', 'unittest', 'xmlrpc',",
         "        'ftplib', 'telnetlib', 'imghdr', 'sndhdr', 'aifc', 'sunau',",
         "    ],",
-        "    cipher=block_cipher,",
         "    noarchive=False,",
         ")",
         "",
