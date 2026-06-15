@@ -44,6 +44,17 @@ class WarmupRecord:
         return self.daily_log.get(date.today().isoformat(), 0)
 
     def can_send_today(self) -> bool:
+        if self.paused_until:
+            try:
+                from datetime import date as _d
+                if _d.fromisoformat(self.paused_until) > _d.today():
+                    return False
+                else:
+                    # Дата паузы прошла — сбрасываем
+                    self.paused_until = None
+                    self.is_active = True
+            except (ValueError, TypeError):
+                pass
         return self.is_active and self.today_sent < self.today_limit
 
     def record_sent(self, count: int = 1) -> None:
