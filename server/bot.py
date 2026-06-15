@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 
 import jwt
 import uvicorn
+from core._version import APP_VERSION
 import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
@@ -1481,7 +1482,7 @@ async def health():
     return {
         "status": "ok",
         "service": "FMail Sender License API",
-        "version": "3.0.0",
+        "version": APP_VERSION,
         "active_licenses": stats.get("active", 0),
         "open_tickets": stats.get("open_tickets", 0),
     }
@@ -1535,7 +1536,7 @@ async def _poll_pending_payments():
 
 async def main():
     await db.init_db()
-    logger.info("Starting FMail Sender Bot + API v3.0.0...")
+    logger.info("Starting FMail Sender Bot + API v%s...", APP_VERSION)
 
     config = uvicorn.Config(
         api_app, host=API_HOST, port=API_PORT,
@@ -1543,11 +1544,14 @@ async def main():
     )
     server = uvicorn.Server(config)
 
-    await asyncio.gather(
-        dp.start_polling(bot, skip_updates=True),
-        server.serve(),
-        _poll_pending_payments(),
-    )
+    try:
+        await asyncio.gather(
+            dp.start_polling(bot, skip_updates=True),
+            server.serve(),
+            _poll_pending_payments(),
+        )
+    finally:
+        await crypto_client.close()
 
 
 if __name__ == "__main__":
