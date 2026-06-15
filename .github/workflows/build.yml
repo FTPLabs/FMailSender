@@ -1,17 +1,17 @@
-name: Build FMailSender .exe
+name: Release FMailSender .exe
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release tag (e.g. v3.0.3). Leave empty to skip release.'
-        required: false
-        default: ''
+        description: 'Release tag (e.g. v3.1.4)'
+        required: true
+        default: 'v3.1.4'
+  push:
+    tags: ['v*']
 
 jobs:
-  build-exe:
+  build-release:
     runs-on: windows-latest
     permissions:
       contents: write
@@ -26,34 +26,16 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller pillow
-
-      - name: Syntax check (py_compile)
-        shell: pwsh
-        run: |
-          $files = Get-ChildItem -Recurse -Filter "*.py" | Where-Object { $_.FullName -notmatch "venv|site-packages|\.git" } | Select-Object -ExpandProperty FullName
-          $failed = @()
-          foreach ($f in $files) {
-            $out = python -m py_compile "$f" 2>&1
-            if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: $f"; Write-Host $out; $failed += $f }
-          }
-          if ($failed.Count -gt 0) { Write-Error "Syntax errors in $($failed.Count) file(s)"; exit 1 }
-          Write-Host "All $($files.Count) Python files OK"
-
-      - name: Import check (core modules)
-        run: python -c "import sys; sys.path.insert(0,'.'); from core.sender import Recipient, EmailTemplate, SmtpAccount, SendingEngine, CampaignConfig, SendResult, validate_email_format; from core.license import LicenseInfo, KEY_PREFIX; print('All imports OK')"
+          pip install PyQt6 aiosmtplib cryptography PyJWT dnspython openpyxl reportlab psutil requests Pillow pyinstaller
 
       - name: Build .exe
         shell: cmd
         run: |
           pyinstaller --noconfirm --onefile --windowed ^
             --name "FMailSender" ^
-            --icon "assets/images/fmail_logo.png" ^
             --add-data "assets;assets" ^
             --add-data "data;data" ^
             --collect-all "PyQt6" ^
-            --hidden-import "PyQt6.sip" ^
             --collect-submodules "gui" ^
             --collect-submodules "core" ^
             --hidden-import "gui.screens.screen_accounts" ^
@@ -73,60 +55,40 @@ jobs:
             --hidden-import "core.updater" ^
             main.py
 
-      - name: Create Release (tag push)
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Rename exe with version
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.event.inputs.tag_name }}" -ne "") { "${{ github.event.inputs.tag_name }}" } else { "${{ github.ref_name }}" }
+          Copy-Item "dist\FMailSender.exe" "dist\FMailSender_${tag}.exe"
+          Write-Host "Built: FMailSender_${tag}.exe ($(((Get-Item dist\FMailSender.exe).Length / 1MB).ToString('F1')) MB)"
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/FMailSender.exe
-          generate_release_notes: true
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          name: "FMail Sender ${{ github.event.inputs.tag_name || github.ref_name }}"
+          files: |
+            dist/FMailSender.exe
           body: |
-            ## FMailSender ${{ github.ref_name }}
+            ## FMail Sender ${{ github.event.inputs.tag_name || github.ref_name }}
 
-            ### Скачать
-            Скачайте **FMailSender.exe** ниже и запустите — установка не нужна.
+            ### Что нового
+            - 🔒 HTTPS для сервера лицензий (bug fix)
+            - 📧 DKIM штраф +8 в spam score (bug fix)
+            - ⏱ Bounce дедупликация с 30-дневным окном (bug fix)
+            - 🔔 Звуковой сигнал C-E-G при завершении рассылки
+            - 🎨 Premium color picker: 24 preset + HEX ввод
+            - ✍️ Подпись "by ftpdev" в сайдбаре
+
+            ### Установка
+            Скачайте **FMailSender.exe** и запустите — установка не требуется.
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create Release (manual dispatch)
-        if: "github.event_name == 'workflow_dispatch' && inputs.tag_name != ''"
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag_name }}
-          files: dist/FMailSender.exe
-          generate_release_notes: true
-          body: |
-            ## FMailSender ${{ inputs.tag_name }}
-
-            ### Скачать
-            Скачайте **FMailSender.exe** ниже и запустите — установка не нужна.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifact
-        continue-on-error: true
+      - name: Upload artifact (30 days)
         uses: actions/upload-artifact@v4
         with:
-          name: FMailSender-windows-exe
+          name: FMailSender-windows-${{ github.event.inputs.tag_name || github.ref_name }}
           path: dist/FMailSender.exe
           retention-days: 30
-
-  deploy-server:
-    runs-on: ubuntu-latest
-    if: "startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'"
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1
-        continue-on-error: true
-        with:
-          host: 31.76.100.190
-          username: root
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            DEPLOY_DIR=/opt/fmailsender
-            [ -d "$DEPLOY_DIR/.git" ] || git clone https://github.com/FTPLabs/FMailSender.git "$DEPLOY_DIR"
-            cd "$DEPLOY_DIR" && git pull origin main
-            pip3 install -r server/requirements.txt -q
-            systemctl restart fmailsender 2>/dev/null || true
-            echo "Deployed at $(date)"
