@@ -273,9 +273,14 @@ class BounceMonitor:
                     raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
                     record = _parse_dsn_message(raw)
                     if record:
-                        # Дедупликация по email (не добавляем одно и то же дважды)
+                        # BUG FIX #4: дедупликация с 30-дневным окном
+                        # (раньше один и тот же адрес никогда не добавлялся повторно)
+                        _DEDUP_DAYS = 30
                         already_known = any(
                             r.email.lower() == record.email.lower()
+                            and r.bounce_type == record.bounce_type
+                            and r.received_at
+                            and (datetime.now() - datetime.fromisoformat(r.received_at)).days < _DEDUP_DAYS
                             for r in self._bounce_records
                         )
                         if not already_known:
