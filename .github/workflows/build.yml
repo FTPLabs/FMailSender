@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release tag (e.g. v2.8.2)'
+        description: 'Release tag (e.g. v2.8.3)'
         required: true
-        default: 'v2.8.2'
+        default: 'v2.8.3'
   push:
     tags: ['v*']
 
@@ -28,7 +28,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install PyQt6 PyQt6-Qt6 aiosmtplib cryptography PyJWT dnspython openpyxl reportlab psutil requests Pillow pyinstaller wmi pywin32
+          pip install PyQt6 aiosmtplib cryptography PyJWT dnspython openpyxl reportlab psutil requests Pillow pyinstaller
+          pip install wmi pywin32 || echo "wmi/pywin32 install failed — continuing"
 
       - name: Build .exe
         shell: cmd
@@ -56,9 +57,6 @@ jobs:
             --hidden-import "core.warmup" ^
             --hidden-import "core.ai_fixer" ^
             --hidden-import "core.updater" ^
-            --hidden-import "wmi" ^
-            --hidden-import "win32api" ^
-            --hidden-import "win32con" ^
             main.py
 
       - name: Rename exe with version
@@ -66,7 +64,8 @@ jobs:
         run: |
           $tag = if ("${{ github.event.inputs.tag_name }}" -ne "") { "${{ github.event.inputs.tag_name }}" } else { "${{ github.ref_name }}" }
           Copy-Item "dist\FMailSender.exe" "dist\FMailSender_${tag}.exe"
-          Write-Host "Built: FMailSender_${tag}.exe ($(((Get-Item dist\FMailSender.exe).Length / 1MB).ToString('F1')) MB)"
+          $size = (Get-Item "dist\FMailSender.exe").Length / 1MB
+          Write-Host "Built: FMailSender_${tag}.exe ($([math]::Round($size,1)) MB)"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -78,13 +77,13 @@ jobs:
           body: |
             ## FMail Sender ${{ github.event.inputs.tag_name || github.ref_name }}
 
-            ### Что нового в v2.8.x (Security & Bug Fix Release)
+            ### Security & Bug Fix Release
             - SSL-верификация: управляется через LICENSE_SSL_VERIFY (env var)
             - HWID_SALT: уровень лога повышен до WARNING
             - asyncio.Lock в кеше GitHub Releases (race condition fix)
             - IndexError fix в AI Spam Fixer (JSON парсинг)
             - IMAP timeout 15 сек (защита от зависания потока)
-            - i18n + wmi добавлены в сборку
+            - i18n добавлены в сборку
 
             ### Установка
             Скачайте **FMailSender.exe** и запустите — установка не требуется.
