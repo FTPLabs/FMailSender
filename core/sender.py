@@ -632,13 +632,6 @@ class SmtpAccount:
         self._hour_reset: float = time.time()
         self._day_reset: float = time.time()
 
-    def _tick_hour_reset(self) -> None:  # noqa: DEPRECATED — use _tick_resets(); kept for compatibility
-        """Сбрасывает часовой счётчик если прошёл час. Вызывать только под self._lock."""
-        now = time.time()
-        if now - self._hour_reset >= 3600:
-            self.sent_this_hour = 0
-            self._hour_reset = now
-
     def _tick_resets(self) -> None:
         """Сбрасывает часовой и суточный счётчики при смене периода."""
         now = time.time()
@@ -1042,6 +1035,7 @@ class SendingEngine:
                 s = smtplib.SMTP(account.host, account.port, timeout=30)
                 if account.use_tls:
                     s.starttls(context=ctx)
+                    s.ehlo()  # RFC 3207: повторный EHLO обязателен после STARTTLS
             s.login(account.email, account.password)
             s.send_message(msg)
             s.quit()
