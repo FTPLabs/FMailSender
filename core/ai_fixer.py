@@ -129,8 +129,8 @@ class AiSpamFixer:
             _om = _re_j.search(r'\{[\s\S]+\}', content)
             if _om:
                 content = _om.group(0).strip()
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
 
         try:
             parsed = json.loads(content)
