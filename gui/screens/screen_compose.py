@@ -202,7 +202,8 @@ class FormattingToolbar(QFrame):
         self._editor.textCursor().mergeCharFormat(fmt)
 
     def _text_color(self):
-        """Premium цветовой пикер — сетка 24 preset + custom кнопка."""        from PyQt6.QtWidgets import (
+        """Premium цветовой пикер — сетка 24 preset + custom кнопка."""
+        from PyQt6.QtWidgets import (
             QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton,
             QLabel, QFrame, QLineEdit
         )
