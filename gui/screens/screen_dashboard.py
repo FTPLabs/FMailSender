@@ -181,6 +181,7 @@ class ActivityChart(QWidget):
 
         painter.end()
 
+class DashboardScreen(QWidget):
     """Главный экран — KPI + график активности."""
 
     def __init__(self, parent=None):
