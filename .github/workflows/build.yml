@@ -1,27 +1,18 @@
 name: Release FMailSender .exe
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag_name:
         description: 'Release tag'
-        required: true
-        default: 'v2.8.4'
-  push:
-    tags: ['v*']
+        required: false
+        default: 'v2.8.5'
 
 jobs:
   build-release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Debug info
-        run: |
-          echo "Runner: $RUNNER_OS"
-          echo "Python version test"
-          python3 --version
-          echo "All OK - runner assigned successfully"
-          echo "Tag: ${{ github.ref_name }}"
+      - name: Hello
+        run: echo "Runner OK on $RUNNER_OS"
