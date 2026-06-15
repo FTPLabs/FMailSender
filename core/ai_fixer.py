@@ -92,9 +92,6 @@ class AiSpamFixer:
   "explanation": "кратко что изменено и почему"
 }}"""
 
-        import urllib.request
-        import urllib.error
-
         payload = json.dumps({
             "model": self.MODEL,
             "messages": [
