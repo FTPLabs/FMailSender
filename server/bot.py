@@ -4,6 +4,7 @@ FMail Sender — Telegram Bot + FastAPI License Server v3.0.0
 Поддержка: тикеты с диалогом, медиафайлы, голосовые, ответы обеих сторон.
 """
 import asyncio
+import html
 import logging
 import os
 import sys
@@ -543,7 +544,7 @@ async def msg_ticket_create(message: Message, state: FSMContext):
         f"👤 {mention} · <code>{user.id}</code>\n"
         f"💻 {hwid or '—'}{plan_info}\n\n"
     )
-    body = text or "📎 медиафайл"
+    body = html.escape(text) if text else "📎 медиафайл"
     admin_kb = kb_ticket_admin(ticket_id)
 
     for admin_id in ADMIN_IDS:
@@ -603,7 +604,7 @@ async def msg_ticket_user_reply(message: Message, state: FSMContext):
     await db.add_ticket_message(ticket_id, user.id, "user", text, file_id, file_type)
 
     header = f"↩️ <b>Тикет #{ticket_id}</b> — ответ клиента\n👤 {user.first_name}\n\n"
-    body = text or "📎 медиафайл"
+    body = html.escape(text) if text else "📎 медиафайл"
     admin_kb = kb_ticket_admin(ticket_id)
 
     for admin_id in ADMIN_IDS:
@@ -663,7 +664,7 @@ async def msg_ticket_reply_admin(message: Message, state: FSMContext):
     await db.add_ticket_message(ticket_id, message.from_user.id, "admin", text, file_id, file_type)
 
     header = f"💬 <b>Ответ поддержки · Тикет #{ticket_id}</b>\n\n"
-    body = text or "📎 медиафайл"
+    body = html.escape(text) if text else "📎 медиафайл"
     user_kb = kb_ticket_user(ticket_id)
 
     try:
