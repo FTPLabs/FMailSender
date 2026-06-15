@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QFrame, QStackedWidget
 )
-from PyQt6.QtCore import Qt, QByteArray, pyqtSignal
+from PyQt6.QtCore import Qt, QByteArray, QSize, pyqtSignal
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtGui import QPixmap, QPainter
 
@@ -168,83 +168,68 @@ class MainWindow(QMainWindow):
         sidebar_layout.addStretch()
 
         _is_lifetime = self._license.plan.upper() in ("LIFETIME", "LIFE", "LTD", "LIFELONG")
+        from gui.icons import make_icon, TELEGRAM, LOLZ
+        import webbrowser
+
         _plan_frame = QFrame()
         _plan_frame.setObjectName("plan_info_frame")
         _plan_fl = QVBoxLayout(_plan_frame)
         _plan_fl.setContentsMargins(10, 10, 10, 10)
         _plan_fl.setSpacing(6)
 
-        if not _is_lifetime:
-            expiry_lbl = QLabel(f"до {self._license.expires_at.strftime('%d.%m.%Y')}")
-            expiry_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            expiry_lbl.setStyleSheet(
-                "color: rgba(139,92,246,0.65); font-size: 10px;"
-                " font-weight: 400; letter-spacing: 0.5px;"
-                " background: transparent; padding: 0;"
-            )
-            _plan_fl.addWidget(expiry_lbl)
-
-        plan_lbl = QLabel(("\u221e  " if _is_lifetime else "") + self._license.plan.lower())
-        plan_lbl.setObjectName("plan_badge")
-        plan_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _plan_fl.addWidget(plan_lbl)
-
-        # Кнопки Telegram и Lolzteam через SVG из gui.icons
-        from gui.icons import make_icon, TELEGRAM, LOLZ
-        import webbrowser
-
-        _by_lbl = QLabel("by ftpdev")
-        _by_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _by_lbl.setStyleSheet(
-            "color: rgba(139,92,246,0.55); font-size: 10px; font-weight: 500;"
-            " letter-spacing: 0.5px; background: transparent; padding: 0 0 2px 0;"
+        # Only expiry date (or ∞ lifetime)
+        if _is_lifetime:
+            _date_str = "\u221e  lifetime"
+        else:
+            _date_str = "до " + self._license.expires_at.strftime("%d.%m.%Y")
+        expiry_lbl = QLabel(_date_str)
+        expiry_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        expiry_lbl.setStyleSheet(
+            "color: rgba(139,92,246,0.8); font-size: 11px;"
+            " font-weight: 500; letter-spacing: 0.5px;"
+            " background: transparent; padding: 0;"
         )
-        _plan_fl.addWidget(_by_lbl)
+        _plan_fl.addWidget(expiry_lbl)
 
+        # Small circular icon-only buttons
         _social_row = QHBoxLayout()
-        _social_row.setContentsMargins(0, 2, 0, 0)
-        _social_row.setSpacing(8)
+        _social_row.setContentsMargins(0, 6, 0, 0)
+        _social_row.setSpacing(10)
         _social_row.addStretch()
 
         _tg_btn = QPushButton()
-        _tg_btn.setFixedSize(80, 32)
+        _tg_btn.setFixedSize(34, 34)
         _tg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        _tg_btn.setToolTip("Поддержка в Telegram")
-        _tg_btn.setIcon(make_icon(TELEGRAM, 16, "#2AABEE"))
-        _tg_btn.setText("  Telegram")
+        _tg_btn.setToolTip("Telegram")
+        _tg_btn.setIcon(make_icon(TELEGRAM, 22, "#ffffff"))
+        _tg_btn.setIconSize(QSize(22, 22))
         _tg_btn.setStyleSheet(
             "QPushButton {"
-            " background: rgba(42,171,238,0.12);"
-            " border: 1px solid rgba(42,171,238,0.35);"
-            " border-radius: 8px;"
-            " color: rgba(42,171,238,0.9);"
-            " font-size: 11px; font-weight: 600;"
+            " background: transparent;"
+            " border: none;"
+            " border-radius: 17px;"
             "}"
             "QPushButton:hover {"
-            " background: rgba(42,171,238,0.22);"
-            " border-color: rgba(42,171,238,0.6);"
+            " background: rgba(42,171,238,0.15);"
             "}"
         )
         _tg_btn.clicked.connect(lambda: webbrowser.open("https://t.me/ftpdev_sup"))
         _social_row.addWidget(_tg_btn)
 
         _lolz_btn = QPushButton()
-        _lolz_btn.setFixedSize(80, 32)
+        _lolz_btn.setFixedSize(34, 34)
         _lolz_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        _lolz_btn.setToolTip("Профиль на Lolzteam")
-        _lolz_btn.setIcon(make_icon(LOLZ, 16, "#F97316"))
-        _lolz_btn.setText("  Lolzteam")
+        _lolz_btn.setToolTip("Lolzteam")
+        _lolz_btn.setIcon(make_icon(LOLZ, 20, "#22C55E"))
+        _lolz_btn.setIconSize(QSize(20, 20))
         _lolz_btn.setStyleSheet(
             "QPushButton {"
-            " background: rgba(249,115,22,0.12);"
-            " border: 1px solid rgba(249,115,22,0.35);"
-            " border-radius: 8px;"
-            " color: rgba(249,115,22,0.9);"
-            " font-size: 11px; font-weight: 600;"
+            " background: transparent;"
+            " border: none;"
+            " border-radius: 17px;"
             "}"
             "QPushButton:hover {"
-            " background: rgba(249,115,22,0.22);"
-            " border-color: rgba(249,115,22,0.6);"
+            " background: rgba(34,197,94,0.15);"
             "}"
         )
         _lolz_btn.clicked.connect(lambda: webbrowser.open("https://lolz.live/ftpdev"))
