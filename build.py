@@ -62,7 +62,12 @@ def build_spec() -> str:
         "# -*- mode: python ; coding: utf-8 -*-",
         "from PyInstaller.utils.hooks import collect_submodules",
         "",
-        "block_cipher = None",
+        "# PyInstaller 6.x removed cipher support — keep variable for backwards compat with spec template
+try:
+    from PyInstaller.compat import is_win  # noqa: F401 — confirms PyInstaller is importable
+except ImportError:
+    pass
+block_cipher = None",
         "",
         "extra_hidden = collect_submodules('PyQt6') + collect_submodules('cryptography')",
         "",
@@ -104,7 +109,7 @@ def build_spec() -> str:
         "    noarchive=False,",
         ")",
         "",
-        "pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)",
+        "pyz = PYZ(a.pure, a.zipped_data)",
         "",
         "exe = EXE(",
         "    pyz,",
