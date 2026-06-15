@@ -15,6 +15,21 @@ from PyQt6.QtCore import QSettings, Qt, QTimer, QDateTime, pyqtSignal
 from core.sender import SendingEngine, SmtpAccount, Recipient, EmailTemplate, CampaignConfig, SendResult
 from gui.theme import Colors, Spacing
 
+# ── Звуковое уведомление ────────────────────────────────────────────────────
+def _play_completion_chime() -> None:
+    """Воспроизводит мелодичный аккорд C-E-G при завершении рассылки (Windows только)."""
+    import threading
+    def _chime():
+        try:
+            import winsound, time as _t
+            # Мажорный аккорд C5-E5-G5 — приятное звуковое уведомление
+            for freq, dur in [(523, 140), (659, 140), (784, 240)]:
+                winsound.Beep(freq, dur)
+                _t.sleep(0.04)
+        except Exception:
+            pass  # non-Windows или нет звука — тихо игнорируем
+    threading.Thread(target=_chime, daemon=True).start()
+
 
 def _status_chip(text):
   lbl = QLabel(text)
@@ -352,6 +367,7 @@ class SendingScreen(QWidget):
       real_results = [r for r in results if r.error != "Отменено"]
       self.campaign_finished.emit(real_results if real_results else results)
       if not self._manually_stopped:
+          _play_completion_chime()  # Звуковое уведомление о завершении
           success = sum(1 for r in results if r.success)
           QMessageBox.information(
               self, "Рассылка завершена",
