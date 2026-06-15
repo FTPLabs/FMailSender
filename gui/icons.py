@@ -64,9 +64,9 @@ REFRESH = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="non
 
 # ── Custom brand icons ────────────────────────────────────────────────────────
 
-# Telegram: official paper-plane style icon (filled)
-TELEGRAM = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.93 6.36l-1.686 7.948c-.127.567-.46.708-.933.44l-2.573-1.895-1.241 1.195c-.137.137-.252.252-.517.252l.185-2.62 4.773-4.311c.207-.185-.045-.288-.322-.103L8.118 14.36l-2.53-.79c-.55-.172-.56-.55.114-.815l9.867-3.803c.458-.165.858.113.361.808z"/></svg>'
+# Telegram: full gradient circle icon (official colors, no currentColor — renders as-is)
+TELEGRAM = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="url(#tg_g)"/><path d="M22.9866 10.2088C23.1112 9.40332 22.3454 8.76755 21.6292 9.082L7.36482 15.3448C6.85123 15.5703 6.8888 16.3483 7.42147 16.5179L10.3631 17.4547C10.9246 17.6335 11.5325 17.541 12.0228 17.2023L18.655 12.6203C18.855 12.4821 19.073 12.7665 18.9021 12.9426L14.1281 17.8646C13.665 18.3421 13.7569 19.1512 14.314 19.5005L19.659 22.8523C20.2585 23.2282 21.0297 22.8506 21.1418 22.1261L22.9866 10.2088Z" fill="white"/><defs><linearGradient id="tg_g" x1="16" y1="2" x2="16" y2="30" gradientUnits="userSpaceOnUse"><stop stop-color="#37BBFE"/><stop offset="1" stop-color="#007DBB"/></linearGradient></defs></svg>'
 
-# Lolz Market (lolz.live) — stylised rounded-square "L" logo
-LOLZ = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect fill="currentColor" x="2" y="2" width="20" height="20" rx="5.5"/><path fill="white" d="M7.5 6.5h2.8v8.2h4.2v2.3H7.5V6.5z"/></svg>'
+# Lolzteam (lolz.live) — LZ monogram icon (white, rendered on green circle button)
+LOLZ = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M3 18V6h2.5v9.5h5V18H3zm8.5-12h8l-5.5 9.5H20V18h-8l5.5-9.5h-5.5V6z"/></svg>'
 
