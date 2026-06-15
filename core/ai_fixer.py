@@ -6,11 +6,19 @@ API key: env OPENAI_API_KEY  (or prompt user in settings).
 from __future__ import annotations
 import json
 import os
+import re as _re_module
 from typing import Optional
 
 
 def _get_openai_key() -> str | None:
     return os.environ.get("OPENAI_API_KEY", "").strip() or None
+
+
+def _re_strip_html(html: str, max_len: int = 3000) -> str:
+    """Strip HTML tags and truncate to max_len characters."""
+    text = _re_module.sub(r"<[^>]+>", "", html)
+    text = _re_module.sub(r"\s+", " ", text).strip()
+    return text[:max_len]
 
 
 class AiFixResult:
@@ -120,7 +128,7 @@ class AiSpamFixer:
             raise RuntimeError(
                 f"OpenAI API вернул неожиданный ответ: {str(data)[:300]}"
             ) from exc
-        # FIX: безопасное извлечение JSON (IndexError protection)
+
         import re as _re_j
         _jm = _re_j.search(r'```(?:json)?\s*([\s\S]+?)```', content)
         if _jm:
