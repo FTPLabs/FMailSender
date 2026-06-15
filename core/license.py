@@ -69,6 +69,17 @@ _hwid_cache: Optional[str] = None
 _hwid_lock = threading.Lock()
 
 
+
+def _get_ssl_verify() -> "bool | str":
+    """SSL verify helper. Default True. Set LICENSE_SSL_VERIFY=0 to disable (insecure)."""
+    _ssl_env = os.environ.get("LICENSE_SSL_VERIFY", "1").strip()
+    if _ssl_env == "0":
+        logger.warning("SECURITY: SSL verify DISABLED. Set LICENSE_SSL_VERIFY=1 or CA-cert path.")
+        return False
+    if _ssl_env == "1":
+        return True
+    return _ssl_env  # treated as CA bundle path
+
 # ── Анти-отладчик ─────────────────────────────────────────────────────────────
 
 def _check_debugger() -> bool:
@@ -306,13 +317,12 @@ class LicenseInfo:
 
     @property
     def days_left(self) -> int:
-        delta = self.expires_at - datetime.now()
+        delta = self.expires_at - datetime.utcnow()
         return max(0, delta.days)
 
     @property
     def is_expired(self) -> bool:
-        # Consistent with expires_at (local naive datetime after UTC conversion)
-        return datetime.now() > self.expires_at
+        return datetime.utcnow() > self.expires_at
 
     def __repr__(self) -> str:
         return (
@@ -349,9 +359,7 @@ def _verify_key_online(key: str, hwid: str) -> Optional[bool]:
     None  — сервер недоступен.
     """
     try:
-        _ssl_env = os.environ.get("LICENSE_SSL_VERIFY","").strip()
-        _ssl_v: bool|str = True if _ssl_env=="1" else (_ssl_env if _ssl_env not in ("","0") else False)
-        if _ssl_v is False: logger.warning("SECURITY: SSL verify DISABLED. Set LICENSE_SSL_VERIFY=1 или путь к CA-cert.")
+        _ssl_v = _get_ssl_verify()
         resp = requests.post(
             LICENSE_VERIFY_URL,
             json={"key": key, "hwid": hwid},
@@ -414,10 +422,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
         )
 
     hwid = generate_hwid()
-    _ssl_env = os.environ.get("LICENSE_SSL_VERIFY", "").strip()
-    _ssl_v: bool | str = True if _ssl_env == "1" else (_ssl_env if _ssl_env not in ("", "0") else False)
-    if _ssl_v is False:
-        logger.warning("SECURITY: SSL verify DISABLED for activation. Set LICENSE_SSL_VERIFY=1 or CA-cert path.")
+    _ssl_v = _get_ssl_verify()
     if progress_callback:
         progress_callback(20, "Проверка ключа...")
 
@@ -524,7 +529,7 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
     if _JWT_SECRET_FALLBACK:
         activated_at = data.get("activated_at", 0)
         last_online = data.get("last_verified_online", activated_at)
-        hours_offline = (time.time() - last_online) / 3600
+        hours_offline = (time.time() - last_online) / 3600  # UTC-independent: uses time.time()
         if hours_offline > OFFLINE_GRACE_HOURS:
             key_gp = data.get("key", "")
             hwid_gp = generate_hwid()
