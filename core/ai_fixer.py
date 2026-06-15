@@ -75,7 +75,7 @@ class AiSpamFixer:
 {subject}
 
 ТЕКУЩЕЕ ТЕЛО (HTML):
-{body_html[:3000]}
+{_re_strip_html(body_html, 3000)}
 
 Перепиши письмо, устранив все проблемы. Верни JSON:
 {{
@@ -120,9 +120,15 @@ class AiSpamFixer:
             raise RuntimeError(
                 f"OpenAI API вернул неожиданный ответ: {str(data)[:300]}"
             ) from exc
-        # Extract JSON from markdown code block if present
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0].strip()
+        # FIX: безопасное извлечение JSON (IndexError protection)
+        import re as _re_j
+        _jm = _re_j.search(r'```(?:json)?\s*([\s\S]+?)```', content)
+        if _jm:
+            content = _jm.group(1).strip()
+        else:
+            _om = _re_j.search(r'\{[\s\S]+\}', content)
+            if _om:
+                content = _om.group(0).strip()
         elif "```" in content:
             content = content.split("```")[1].split("```")[0].strip()
 
