@@ -89,10 +89,10 @@ class FormattingToolbar(QFrame):
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(Spacing.SM, 3, Spacing.SM, 3)
+        layout.setContentsMargins(Spacing.SM, 4, Spacing.SM, 4)
         layout.setSpacing(2)
         self.setObjectName("card")
-        self.setFixedHeight(40)
+        self.setFixedHeight(48)
 
         try:
             from gui.icons import make_icon, BOLD, ITALIC, UNDERLINE, ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, LINK, PALETTE
@@ -106,7 +106,7 @@ class FormattingToolbar(QFrame):
                         "align_right": "ALIGN_RIGHT", "link": "LINK", "color": "PALETTE"}
             b = QPushButton()
             b.setObjectName(obj)
-            b.setFixedSize(26, 26)
+            b.setFixedSize(30, 30)
             b.setToolTip(tooltip)
             b.clicked.connect(callback)
             if _has_icons and icon_key in _SVG_MAP:
@@ -115,8 +115,8 @@ class FormattingToolbar(QFrame):
                 if svg_str is None:
                     svg_str = getattr(_ic, "PALETTE", "")
                 from PyQt6.QtCore import QSize as _QSize
-                b.setIcon(make_icon(svg_str, 14))
-                b.setIconSize(_QSize(14, 14))
+                b.setIcon(make_icon(svg_str, 16))
+                b.setIconSize(_QSize(16, 16))
             else:
                 b.setText(label)
             return b
@@ -139,8 +139,8 @@ class FormattingToolbar(QFrame):
         self.font_size = QSpinBox()
         self.font_size.setRange(8, 72)
         self.font_size.setValue(14)
-        self.font_size.setFixedWidth(46)
-        self.font_size.setFixedHeight(24)
+        self.font_size.setFixedWidth(58)
+        self.font_size.setFixedHeight(28)
         self.font_size.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.font_size.valueChanged.connect(self._font_size_changed)
         self.font_size.setToolTip("Размер шрифта (пт)")
@@ -162,8 +162,8 @@ class FormattingToolbar(QFrame):
 
         # ── Переменные ───────────────────────────────────────────────────────
         self._vars_combo = QComboBox()
-        self._vars_combo.setFixedWidth(148)
-        self._vars_combo.setFixedHeight(28)
+        self._vars_combo.setFixedWidth(162)
+        self._vars_combo.setFixedHeight(30)
         self._vars_combo.addItem("∴ Переменная...")
         self._vars_combo.addItems([
             "{{first_name}}", "{{last_name}}", "{{company}}",
