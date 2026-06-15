@@ -1,0 +1,63 @@
+name: Python Syntax Check
+
+on:
+  push:
+    branches: ["**"]
+    paths: ["**.py"]
+  pull_request:
+    branches: ["**"]
+    paths: ["**.py"]
+
+jobs:
+  syntax-check:
+    name: Python Syntax Guard
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check syntax (py_compile)
+        run: |
+          echo "=== Проверка синтаксиса всех .py файлов ==="
+          ERRORS=0
+          while IFS= read -r -d "" f; do
+            python -m py_compile "$f" 2>&1 && echo "  OK: $f" || { echo "  FAIL: $f"; ERRORS=$((ERRORS+1)); }
+          done < <(find . -name "*.py" -not -path "./.git/*" -not -path "./venv/*" -not -path "./.agents/*" -print0)
+          echo "=== Итог: найдено ошибок: $ERRORS ==="
+          [ "$ERRORS" -eq 0 ]
+
+      - name: Check docstring+code on same line
+        run: |
+          echo "=== Поиск SyntaxError-паттерна: docstring слита с кодом ==="
+          FOUND=$(grep -rn --include="*.py" \
+            -e '""".*"""[[:space:]]\+from\|""".*"""[[:space:]]\+import\|""".*"""[[:space:]]\+if\|""".*"""[[:space:]]\+for' \
+            . --exclude-dir=".git" --exclude-dir="venv" || true)
+          if [ -n "$FOUND" ]; then
+            echo "КРИТИЧНО — найден паттерн SyntaxError:"
+            echo "$FOUND"
+            exit 1
+          else
+            echo "OK — паттерн не найден"
+          fi
+
+      - name: Check PyInstaller cipher= (deprecated in 6.x)
+        run: |
+          echo "=== Проверка build.py на устаревший cipher= ==="
+          if grep -n "cipher=block_cipher" build.py 2>/dev/null; then
+            echo "WARN: cipher=block_cipher найден — несовместимо с PyInstaller 6.x"
+            exit 1
+          else
+            echo "OK — cipher= не используется"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo ""
+          echo "Скилл: .agents/skills/python-syntax-guard/SKILL.md"
+          echo "Подробнее о проверках: см. SKILL.md в репозитории"
+
