@@ -148,7 +148,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addSpacing(8)
 
         nav_items = [
-            ("dashboard",  "Обзор"),
+            ("dashboard",  "Дашборд"),
             ("accounts",   "Аккаунты"),
             ("compose",    "Письмо"),
             ("recipients", "Получатели"),
@@ -263,7 +263,7 @@ class MainWindow(QMainWindow):
         header = QFrame()
         header.setObjectName("header")
         header_layout = QHBoxLayout(header)
-        self.page_title = QLabel("Обзор")
+        self.page_title = QLabel("Дашборд")
         self.page_title.setStyleSheet(
             f"font-size:15px;font-weight:600;color:{Colors.TEXT_PRIMARY};"
         )
@@ -324,7 +324,7 @@ class MainWindow(QMainWindow):
 
     def _navigate(self, key: str):
         labels = {
-            "dashboard": "Обзор", "accounts": "Аккаунты",
+            "dashboard": "Дашборд", "accounts": "Аккаунты",
             "compose": "Письмо", "recipients": "Получатели",
             "sending": "Рассылка", "analytics": "Аналитика",
             "inbox": "Ответы",
