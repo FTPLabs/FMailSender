@@ -58,81 +58,72 @@ def build_spec() -> str:
 
     datas_str = ",\n        ".join(datas_parts)
 
-    # Collect SSL binaries for Windows DLL fix
-    try:
-        from PyInstaller.utils.hooks import collect_binaries as _cb
-        _ssl_bins = _cb('ssl') + _cb('cryptography')
-        _ssl_bin_lines = "
-".join(f"    (r'{s}', r'{d}')," for s, d in _ssl_bins)
-    except Exception:
-        _ssl_bin_lines = ""
-
-    return (
-        "# -*- mode: python ; coding: utf-8 -*-\n"
-        "import sys, os\n"
-        "from PyInstaller.utils.hooks import collect_submodules, collect_binaries\n"
-        "_ssl_bins = collect_binaries('ssl') + collect_binaries('_ssl') + collect_binaries('cryptography')\n"
-        "\n"
-        "block_cipher = None\n"
-        "\n"
-        "extra_hidden = collect_submodules('PyQt6') + collect_submodules('cryptography')\n"
-        "\n"
-        "a = Analysis(\n"
-        f"    [r'{ROOT / 'main.py'}'],\n"
-        f"    pathex=[r'{ROOT}'],\n"
-        "    binaries=[*_ssl_bins],\n"
-        "    datas=[\n"
-        f"        {datas_str},\n"
-        "    ],\n"
-        "    hiddenimports=[\n"
-        "        'core', 'core.license', 'core.sender', 'core.bounce',\n"
-        "        'core.warmup', 'core.spam_checker', 'core.updater', 'core._version',\n"
-        "        'gui', 'gui.app', 'gui.theme',\n"
-        "        'gui.screens', 'gui.screens.screen_dashboard', 'gui.screens.screen_accounts',\n"
-        "        'gui.screens.screen_compose', 'gui.screens.screen_recipients',\n"
-        "        'gui.screens.screen_sending', 'gui.screens.screen_analytics',\n"
-        "        'gui.screens.screen_activation',\n"
-        "        'ssl', '_ssl', 'hashlib', '_hashlib',\n"
-        "        'aiosmtplib', 'cryptography', 'cryptography.fernet',\n"
-        "        'cryptography.hazmat.primitives', 'cryptography.hazmat.backends',\n"
-        "        'jwt', 'requests', 'urllib3', 'dns', 'dns.resolver', 'dns.exception',\n"
-        "        'email.mime.multipart', 'email.mime.text', 'email.mime.base',\n"
-        "        'PyQt6', 'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui',\n"
-        "        'PyQt6.QtSvg', 'PyQt6.QtSvgWidgets', 'PyQt6.QtNetwork',\n"
-        "        'psutil', 'wmi',\n"
-        "    ] + extra_hidden,\n"
-        "    hookspath=[],\n"
-        "    hooksconfig={},\n"
-        "    runtime_hooks=[],\n"
-        "    excludes=['tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas', 'PIL', 'cv2', 'flask', 'django', 'tornado', 'IPython', 'notebook', 'pytest', 'setuptools', 'pkg_resources', 'multiprocessing', 'lib2to3', 'pydoc', 'doctest', 'unittest', 'xmlrpc', 'ftplib', 'telnetlib', 'imghdr', 'sndhdr', 'aifc', 'sunau'],\n"
-        "    cipher=block_cipher,\n"
-        "    noarchive=False,\n"
-        ")\n"
-        "\n"
-        "pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)\n"
-        "\n"
-        "exe = EXE(\n"
-        "    pyz,\n"
-        "    a.scripts,\n"
-        "    a.binaries,\n"
-        "    a.zipfiles,\n"
-        "    a.datas,\n"
-        "    [],\n"
-        "    name='FMailSender',\n"
-        "    debug=False,\n"
-        "    bootloader_ignore_signals=False,\n"
-        "    strip=False,\n"  # strip=False: prevents DLL load failures on Windows
-        "    upx=True,\n"
-        "    runtime_tmpdir=None,\n"
-        "    console=False,\n"
-        "    disable_windowed_traceback=False,\n"
-        "    argv_emulation=False,\n"
-        "    target_arch=None,\n"
-        "    codesign_identity=None,\n"
-        "    entitlements_file=None,\n"
-        f"    {icon_line}\n"
-        ")\n"
-    );
+    lines = [
+        "# -*- mode: python ; coding: utf-8 -*-",
+        "from PyInstaller.utils.hooks import collect_submodules, collect_binaries",
+        "_ssl_bins = collect_binaries('ssl') + collect_binaries('_ssl') + collect_binaries('cryptography')",
+        "",
+        "block_cipher = None",
+        "",
+        "extra_hidden = collect_submodules('PyQt6') + collect_submodules('cryptography')",
+        "",
+        "a = Analysis(",
+        f"    [r'{ROOT / 'main.py'}'],",
+        f"    pathex=[r'{ROOT}'],",
+        "    binaries=[*_ssl_bins],",
+        "    datas=[",
+        f"        {datas_str},",
+        "    ],",
+        "    hiddenimports=[",
+        "        'core', 'core.license', 'core.sender', 'core.bounce',",
+        "        'core.warmup', 'core.spam_checker', 'core.updater', 'core._version',",
+        "        'gui', 'gui.app', 'gui.theme',",
+        "        'gui.screens', 'gui.screens.screen_dashboard', 'gui.screens.screen_accounts',",
+        "        'gui.screens.screen_compose', 'gui.screens.screen_recipients',",
+        "        'gui.screens.screen_sending', 'gui.screens.screen_analytics',",
+        "        'gui.screens.screen_activation',",
+        "        'ssl', '_ssl', 'hashlib', '_hashlib',",
+        "        'aiosmtplib', 'cryptography', 'cryptography.fernet',",
+        "        'cryptography.hazmat.primitives', 'cryptography.hazmat.backends',",
+        "        'jwt', 'requests', 'urllib3', 'dns', 'dns.resolver', 'dns.exception',",
+        "        'email.mime.multipart', 'email.mime.text', 'email.mime.base',",
+        "        'PyQt6', 'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui',",
+        "        'PyQt6.QtSvg', 'PyQt6.QtSvgWidgets', 'PyQt6.QtNetwork',",
+        "        'psutil', 'wmi',",
+        "    ] + extra_hidden,",
+        "    hookspath=[],",
+        "    hooksconfig={},",
+        "    runtime_hooks=[],",
+        "    excludes=['tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas', 'PIL', 'cv2', 'flask', 'django', 'tornado', 'IPython', 'notebook', 'pytest', 'setuptools', 'pkg_resources', 'multiprocessing', 'lib2to3', 'pydoc', 'doctest', 'unittest', 'xmlrpc', 'ftplib', 'telnetlib', 'imghdr', 'sndhdr', 'aifc', 'sunau'],",
+        "    cipher=block_cipher,",
+        "    noarchive=False,",
+        ")",
+        "",
+        "pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)",
+        "",
+        "exe = EXE(",
+        "    pyz,",
+        "    a.scripts,",
+        "    a.binaries,",
+        "    a.zipfiles,",
+        "    a.datas,",
+        "    [],",
+        "    name='FMailSender',",
+        "    debug=False,",
+        "    bootloader_ignore_signals=False,",
+        "    strip=False,",
+        "    upx=True,",
+        "    runtime_tmpdir=None,",
+        "    console=False,",
+        "    disable_windowed_traceback=False,",
+        "    argv_emulation=False,",
+        "    target_arch=None,",
+        "    codesign_identity=None,",
+        "    entitlements_file=None,",
+        f"    {icon_line}",
+        ")",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def main():
@@ -179,7 +170,7 @@ def main():
     if SPEC_FILE.exists():
         SPEC_FILE.unlink()
 
-    print("\n✅ Сборка завершена успешно!")
+    print("\n Сборка завершена успешно!")
 
 
 if __name__ == "__main__":
