@@ -347,9 +347,9 @@ class InboxScreen(QWidget):
         preview_layout = QVBoxLayout(preview_panel)
         preview_layout.setContentsMargins(Spacing.MD, Spacing.MD, Spacing.MD, Spacing.MD)
 
-        self._preview_from    = QLabel("—")
+        self._preview_from    = QLabel("")
         self._preview_from.setStyleSheet(f"font-weight: {Typography.WEIGHT_BOLD}; color: {Colors.TEXT_PRIMARY};")
-        self._preview_subject = QLabel("—")
+        self._preview_subject = QLabel("")
         self._preview_subject.setWordWrap(True)
         self._preview_subject.setStyleSheet(f"font-size: {Typography.SIZE_MD}px; color: {Colors.TEXT_PRIMARY};")
         self._preview_date    = QLabel("")
@@ -358,6 +358,9 @@ class InboxScreen(QWidget):
         self._preview_body = QTextEdit()
         self._preview_body.setReadOnly(True)
         self._preview_body.setObjectName("card_inner")
+        self._preview_body.setPlaceholderText(
+            "Выберите письмо из списка слева, чтобы прочитать его здесь."
+        )
         self._preview_body.setStyleSheet(
             f"background: {Colors.BG_SURFACE3};"
             f" color: {Colors.TEXT_PRIMARY};"
@@ -432,6 +435,10 @@ class InboxScreen(QWidget):
         rows = self._table.selectionModel().selectedRows()
         if not rows:
             self._reply_btn.setEnabled(False)
+            self._preview_from.setText("")
+            self._preview_subject.setText("")
+            self._preview_date.setText("")
+            self._preview_body.clear()
             return
         idx = rows[0].row()
         if idx < 0 or idx >= len(self._messages):
