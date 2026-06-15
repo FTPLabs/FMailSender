@@ -58,9 +58,20 @@ def build_spec() -> str:
 
     datas_str = ",\n        ".join(datas_parts)
 
+    # Collect SSL binaries for Windows DLL fix
+    try:
+        from PyInstaller.utils.hooks import collect_binaries as _cb
+        _ssl_bins = _cb('ssl') + _cb('cryptography')
+        _ssl_bin_lines = "
+".join(f"    (r'{s}', r'{d}')," for s, d in _ssl_bins)
+    except Exception:
+        _ssl_bin_lines = ""
+
     return (
         "# -*- mode: python ; coding: utf-8 -*-\n"
-        "from PyInstaller.utils.hooks import collect_submodules\n"
+        "import sys, os\n"
+        "from PyInstaller.utils.hooks import collect_submodules, collect_binaries\n"
+        "_ssl_bins = collect_binaries('ssl') + collect_binaries('_ssl') + collect_binaries('cryptography')\n"
         "\n"
         "block_cipher = None\n"
         "\n"
@@ -69,7 +80,7 @@ def build_spec() -> str:
         "a = Analysis(\n"
         f"    [r'{ROOT / 'main.py'}'],\n"
         f"    pathex=[r'{ROOT}'],\n"
-        "    binaries=[],\n"
+        "    binaries=[*_ssl_bins],\n"
         "    datas=[\n"
         f"        {datas_str},\n"
         "    ],\n"
@@ -81,6 +92,7 @@ def build_spec() -> str:
         "        'gui.screens.screen_compose', 'gui.screens.screen_recipients',\n"
         "        'gui.screens.screen_sending', 'gui.screens.screen_analytics',\n"
         "        'gui.screens.screen_activation',\n"
+        "        'ssl', '_ssl', 'hashlib', '_hashlib',\n"
         "        'aiosmtplib', 'cryptography', 'cryptography.fernet',\n"
         "        'cryptography.hazmat.primitives', 'cryptography.hazmat.backends',\n"
         "        'jwt', 'requests', 'urllib3', 'dns', 'dns.resolver', 'dns.exception',\n"
@@ -109,7 +121,7 @@ def build_spec() -> str:
         "    name='FMailSender',\n"
         "    debug=False,\n"
         "    bootloader_ignore_signals=False,\n"
-        "    strip=True,\n"
+        "    strip=False,\n"  # strip=False: prevents DLL load failures on Windows
         "    upx=True,\n"
         "    runtime_tmpdir=None,\n"
         "    console=False,\n"
