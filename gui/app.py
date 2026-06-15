@@ -238,6 +238,15 @@ class MainWindow(QMainWindow):
         _social_row.addStretch()
         _plan_fl.addLayout(_social_row)
 
+        # 'by ftpdev' подпись
+        _by_lbl = QLabel("by ftpdev")
+        _by_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _by_lbl.setStyleSheet(
+            "color: rgba(139,92,246,0.45); font-size: 10px;"
+            " letter-spacing: 1.2px; background: transparent; padding: 0; margin-top: 2px;"
+        )
+        _plan_fl.addWidget(_by_lbl)
+
         sidebar_layout.addWidget(_plan_frame)
         root.addWidget(sidebar)
 
