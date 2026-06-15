@@ -748,57 +748,45 @@ def _build_message(
 
 
 def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
-    """Sync SMTP test — runs in thread pool to avoid blocking the event loop."""
-    import ssl
+    """Sync SMTP test через стандартный smtplib — надёжно работает с любым провайдером."""
+    import ssl as _ssl
     try:
-        ctx = ssl.create_default_context()
+        ctx = _ssl.create_default_context()
         if account.use_ssl:
-            s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=15)
+            s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=20)
         else:
-            s = smtplib.SMTP(account.host, account.port, timeout=15)
+            s = smtplib.SMTP(account.host, account.port, timeout=20)
+            s.ehlo()
             if account.use_tls:
                 s.starttls(context=ctx)
+                s.ehlo()  # повторный EHLO после STARTTLS — обязателен по RFC
         s.login(account.email, account.password)
         s.quit()
-        return True, f"OK — {account.host}:{account.port}"
+        return True, f"OK — {account.host}:{account.port} авторизация успешна"
+    except smtplib.SMTPAuthenticationError as e:
+        raw = e.smtp_error
+        detail = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+        return False, f"Неверный логин или пароль. {detail[:120]}"
+    except smtplib.SMTPConnectError:
+        return False, f"Не удалось подключиться к {account.host}:{account.port}. Проверьте хост и порт."
+    except smtplib.SMTPServerDisconnected:
+        return False, "Сервер разорвал соединение. Возможно, неверный протокол (SSL/TLS)."
+    except smtplib.SMTPException as e:
+        return False, f"Ошибка SMTP: {e}"
+    except OSError as e:
+        return False, f"Сетевая ошибка: {e}"
     except Exception as e:
-        return False, f"ОШИБКА: {e}"
+        return False, f"Ошибка [{type(e).__name__}]: {e}"
 
 
 async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
     """
     Проверяет SMTP-подключение.
-    aiosmtplib >= 3.x: используем start_tls=True в конструкторе (вместо ручного starttls()).
-    Если aiosmtplib недоступен — синхронный fallback через smtplib.
+    Всегда использует надёжный smtplib через executor — избегаем несовместимости aiosmtplib версий.
+    Все ошибки выводятся понятным пользователю языком.
     """
-    if not _HAS_AIOSMTPLIB:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _test_smtp_sync, account)
-    try:
-        if account.use_ssl:
-            # Port 465: TLS с первого байта
-            smtp = aiosmtplib.SMTP(
-                hostname=account.host, port=account.port,
-                use_tls=True, timeout=20,
-            )
-        elif account.use_tls:
-            # Port 587: STARTTLS — передаём start_tls=True, connect() делает EHLO + STARTTLS сам
-            smtp = aiosmtplib.SMTP(
-                hostname=account.host, port=account.port,
-                start_tls=True, timeout=20,
-            )
-        else:
-            # Plain SMTP (редко)
-            smtp = aiosmtplib.SMTP(
-                hostname=account.host, port=account.port,
-                timeout=20,
-            )
-        await smtp.connect()
-        await smtp.login(account.email, account.password)
-        await smtp.quit()
-        return True, f"OK — SMTP {account.host}:{account.port} авторизация успешна"
-    except Exception as e:
-        return False, f"ОШИБКА [{type(e).__name__}]: {e}"
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _test_smtp_sync, account)
 
 
 class SendingEngine:
