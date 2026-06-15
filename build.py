@@ -145,7 +145,6 @@ def main():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--clean",
-        "--optimize=2",
         "--noconfirm",
         "--distpath", str(DIST),
         "--workpath", str(BUILD),
