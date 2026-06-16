@@ -88,8 +88,6 @@ def _get_ssl_verify() -> "bool | str":
             "Connections to license server are VULNERABLE to MITM attacks! "
             "Set LICENSE_SSL_VERIFY=1 or path to CA bundle."
         )
-            "Self-signed cert — set LICENSE_SSL_VERIFY=1 or CA bundle path for full MITM protection."
-        )
         return False
     return _ssl_env  # treated as CA bundle path
 
