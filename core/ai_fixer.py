@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import os
 import re as _re_module
+import urllib.error
+import urllib.request
 from typing import Optional
 
 

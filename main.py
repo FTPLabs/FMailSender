@@ -4,6 +4,21 @@ import os
 import threading
 import time
 
+
+  def _check_mode():
+      """Режим быстрой проверки: импортирует все модули и выходит 0 если OK."""
+      try:
+          from core._version import APP_NAME, APP_VERSION
+          from core.license import generate_hwid
+          from core.sender import SendingEngine
+          from core.spam_checker import SpamChecker
+          from core.ai_fixer import AiSpamFixer
+          print(f"FMailSender v{APP_VERSION} — startup check OK")
+          sys.exit(0)
+      except Exception as e:
+          print(f"FMailSender startup check FAILED: {e}", file=sys.stderr)
+          sys.exit(1)
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core._version import APP_NAME, APP_VERSION
@@ -22,6 +37,12 @@ def _load_icon(target):
 
 
 def main():
+    if "--check" in sys.argv:
+        _check_mode()
+    if "--version" in sys.argv:
+        from core._version import APP_VERSION
+        print(f"FMailSender v{APP_VERSION}")
+        sys.exit(0)
     # Прогрев HWID кэша — запускаем в фоне и ждём завершения до check_license
     from core.license import security_check, generate_hwid
     hwid_ready = threading.Event()

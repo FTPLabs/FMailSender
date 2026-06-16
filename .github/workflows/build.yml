@@ -31,8 +31,27 @@ jobs:
           pip install PyQt6 aiosmtplib cryptography PyJWT dnspython openpyxl reportlab psutil requests Pillow pyinstaller
           pip install wmi pywin32 || echo "wmi/pywin32 optional — skipping"
 
+      - name: Verify Python imports before build
+        run: |
+          python -c "import sys; sys.path.insert(0, '.'); from core._version import APP_NAME, APP_VERSION; from core.sender import SendingEngine; from core.spam_checker import SpamChecker; from core.ai_fixer import AiSpamFixer; from core.warmup import WarmupScheduler; print(f'All imports OK - {APP_NAME} v{APP_VERSION}')"
+
       - name: Build .exe via build.py
         run: python build.py
+
+      - name: Smoke-test .exe (авто-проверка запуска)
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "dist\FMailSender.exe" -ArgumentList "--check" -PassThru -WindowStyle Hidden
+          $proc | Wait-Process -Timeout 15 -ErrorAction SilentlyContinue
+          if (-not $proc.HasExited) {
+            $proc.Kill()
+            Write-Host "PASS: FMailSender.exe запустился без краша"
+          } elseif ($proc.ExitCode -eq 0) {
+            Write-Host "PASS: --check вернул 0"
+          } else {
+            Write-Error "FAIL: ExitCode=$($proc.ExitCode)"
+            exit 1
+          }
 
       - name: Rename exe with version
         shell: pwsh

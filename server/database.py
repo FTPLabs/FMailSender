@@ -6,10 +6,23 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import aiosqlite
+from contextlib import asynccontextmanager
 
 from config import DB_PATH, KEY_PREFIX, PLANS
 
 logger = logging.getLogger("database")
+
+
+@asynccontextmanager
+async def _db():
+    """Контекст менеджер: WAL + busy_timeout=5000 для безопасного concurrent доступа."""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA busy_timeout=5000")
+        await conn.execute("PRAGMA synchronous=NORMAL")
+        yield conn
+
 
 CREATE_SQL = """
 CREATE TABLE IF NOT EXISTS licenses (
@@ -92,8 +105,9 @@ def _generate_key() -> str:
 
 
 async def init_db() -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA busy_timeout=5000")
         await db.execute("PRAGMA synchronous=NORMAL")
         await db.executescript(CREATE_SQL)
         for plan_id, plan in PLANS.items():
@@ -107,7 +121,7 @@ async def init_db() -> None:
 
 async def upsert_user(telegram_id: int, username: str, first_name: str) -> None:
     now = _now()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         await db.execute(
             """INSERT INTO users (telegram_id, username, first_name, registered_at, last_seen)
                VALUES (?, ?, ?, ?, ?)
@@ -121,7 +135,7 @@ async def upsert_user(telegram_id: int, username: str, first_name: str) -> None:
 
 
 async def set_user_hwid(telegram_id: int, hwid: str) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         await db.execute(
             "UPDATE users SET hwid=?, last_seen=? WHERE telegram_id=?",
             (hwid.upper().strip(), _now(), telegram_id),
@@ -130,7 +144,7 @@ async def set_user_hwid(telegram_id: int, hwid: str) -> None:
 
 
 async def get_user_hwid(telegram_id: int) -> str:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         async with db.execute(
             "SELECT hwid FROM users WHERE telegram_id=?", (telegram_id,)
         ) as cur:
@@ -146,7 +160,7 @@ async def save_payment(
     amount: float,
     currency: str = "USDT",
 ) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         # Check for existing — INSERT OR IGNORE returns lastrowid=0 on conflict
         async with db.execute(
             "SELECT id FROM payments WHERE invoice_id = ?", (invoice_id,)
@@ -165,7 +179,7 @@ async def save_payment(
 
 
 async def get_payment(invoice_id: str) -> Optional[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM payments WHERE invoice_id=?", (invoice_id,)
@@ -184,7 +198,7 @@ async def get_payment_license(invoice_id: str) -> Optional[str]:
 
 async def get_pending_payments(limit: int = 50) -> list:
     """FIX ERR-2: Returns all payments with status='pending' for background poller."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM payments WHERE status='pending' ORDER BY created_at DESC LIMIT ?",
@@ -195,7 +209,7 @@ async def get_pending_payments(limit: int = 50) -> list:
 
 
 async def mark_payment_paid(invoice_id: str, license_key: str) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         await db.execute(
             "UPDATE payments SET status='paid', license_key=?, paid_at=? WHERE invoice_id=?",
             (license_key, _now(), invoice_id),
@@ -215,7 +229,7 @@ async def create_license_for_payment(
     Returns existing license_key if payment was already processed (idempotent).
     """
     # First check if already processed (idempotent guard)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT license_key FROM payments WHERE invoice_id=? AND status='paid'",
@@ -293,7 +307,7 @@ async def create_license(
     key = _generate_key()
     now = _now()
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         for _attempt in range(10):
             try:
                 await db.execute(
@@ -327,7 +341,7 @@ async def create_license(
 
 
 async def get_license(key: str) -> Optional[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM licenses WHERE key=?", (key.upper(),)) as cur:
             row = await cur.fetchone()
@@ -341,7 +355,7 @@ async def bind_hwid_to_license(key: str, hwid: str) -> bool:
     existing_hwid = lic.get("hwid", "")
     if existing_hwid and existing_hwid.upper() != hwid.upper():
         return False
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         await db.execute(
             "UPDATE licenses SET hwid=?, activated_at=? WHERE key=?",
             (hwid.upper(), _now(), key.upper()),
@@ -351,7 +365,7 @@ async def bind_hwid_to_license(key: str, hwid: str) -> bool:
 
 
 async def revoke_license(key: str) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         cur = await db.execute(
             "UPDATE licenses SET is_active=0 WHERE key=?", (key.upper(),)
         )
@@ -364,7 +378,7 @@ async def delete_all_licenses() -> int:
     Deletes ALL licenses and payments inside a single transaction.
     WARNING: irreversible — admin confirmation is required before calling.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         await db.execute("PRAGMA journal_mode=WAL")
         try:
             cur = await db.execute("SELECT COUNT(*) FROM licenses")
@@ -380,7 +394,7 @@ async def delete_all_licenses() -> int:
 
 
 async def get_all_licenses(limit: int = 50, offset: int = 0) -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM licenses ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -395,7 +409,7 @@ async def get_distinct_user_ids() -> list:
     """Returns list of ALL registered user telegram_ids (from users table).
     FIX ERR-1: was querying licenses only — excluded users who haven't bought yet.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         async with db.execute(
             "SELECT telegram_id FROM users WHERE telegram_id > 0"
         ) as cur:
@@ -405,7 +419,7 @@ async def get_distinct_user_ids() -> list:
 
 
 async def get_license_by_telegram(telegram_id: int) -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM licenses WHERE telegram_id=? ORDER BY created_at DESC",
@@ -416,7 +430,7 @@ async def get_license_by_telegram(telegram_id: int) -> list:
 
 
 async def get_stats() -> dict:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         async def _count(sql: str) -> int:
             async with db.execute(sql) as cur:
                 row = await cur.fetchone()
@@ -438,7 +452,7 @@ async def get_stats() -> dict:
 
 
 async def search_license(query: str) -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         q = f"%{query.upper()}%"
         async with db.execute(
@@ -452,14 +466,14 @@ async def search_license(query: str) -> list:
 
 
 async def get_setting(key: str) -> Optional[str]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         async with db.execute("SELECT value FROM settings WHERE key=?", (key,)) as cur:
             row = await cur.fetchone()
             return row[0] if row else None
 
 
 async def set_setting(key: str, value: str) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         await db.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, value),
@@ -481,7 +495,7 @@ async def get_plan_price(plan_id: str) -> float:
 
 async def create_ticket(user_id: int, username: str, first_name: str) -> int:
     now = _now()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         cur = await db.execute(
             "INSERT INTO tickets (user_id, username, first_name, status, created_at, updated_at) VALUES (?,?,?,?,?,?)",
             (user_id, username or "", first_name or "", "open", now, now),
@@ -499,7 +513,7 @@ async def add_ticket_message(
     file_type: str = "",
 ) -> None:
     now = _now()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         await db.execute(
             "INSERT INTO ticket_messages (ticket_id, sender_id, role, text, file_id, file_type, created_at) VALUES (?,?,?,?,?,?,?)",
             (ticket_id, sender_id, role, text or "", file_id or "", file_type or "", now),
@@ -511,7 +525,7 @@ async def add_ticket_message(
 
 
 async def get_ticket(ticket_id: int) -> Optional[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)) as cur:
             row = await cur.fetchone()
@@ -519,7 +533,7 @@ async def get_ticket(ticket_id: int) -> Optional[dict]:
 
 
 async def get_open_tickets(limit: int = 20) -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM tickets WHERE status='open' ORDER BY updated_at DESC LIMIT ?",
@@ -530,7 +544,7 @@ async def get_open_tickets(limit: int = 20) -> list:
 
 
 async def close_ticket(ticket_id: int) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         await db.execute(
             "UPDATE tickets SET status='closed', updated_at=? WHERE id=?",
             (_now(), ticket_id),
@@ -539,7 +553,7 @@ async def close_ticket(ticket_id: int) -> None:
 
 
 async def get_ticket_messages(ticket_id: int) -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY created_at ASC",

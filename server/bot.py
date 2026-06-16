@@ -45,15 +45,16 @@ class JsonFileStorage(BaseStorage):
                 pass
         return {}
 
-    def _dump_sync(self) -> None:
-        """Sync write — called only via asyncio.to_thread."""
+    def _dump_sync(self, snapshot: dict) -> None:
+        """Sync write — принимает snapshot, не трогает self._data из потока (thread-safe)."""
         tmp = self._path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self._path)
 
     async def _dump(self) -> None:
-        """Async dump — offloads file I/O to thread pool, never blocks event loop."""
-        await asyncio.to_thread(self._dump_sync)
+        """Async dump — snapshot в event loop, запись в thread pool (FIX: устраняет data race)."""
+        snapshot = dict(self._data)  # snapshot до to_thread — thread-safe
+        await asyncio.to_thread(self._dump_sync, snapshot)
 
     def _key(self, key: StorageKey) -> str:
         return f"{key.chat_id}:{key.user_id}"
@@ -111,35 +112,35 @@ async def fetch_latest_release() -> dict:
     import time
     if _release_cache_lock is None:
         _release_cache_lock = asyncio.Lock()
-    async with _release_cache_lock:
+    async with _release_cache_lock:  # FIX: весь блок внутри lock — no race condition
         if _release_cache and (time.time() - _release_cache_ts) < _RELEASE_CACHE_TTL:
             return _release_cache
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    assets = data.get("assets", [])
-                    exe_asset = next(
-                        (a for a in assets if a.get("name", "").endswith(".exe")), None
-                    )
-                    _release_cache = {
-                        "tag": data.get("tag_name", ""),
-                        "html_url": data.get("html_url", ""),
-                        "download_url": (
-                            exe_asset["browser_download_url"]
-                            if exe_asset
-                            else data.get("html_url", DOWNLOAD_URL)
-                        ),
-                        "vt_url": _extract_vt_url(data.get("body", "")),
-                        "body": data.get("body", ""),
-                    }
-                    _release_cache_ts = time.time()
-                    return _release_cache
-    except Exception as e:
-        logger.warning("GitHub release fetch failed: %s", e)
-    return {"tag": "", "html_url": DOWNLOAD_URL, "download_url": DOWNLOAD_URL, "vt_url": "", "body": ""}
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        assets = data.get("assets", [])
+                        exe_asset = next(
+                            (a for a in assets if a.get("name", "").endswith(".exe")), None
+                        )
+                        _release_cache = {
+                            "tag": data.get("tag_name", ""),
+                            "html_url": data.get("html_url", ""),
+                            "download_url": (
+                                exe_asset["browser_download_url"]
+                                if exe_asset
+                                else data.get("html_url", DOWNLOAD_URL)
+                            ),
+                            "vt_url": _extract_vt_url(data.get("body", "")),
+                            "body": data.get("body", ""),
+                        }
+                        _release_cache_ts = time.time()
+                        return _release_cache
+        except Exception as e:
+            logger.warning("GitHub release fetch failed: %s", e)
+        return {"tag": "", "html_url": DOWNLOAD_URL, "download_url": DOWNLOAD_URL, "vt_url": "", "body": ""}
 
 
 def _extract_vt_url(release_body: str) -> str:

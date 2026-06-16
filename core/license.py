@@ -79,6 +79,10 @@ def _get_ssl_verify() -> "bool | str":
     if _ssl_env == "1":
         return True
     if _ssl_env == "0":
+        logger.warning(
+            "SSL verify DISABLED (LICENSE_SSL_VERIFY=0). "
+            "Self-signed cert — set LICENSE_SSL_VERIFY=1 or CA bundle path for full MITM protection."
+        )
         return False
     return _ssl_env  # treated as CA bundle path
 
