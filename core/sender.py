@@ -184,7 +184,7 @@ def get_smtp_config_for_domain(domain: str) -> Optional[dict]:
     if d in _SMTP_CONFIGS:
         return _SMTP_CONFIGS[d]
     for prefix, cfg in _SMTP_DOMAIN_PATTERNS:
-        if d.startswith(prefix) or ("." + prefix.rstrip(".")) in d:
+        if d == prefix.rstrip(".") or d.endswith("." + prefix.rstrip(".")):
             return cfg
     return None
 
