@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install PyQt6 aiosmtplib cryptography PyJWT dnspython openpyxl reportlab psutil requests Pillow pyinstaller
+          pip install PyQt6 PyQt6-WebEngine aiosmtplib cryptography PyJWT dnspython openpyxl reportlab psutil requests Pillow pyinstaller
           pip install wmi pywin32 || echo "wmi/pywin32 optional — skipping"
 
       - name: Verify Python imports before build
@@ -68,20 +68,23 @@ jobs:
           name: "FMail Sender ${{ github.event.inputs.tag_name || github.ref_name }}"
           files: dist/FMailSender.exe
           body: |
-            ## FMail Sender ${{ github.event.inputs.tag_name || github.ref_name }}
+              ## FMail Sender ${{ github.event.inputs.tag_name || github.ref_name }} — Новый GUI
 
-            ### Исправления в этой версии
-            - Исправлен запуск: `gui.screens.screen_compose` теперь корректно включается в сборку
-            - Сборка переведена на `build.py` (spec-файл) — надёжная упаковка всех модулей
-            - Исправлена SSL-верификация в `core/license.py` (`_ssl_v` NameError)
-            - Исправлен синтаксис `elif` в `core/ai_fixer.py`
-            - Исправлен `CancelledError` в `core/sender.py`
-            - Исправлен `re.DOTALL` в `core/bounce.py`
-            - HTML injection защита в `server/bot.py`
+              ### ✨ Новый Web3/dApp Glassmorphism дизайн
+              - Deep space фон (#050510) + violet neon (#8B5CF6) + cyan accent (#06B6D4)
+              - Анимированный фон с частицами
+              - 7 экранов: Дашборд, Аккаунты, Письмо, Получатели, Рассылка, Аналитика, Ответы
+              - KPI-карточки с анимацией, Bézier-графики активности
+              - Rich-text редактор с live preview и A/B тестами
 
-            ### Установка
-            Скачайте **FMailSender.exe** и запустите — установка не требуется.
-          fail_on_unmatched_files: false
+              ### 🔧 Исправления сервера
+              - Исправлен SSL в сервере лицензий (HTTPS теперь работает)
+              - Исправлен ModuleNotFoundError при старте бота
+              - Исправлены race conditions, busy_timeout, ai_fixer imports
+
+              ### Установка
+              Скачайте **FMailSender.exe** и запустите — установка не требуется.
+            fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
