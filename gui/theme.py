@@ -1,54 +1,56 @@
 """
-FMail Sender — Web3 / dApp UI + Glassmorphism Design System v3.0
-Primary:  violet   #7C3AED  →  #8B5CF6
-Accent:   cyan     #06B6D4  →  #0891B2
-BG:       deep space  #050510
-Glass panels: rgba(255,255,255,0.04) with backdrop blur simulation
-Neon glow effects via box-shadow on key elements
+FMail Sender Pro — CyberPro Design System v3.3
+Style: киберпанк #040410 BG, violet/cyan neon, 3 animated orbs, aurora sweep
+Primary:  violet   #7C3AED -> #8B5CF6
+Accent:   cyan     #06B6D4
+BG:       deep black  #040410
 """
 from PyQt6.QtGui import QFontDatabase
 from pathlib import Path
 
 
 class Colors:
-    # ── Deep space backgrounds ──────────────────────────
-    BG_BASE       = "#050510"
-    BG_SURFACE1   = "#0A0A1A"
-    BG_SURFACE2   = "#0F0F22"
-    BG_SURFACE3   = "#14142E"
-    BG_SURFACE4   = "#1A1A3A"
-    BG_GLASS      = "rgba(255, 255, 255, 0.04)"
-    BG_GLASS2     = "rgba(255, 255, 255, 0.07)"
+    # Deep black backgrounds (CyberPro)
+    BG_BASE       = "#040410"
+    BG_SURFACE1   = "#08080F"
+    BG_SURFACE2   = "#0C0C1A"
+    BG_SURFACE3   = "#101020"
+    BG_SURFACE4   = "#14142A"
+    BG_GLASS      = "rgba(255, 255, 255, 0.03)"
+    BG_GLASS2     = "rgba(255, 255, 255, 0.06)"
 
-    # ── Primary – violet neon ──────────────────────────
+    # Primary violet neon
     ACCENT        = "#8B5CF6"
     ACCENT_HOVER  = "#7C3AED"
     ACCENT_PRESS  = "#6D28D9"
     ACCENT_GLOW   = "rgba(139, 92, 246, 0.35)"
+    ACCENT_DIM    = "rgba(139, 92, 246, 0.12)"
 
-    # ── Secondary – cyan neon ─────────────────────────
+    # Secondary cyan neon
     CYAN          = "#06B6D4"
     CYAN_HOVER    = "#0891B2"
-    CYAN_GLOW     = "rgba(6, 182, 212, 0.30)"
+    CYAN_GLOW     = "rgba(6, 182, 212, 0.25)"
+    CYAN_DIM      = "rgba(6, 182, 212, 0.10)"
 
-    # ── Gradient ──────────────────────────────────────
+    # Gradient
     GRAD_START    = "#7C3AED"
     GRAD_END      = "#06B6D4"
     GRAD_MID      = "#5B21B6"
 
-    # ── Text ──────────────────────────────────────────
+    # Text
     TEXT_PRIMARY   = "#E8E8FF"
-    TEXT_SECONDARY = "#8888BB"
-    TEXT_MUTED     = "#5555AA"
-    TEXT_DISABLED  = "#333366"
+    TEXT_SECONDARY = "#6666AA"
+    TEXT_MUTED     = "#33335A"
+    TEXT_DISABLED  = "#22224A"
 
-    # ── Borders – neon glass ──────────────────────────
-    BORDER         = "rgba(139, 92, 246, 0.18)"
-    BORDER_FOCUS   = "rgba(139, 92, 246, 0.70)"
-    BORDER_HOVER   = "rgba(139, 92, 246, 0.35)"
-    BORDER_CYAN    = "rgba(6, 182, 212, 0.25)"
+    # Borders violet glass
+    BORDER         = "rgba(139, 92, 246, 0.12)"
+    BORDER_FOCUS   = "rgba(139, 92, 246, 0.65)"
+    BORDER_HOVER   = "rgba(139, 92, 246, 0.30)"
+    BORDER_CYAN    = "rgba(6, 182, 212, 0.20)"
+    BORDER_WHITE   = "rgba(255, 255, 255, 0.06)"
 
-    # ── Semantic ──────────────────────────────────────
+    # Semantic
     SUCCESS        = "#10B981"
     WARNING        = "#F59E0B"
     ERROR          = "#EF4444"
@@ -57,15 +59,20 @@ class Colors:
     WARNING_BG     = "rgba(245, 158, 11,  0.10)"
     ERROR_BG       = "rgba(239, 68,  68,  0.10)"
 
-    SCROLLBAR_HANDLE = "rgba(139, 92, 246, 0.25)"
+    SCROLLBAR_HANDLE = "rgba(139, 92, 246, 0.20)"
+
+    # Orb colors (for AnimatedBackground)
+    ORB1_COLOR     = (139, 92, 246)
+    ORB2_COLOR     = (6, 182, 212)
+    ORB3_COLOR     = (91, 33, 182)
 
 
 class Radii:
     INPUT  = "8px"
-    CARD   = "14px"
-    PANEL  = "20px"
-    MODAL  = "24px"
-    BUTTON = "10px"
+    CARD   = "12px"
+    PANEL  = "16px"
+    MODAL  = "20px"
+    BUTTON = "8px"
     SMALL  = "6px"
     PILL   = "50px"
 
@@ -76,573 +83,157 @@ class Spacing:
 
 class Typography:
     FONT_FAMILY    = "Inter"
+    FONT_HEADING   = "Inter"
     SIZE_XS = 11; SIZE_SM = 13; SIZE_MD = 15; SIZE_LG = 20; SIZE_XL = 28
-    WEIGHT_REGULAR = 400; WEIGHT_MEDIUM = 500; WEIGHT_BOLD = 700
+    WEIGHT_REGULAR = 400; WEIGHT_MEDIUM = 500; WEIGHT_SEMIBOLD = 600; WEIGHT_BOLD = 700
 
 
 def load_fonts() -> None:
     fonts_dir = Path(__file__).parent.parent / "assets" / "fonts"
     if not fonts_dir.exists():
         return
-    for f in fonts_dir.glob("*.ttf"):
-        QFontDatabase.addApplicationFont(str(f))
+    for ext in ("*.ttf", "*.otf"):
+        for fpath in fonts_dir.glob(ext):
+            QFontDatabase.addApplicationFont(str(fpath))
 
 
-def get_stylesheet() -> str:
+def _c(name: str) -> str:
+    """Helper — return Colors attribute by name string."""
+    return getattr(Colors, name)
+
+
+def global_stylesheet() -> str:
     c = Colors
     r = Radii
+    t = Typography
     return f"""
-/* ═══ Global ═══════════════════════════════════════════════════════════ */
-QMainWindow, QDialog, QWidget {{
+/* Base */
+QWidget {{
+    background-color: transparent;
+    color: {c.TEXT_PRIMARY};
+    font-family: {t.FONT_FAMILY};
+    font-size: {t.SIZE_SM}px;
+    outline: none;
+}}
+QMainWindow, QDialog {{
     background-color: {c.BG_BASE};
-    color: {c.TEXT_PRIMARY};
-    font-family: "Inter", "Segoe UI", "Arial", sans-serif;
-    font-size: {Typography.SIZE_SM}px;
 }}
-QStackedWidget {{ background-color: {c.BG_BASE}; }}
-
-  /* Transparent for widgets that must NOT paint over parent card backgrounds */
-  QLabel, QCheckBox, QRadioButton {{
-      background: transparent;
-  }}
-
-/* ═══ Sidebar — glass panel ═════════════════════════════════════════════ */
-#sidebar {{
-    background-color: {c.BG_SURFACE1};
-    border-right: 1px solid {c.BORDER};
-    min-width: 220px; max-width: 220px;
-}}
-#sidebar QPushButton {{
-    background: transparent;
-    color: {c.TEXT_SECONDARY};
-    border: none;
-    border-radius: {r.SMALL};
-    padding: 10px 14px;
-    text-align: left;
-    font-size: {Typography.SIZE_SM}px;
-    font-weight: {Typography.WEIGHT_MEDIUM};
-    min-height: 38px;
-}}
-#sidebar QPushButton:hover {{
-    background-color: {c.BG_GLASS2};
-    color: {c.TEXT_PRIMARY};
-    border: 1px solid {c.BORDER};
-}}
-#sidebar QPushButton[active="true"] {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 rgba(139,92,246,0.20), stop:1 rgba(6,182,212,0.08));
-    color: {c.ACCENT};
-    border-left: 2px solid {c.ACCENT};
-    border-radius: {r.SMALL};
-    padding-left: 12px;
-}}
-
-/* ═══ Header ════════════════════════════════════════════════════════════ */
-#header {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 {c.BG_SURFACE1}, stop:1 {c.BG_BASE});
-    border-bottom: 1px solid {c.BORDER};
-    min-height: 56px; max-height: 56px;
-    padding: 0 24px;
-}}
-
-/* ═══ Buttons ═══════════════════════════════════════════════════════════ */
-QPushButton {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 {c.GRAD_START}, stop:1 {c.GRAD_END});
-    color: {c.TEXT_PRIMARY};
-    border: none;
-    border-radius: {r.BUTTON};
-    padding: 8px 18px;
-    font-weight: {Typography.WEIGHT_MEDIUM};
-    font-size: {Typography.SIZE_SM}px;
-}}
-QPushButton:hover {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 {c.ACCENT}, stop:1 {c.CYAN});
-}}
-QPushButton:pressed {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 {c.ACCENT_PRESS}, stop:1 {c.CYAN_HOVER});
-}}
-QPushButton:disabled {{
-    background: {c.BG_SURFACE3};
-    color: {c.TEXT_DISABLED};
-    border: 1px solid {c.BORDER};
-}}
-QPushButton#btn_primary {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 {c.GRAD_START}, stop:1 {c.GRAD_END});
-    font-weight: {Typography.WEIGHT_BOLD};
-}}
-QPushButton#btn_secondary {{
-    background: {c.BG_SURFACE3};
-    padding: 6px 14px;
-    min-width: 0px;
-    color: {c.TEXT_SECONDARY};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.BUTTON};
-}}
-QPushButton#btn_icon {{
-    background: {c.BG_SURFACE3};
-    padding: 4px;
-    min-width: 0px;
-    min-height: 0px;
-    color: {c.TEXT_SECONDARY};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.SMALL};
-}}
-QPushButton#btn_secondary:hover {{
-    background: {c.BG_GLASS2};
-    color: {c.TEXT_PRIMARY};
-    border: 1px solid {c.BORDER_HOVER};
-}}
-QPushButton#btn_icon:hover {{
-    background: {c.BG_SURFACE4};
-    color: {c.TEXT_PRIMARY};
-    border: 1px solid {c.BORDER_HOVER};
-}}
-QPushButton#btn_fmt {{
-    background: {c.BG_SURFACE3};
-    padding: 5px 10px;
-    min-width: 30px;
-    min-height: 30px;
-    color: {c.TEXT_SECONDARY};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.SMALL};
-    font-size: 13px;
-}}
-QPushButton#btn_fmt:hover,
-QPushButton#btn_fmt_bold:hover,
-QPushButton#btn_fmt_italic:hover,
-QPushButton#btn_fmt_underline:hover,
-QPushButton#btn_fmt_color:hover {{
-    background: {c.BG_SURFACE4};
-    color: {c.TEXT_PRIMARY};
-    border: 1px solid {c.BORDER_HOVER};
-}}
-QPushButton#btn_fmt_bold {{
-    background: {c.BG_SURFACE3};
-    padding: 5px 10px;
-    min-width: 30px;
-    min-height: 30px;
-    color: {c.TEXT_SECONDARY};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.SMALL};
-    font-weight: 700;
-    font-size: 14px;
-}}
-QPushButton#btn_fmt_italic {{
-    background: {c.BG_SURFACE3};
-    padding: 5px 10px;
-    min-width: 30px;
-    min-height: 30px;
-    color: {c.TEXT_SECONDARY};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.SMALL};
-    font-style: italic;
-    font-size: 14px;
-}}
-QPushButton#btn_fmt_underline {{
-    background: {c.BG_SURFACE3};
-    padding: 5px 10px;
-    min-width: 30px;
-    min-height: 30px;
-    color: {c.TEXT_SECONDARY};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.SMALL};
-    text-decoration: underline;
-    font-size: 14px;
-}}
-QPushButton#btn_fmt_color {{
-    background: {c.BG_SURFACE3};
-    padding: 5px 10px;
-    min-width: 30px;
-    min-height: 30px;
-    color: {c.TEXT_SECONDARY};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.SMALL};
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-}}
-QPushButton#btn_danger {{
-    background: rgba(239, 68, 68, 0.12);
-    color: {c.ERROR};
-    border: 1px solid rgba(239, 68, 68, 0.28);
-}}
-QPushButton#btn_danger:hover {{
-    background: rgba(239, 68, 68, 0.22);
-}}
-
-/* ═══ Glass card panels ══════════════════════════════════════════════════ */
-QFrame#card {{
-    background: {c.BG_GLASS};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.CARD};
-}}
-QFrame#kpi_card {{
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(139,92,246,0.10), stop:1 rgba(6,182,212,0.04));
-    border: 1px solid {c.BORDER};
-    border-radius: {r.CARD};
-}}
-QFrame#panel {{
-    background: {c.BG_SURFACE1};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.PANEL};
-}}
-QFrame#sidebar {{
-    background-color: {c.BG_SURFACE1};
-    border-right: 1px solid {c.BORDER};
-}}
-
-/* ═══ Inputs ════════════════════════════════════════════════════════════ */
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
-    background: {c.BG_GLASS};
-    color: {c.TEXT_PRIMARY};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.INPUT};
-    padding: 7px 12px;
-    selection-background-color: rgba(139, 92, 246, 0.40);
-}}
-QTextEdit, QPlainTextEdit {{
-    background: {c.BG_SURFACE2};
-    color: {c.TEXT_PRIMARY};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.INPUT};
-    padding: 7px 12px;
-    selection-background-color: rgba(139, 92, 246, 0.40);
-}}
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
-    border: 1px solid {c.BORDER_FOCUS};
-    background: {c.BG_GLASS2};
-}}
-QTextEdit:focus, QPlainTextEdit:focus {{
-    border: 1px solid {c.BORDER_FOCUS};
-    background: {c.BG_SURFACE3};
-}}
-QLineEdit:disabled {{ color: {c.TEXT_DISABLED}; }}
-QComboBox::drop-down {{ border: none; width: 24px; background: transparent; }}
-  QComboBox::down-arrow {{ width: 10px; height: 10px; }}
-QComboBox QAbstractItemView {{
-    background: {c.BG_SURFACE2};
-    color: {c.TEXT_PRIMARY};
-    border: 1px solid {c.BORDER};
-    selection-background-color: rgba(139, 92, 246, 0.25);
-    outline: none;
-}}
-
-/* ═══ Labels ════════════════════════════════════════════════════════════ */
-QLabel#section_header {{
-    font-size: {Typography.SIZE_LG}px;
-    font-weight: {Typography.WEIGHT_BOLD};
-    color: {c.TEXT_PRIMARY};
-}}
-QLabel#label_muted  {{
-    color: {c.TEXT_MUTED};
-    font-size: {Typography.SIZE_XS}px;
-}}
-QLabel#label_subtitle {{
-    color: {c.TEXT_SECONDARY};
-    font-size: {Typography.SIZE_SM}px;
-    font-weight: {Typography.WEIGHT_MEDIUM};
-}}
-QLabel#label_kpi_title {{
-    color: {c.TEXT_MUTED};
-    font-size: {Typography.SIZE_XS}px;
-    font-weight: {Typography.WEIGHT_MEDIUM};
-    letter-spacing: 1px;
-}}
-QLabel#label_kpi_value {{
-    font-size: 26px;
-    font-weight: {Typography.WEIGHT_BOLD};
-    color: {c.TEXT_PRIMARY};
-}}
-QLabel#demo_badge {{
-    background: rgba(6,182,212,0.12);
-    color: {c.CYAN};
-    border: 1px solid {c.BORDER_CYAN};
-    border-radius: {r.PILL};
-    padding: 2px 10px;
-    font-size: {Typography.SIZE_XS}px;
-    font-weight: {Typography.WEIGHT_BOLD};
-    letter-spacing: 1px;
-}}
-QFrame#plan_info_frame {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 rgba(124,58,237,0.18), stop:1 rgba(6,182,212,0.08));
-    border: 1px solid rgba(139,92,246,0.35);
-    border-radius: 12px;
-    margin: 0px 2px 2px 2px;
-}}
-QLabel#plan_badge {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 rgba(124,58,237,0.35), stop:1 rgba(6,182,212,0.22));
-    color: {c.ACCENT};
-    border: 1px solid rgba(139,92,246,0.55);
-    border-radius: {r.PILL};
-    padding: 5px 14px;
-    font-size: {Typography.SIZE_SM}px;
-    font-weight: {Typography.WEIGHT_BOLD};
-    letter-spacing: 0.5px;
-}}
-QLabel#label_title {{
-    font-size: {Typography.SIZE_XL}px;
-    font-weight: {Typography.WEIGHT_BOLD};
-    color: {c.TEXT_PRIMARY};
-}}
-
-/* ═══ Progress bar — neon gradient ══════════════════════════════════════ */
-QProgressBar {{
-    background: {c.BG_SURFACE3};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.SMALL};
-    height: 6px;
-    text-align: center;
-    color: transparent;
-}}
-QProgressBar::chunk {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 {c.GRAD_START}, stop:0.5 #9333EA, stop:1 {c.GRAD_END});
-    border-radius: {r.SMALL};
-}}
-
-/* ═══ Tables ════════════════════════════════════════════════════════════ */
-QTableWidget {{
-    background: {c.BG_SURFACE1};
-    color: {c.TEXT_PRIMARY};
-    gridline-color: {c.BORDER};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.CARD};
-    alternate-background-color: {c.BG_GLASS};
-    selection-background-color: rgba(139, 92, 246, 0.18);
-    outline: none;
-}}
-QTableWidget::item {{
-    padding: 4px 10px;
-    border: none;
-}}
-QTableWidget::item:selected {{ color: {c.TEXT_PRIMARY}; }}
-QHeaderView::section {{
-    background: {c.BG_GLASS};
-    color: {c.TEXT_MUTED};
-    border: none;
-    border-bottom: 1px solid {c.BORDER};
-    padding: 8px 10px;
-    font-size: {Typography.SIZE_XS}px;
-    font-weight: {Typography.WEIGHT_BOLD};
-    letter-spacing: 0.8px;
-    text-transform: uppercase;
-}}
-
-/* ═══ Tabs ═══════════════════════════════════════════════════════════════ */
-QTabWidget::pane {{
-    background: {c.BG_SURFACE2};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.CARD};
-}}
-QTabBar::tab {{
-    background: transparent;
-    color: {c.TEXT_SECONDARY};
-    border: none;
-    border-bottom: 2px solid transparent;
-    padding: 8px 20px;
-    font-weight: {Typography.WEIGHT_MEDIUM};
-}}
-QTabBar::tab:selected {{
-    color: {c.ACCENT};
-    border-bottom: 2px solid {c.ACCENT};
-}}
-QTabBar::tab:hover {{ color: {c.TEXT_PRIMARY}; }}
-
-/* ═══ Scrollbars ════════════════════════════════════════════════════════ */
+/* Scrollbars */
 QScrollBar:vertical {{
-    background: transparent; width: 6px; margin: 0;
+    background: transparent; width: 4px; margin: 0;
 }}
 QScrollBar::handle:vertical {{
-    background: {c.SCROLLBAR_HANDLE};
-    border-radius: 3px; min-height: 30px;
+    background: {c.SCROLLBAR_HANDLE}; border-radius: 2px; min-height: 30px;
 }}
-QScrollBar::handle:vertical:hover {{
-    background: {c.BORDER_HOVER};
-}}
+QScrollBar::handle:vertical:hover {{ background: {c.ACCENT}; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-QScrollBar:horizontal {{
-    background: transparent; height: 6px; margin: 0;
-}}
-QScrollBar::handle:horizontal {{
-    background: {c.SCROLLBAR_HANDLE};
-    border-radius: 3px; min-width: 30px;
-}}
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
-
-/* ═══ QTableWidget corner button (black square fix) ══════════════════ */
-  QTableWidget QAbstractButton {{
-      background-color: {c.BG_SURFACE1};
-      border: 1px solid {c.BORDER};
-  }}
-  QTableWidget QAbstractButton:pressed {{
-      background-color: {c.BG_SURFACE2};
-  }}
-  QTableWidget QAbstractButton::indicator {{
-      width: 14px; height: 14px;
-      border: 1px solid {c.BORDER};
-      border-radius: {r.SMALL};
-      background: {c.BG_GLASS};
-  }}
-  QTableWidget QAbstractButton::indicator:checked {{
-      background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
-          stop:0 {c.GRAD_START}, stop:1 {c.GRAD_END});
-      border-color: {c.ACCENT};
-  }}
-
-  /* ═══ Checkboxes ════════════════════════════════════════════════════════ */
-QCheckBox {{
-    spacing: 8px;
-    color: {c.TEXT_SECONDARY};
-    font-size: {Typography.SIZE_SM}px;
-}}
-QCheckBox::indicator {{
-    width: 16px; height: 16px;
-    border: 1px solid {c.BORDER};
-    border-radius: {r.SMALL};
-    background: {c.BG_GLASS};
-}}
-QCheckBox::indicator:checked {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 {c.GRAD_START}, stop:1 {c.GRAD_END});
-    border-color: {c.ACCENT};
-}}
-QCheckBox::indicator:hover {{ border-color: {c.ACCENT}; }}
-
-/* ═══ Slider ════════════════════════════════════════════════════════════ */
-QSlider::groove:horizontal {{
-    height: 4px;
-    background: {c.BG_SURFACE4};
-    border-radius: 2px;
-}}
-QSlider::handle:horizontal {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 {c.ACCENT}, stop:1 {c.CYAN});
-    border: 2px solid {c.BG_BASE};
-    width: 14px; height: 14px;
-    margin: -5px 0;
-    border-radius: 7px;
-}}
-QSlider::sub-page:horizontal {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 {c.GRAD_START}, stop:1 {c.GRAD_END});
-    border-radius: 2px;
-}}
-
-/* ═══ GroupBox ══════════════════════════════════════════════════════════ */
-QGroupBox {{
-    color: {c.TEXT_MUTED};
-    border: 1px solid {c.BORDER};
-    border-radius: {r.CARD};
-    margin-top: 8px;
-    padding-top: 8px;
-    font-size: {Typography.SIZE_XS}px;
-    font-weight: {Typography.WEIGHT_BOLD};
-    letter-spacing: 0.5px;
-}}
-QGroupBox::title {{
-    subcontrol-origin: margin;
-    left: 12px; top: -1px;
-    padding: 0 6px;
-    background-color: {c.BG_BASE};
-    color: {c.TEXT_MUTED};
-}}
-
-/* ═══ ListWidget ════════════════════════════════════════════════════════ */
-QListWidget {{
-    background: {c.BG_SURFACE1};
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
+QScrollBar:horizontal {{ background: transparent; height: 4px; }}
+QScrollBar::handle:horizontal {{ background: {c.SCROLLBAR_HANDLE}; border-radius: 2px; }}
+/* Buttons */
+QPushButton {{
+    background-color: {c.BG_GLASS};
     color: {c.TEXT_PRIMARY};
     border: 1px solid {c.BORDER};
-    border-radius: {r.CARD};
-    alternate-background-color: {c.BG_GLASS};
-    outline: none;
+    border-radius: {r.BUTTON};
+    padding: 7px 16px;
+    font-size: {t.SIZE_SM}px;
+    font-weight: {t.WEIGHT_MEDIUM};
 }}
-QListWidget::item:selected {{
-    background: rgba(139, 92, 246, 0.20);
-    color: {c.TEXT_PRIMARY};
+QPushButton:hover {{
+    background-color: {c.ACCENT_DIM};
+    border-color: {c.BORDER_HOVER};
+    color: white;
 }}
-QListWidget::item:hover {{
-    background: {c.BG_GLASS};
+QPushButton:pressed {{
+    background-color: rgba(109, 40, 217, 0.25);
+    border-color: {c.ACCENT_PRESS};
 }}
-
-/* ═══ DateTimeEdit ══════════════════════════════════════════════════════ */
-QDateTimeEdit {{
-    background: {c.BG_GLASS};
+QPushButton:disabled {{ color: {c.TEXT_MUTED}; border-color: {c.BORDER}; background: transparent; }}
+QPushButton[accent="true"] {{
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {c.ACCENT_HOVER}, stop:1 {c.CYAN});
+    border: none; color: white; font-weight: {t.WEIGHT_SEMIBOLD};
+}}
+QPushButton[accent="true"]:hover {{
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {c.ACCENT}, stop:1 {c.CYAN_HOVER});
+}}
+/* Inputs */
+QLineEdit, QTextEdit, QPlainTextEdit {{
+    background-color: {c.BG_GLASS};
     color: {c.TEXT_PRIMARY};
     border: 1px solid {c.BORDER};
     border-radius: {r.INPUT};
     padding: 6px 10px;
+    selection-background-color: {c.ACCENT_DIM};
 }}
-QDateTimeEdit:focus {{ border-color: {c.BORDER_FOCUS}; }}
-QDateTimeEdit::up-button, QDateTimeEdit::down-button {{
-    width: 0px; height: 0px; border: none; background: transparent;
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{
+    border-color: {c.BORDER_FOCUS}; background-color: {c.BG_GLASS2};
 }}
-
-/* ═══ Splitter ══════════════════════════════════════════════════════════ */
-QSplitter::handle {{ background: {c.BORDER}; }}
-QSplitter::handle:horizontal {{ width: 1px; }}
-QSplitter::handle:vertical {{ height: 1px; }}
-
-/* ═══ Tooltip ═══════════════════════════════════════════════════════════ */
+/* Combobox */
+QComboBox {{
+    background-color: {c.BG_GLASS}; color: {c.TEXT_PRIMARY};
+    border: 1px solid {c.BORDER}; border-radius: {r.INPUT}; padding: 5px 10px;
+}}
+QComboBox:focus, QComboBox:on {{ border-color: {c.BORDER_FOCUS}; }}
+QComboBox::drop-down {{ border: none; width: 24px; }}
+QComboBox::down-arrow {{ image: none; width: 0; }}
+QComboBox QAbstractItemView {{
+    background-color: {c.BG_SURFACE2}; color: {c.TEXT_PRIMARY};
+    border: 1px solid {c.BORDER}; border-radius: {r.INPUT};
+    selection-background-color: {c.ACCENT_DIM}; outline: none;
+}}
+/* SpinBox */
+QSpinBox, QDoubleSpinBox {{
+    background-color: {c.BG_GLASS}; color: {c.TEXT_PRIMARY};
+    border: 1px solid {c.BORDER}; border-radius: {r.INPUT}; padding: 5px 8px;
+}}
+QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {c.BORDER_FOCUS}; }}
+/* Tables */
+QTableWidget, QTableView {{
+    background-color: transparent; color: {c.TEXT_PRIMARY};
+    gridline-color: {c.BORDER}; border: 1px solid {c.BORDER};
+    border-radius: {r.CARD}; outline: none;
+}}
+QHeaderView::section {{
+    background-color: {c.BG_SURFACE1}; color: {c.TEXT_SECONDARY};
+    border: none; border-bottom: 1px solid {c.BORDER};
+    padding: 6px 10px; font-size: 11px;
+    font-weight: {t.WEIGHT_SEMIBOLD}; text-transform: uppercase; letter-spacing: 0.06em;
+}}
+QTableWidget::item {{ padding: 6px 10px; border-bottom: 1px solid {c.BORDER}; }}
+QTableWidget::item:selected {{ background-color: {c.ACCENT_DIM}; color: white; }}
+/* Checkbox */
+QCheckBox {{ color: {c.TEXT_PRIMARY}; spacing: 8px; }}
+QCheckBox::indicator {{
+    width: 16px; height: 16px;
+    border: 1px solid {c.BORDER_HOVER}; border-radius: 4px; background: {c.BG_GLASS};
+}}
+QCheckBox::indicator:checked {{ background: {c.ACCENT}; border-color: {c.ACCENT}; }}
+/* Tabs */
+QTabBar::tab {{
+    background: transparent; color: {c.TEXT_SECONDARY};
+    border: none; border-bottom: 2px solid transparent;
+    padding: 8px 18px; font-size: {t.SIZE_SM}px; font-weight: {t.WEIGHT_MEDIUM};
+}}
+QTabBar::tab:selected {{ color: {c.TEXT_PRIMARY}; border-bottom: 2px solid {c.ACCENT}; }}
+QTabBar::tab:hover:!selected {{ color: {c.TEXT_PRIMARY}; }}
+QTabWidget::pane {{ border: 1px solid {c.BORDER}; border-radius: {r.CARD}; background: transparent; }}
+/* ProgressBar */
+QProgressBar {{ background-color: {c.BG_SURFACE2}; border: none; border-radius: 3px; height: 4px; color: transparent; }}
+QProgressBar::chunk {{
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {c.ACCENT}, stop:1 {c.CYAN});
+    border-radius: 3px;
+}}
+/* Labels */
+QLabel {{ background: transparent; color: {c.TEXT_PRIMARY}; }}
+/* Tooltip */
 QToolTip {{
-    background: {c.BG_SURFACE3};
-    color: {c.TEXT_PRIMARY};
-    border: 1px solid {c.BORDER_HOVER};
-    border-radius: {r.SMALL};
-    padding: 4px 8px;
-    font-size: {Typography.SIZE_XS}px;
+    background-color: {c.BG_SURFACE2}; color: {c.TEXT_PRIMARY};
+    border: 1px solid {c.BORDER}; border-radius: {r.SMALL}; padding: 5px 8px;
 }}
-
-/* ═══ MessageBox ════════════════════════════════════════════════════════ */
-QMessageBox {{ background: {c.BG_SURFACE2}; }}
-QMessageBox QLabel {{ color: {c.TEXT_PRIMARY}; }}
-
-/* ═══ Activation screen ═════════════════════════════════════════════════ */
-#activation_container {{
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(124,58,237,0.08), stop:1 rgba(6,182,212,0.04));
-    border: 1px solid {c.BORDER};
-    border-radius: {r.MODAL};
-}}
-QLineEdit#key_input {{
-    font-size: {Typography.SIZE_MD}px;
-    letter-spacing: 2px;
-    padding: 10px 14px;
-    border-radius: {r.CARD};
-    border: 1px solid {c.BORDER};
-    background: {c.BG_GLASS};
-}}
-QLineEdit#key_input:focus {{
-    border-color: {c.BORDER_FOCUS};
-    background: {c.BG_GLASS2};
-}}
-QPushButton#btn_activate {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 {c.GRAD_START}, stop:1 {c.GRAD_END});
-    font-size: {Typography.SIZE_MD}px;
-    font-weight: {Typography.WEIGHT_BOLD};
-    padding: 12px 24px;
-    border-radius: {r.CARD};
-    min-width: 200px;
-}}
-QPushButton#btn_activate:hover {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 {c.ACCENT}, stop:1 {c.CYAN});
-}}
-
-/* ═══ SpinBox — hide default OS arrow buttons (no black squares) ═══════ */
-QSpinBox::up-button, QSpinBox::down-button,
-QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
-    width: 0px;
-    height: 0px;
-    border: none;
-    background: transparent;
-}}
+/* Splitter */
+QSplitter::handle {{ background: {c.BORDER}; width: 1px; height: 1px; }}
+/* Card/Panel frames */
+QFrame[role="card"] {{ background-color: {c.BG_GLASS}; border: 1px solid {c.BORDER}; border-radius: {r.CARD}; }}
+QFrame[role="panel"] {{ background-color: {c.BG_SURFACE1}; border: 1px solid {c.BORDER}; border-radius: {r.PANEL}; }}
 """
