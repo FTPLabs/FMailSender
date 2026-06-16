@@ -1,350 +1,360 @@
 """
-Экран 1: Dashboard — KPI-карточки, график активности 24ч, статус SMTP.
-"""
-import time
-import random
-from datetime import datetime, timedelta
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QSizePolicy, QGridLayout
-)
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QPolygon, QPainterPath
-from PyQt6.QtCore import QPoint, QRectF
+  Dashboard — CyberPro style: KPI cards with neon glow, activity chart v/c gradient.
+  Keeps all public API: update_stats(), update_activity(), update_campaign_results().
+  """
+  import random
+  from datetime import datetime
+  from PyQt6.QtWidgets import (
+      QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSizePolicy
+  )
+  from PyQt6.QtCore import Qt, QTimer, QRectF
+  from PyQt6.QtGui import (
+      QColor, QPainter, QPen, QBrush, QPainterPath, QLinearGradient
+  )
 
-from gui.theme import Colors, Typography, Spacing
-
-
-class KpiCard(QFrame):
-    """Карточка KPI с анимацией чисел."""
-
-    def __init__(self, title: str, value: int = 0, color: str = Colors.TEXT_PRIMARY, parent=None):
-        super().__init__(parent)
-        self.setObjectName("kpi_card")
-        self._current_value = value
-        self._target_value = value
-        self._color = color
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(Spacing.SM)
-        layout.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
-
-        self.value_label = QLabel(str(value))
-        self.value_label.setObjectName("label_kpi_value")
-        self.value_label.setStyleSheet(f"color: {color};")
-        layout.addWidget(self.value_label)
-
-        self.title_label = QLabel(title.upper())
-        self.title_label.setObjectName("label_kpi_title")
-        layout.addWidget(self.title_label)
-
-        # Анимация цифр
-        self._anim_timer = QTimer()
-        self._anim_timer.setInterval(30)
-        self._anim_timer.timeout.connect(self._animate_step)
-
-    def set_value(self, value: int, animate: bool = True) -> None:
-        self._target_value = value
-        if animate and abs(value - self._current_value) > 0:
-            self._anim_timer.start()
-        else:
-            self._current_value = value
-            self.value_label.setText(self._format(value))
-
-    def _format(self, v: int) -> str:
-        if v >= 1_000_000:
-            return f"{v/1_000_000:.1f}M"
-        if v >= 1_000:
-            return f"{v/1_000:.1f}K"
-        return str(v)
-
-    def _animate_step(self):
-        diff = self._target_value - self._current_value
-        if abs(diff) < 1:
-            self._current_value = self._target_value
-            self._anim_timer.stop()
-        else:
-            self._current_value += diff * 0.15
-        self.value_label.setText(self._format(int(self._current_value)))
+  from gui.theme import Colors, Spacing
 
 
-class ActivityChart(QWidget):
-    """Линейный график активности за последние 24 часа — кастомный QPainter."""
+  # ── KPI Card ──────────────────────────────────────────────────────────────────
+  class KpiCard(QFrame):
+      """CyberPro KPI card — glass border, neon accent, animated counter."""
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMinimumHeight(140)
-        self._data: list[int] = [0] * 24  # по часам
-        self.setObjectName("activity_chart")
+      def __init__(self, title: str, value: int = 0,
+                   color: str = Colors.ACCENT, parent=None):
+          super().__init__(parent)
+          self._current_value: float = float(value)
+          self._target_value: float = float(value)
+          self._color = color
 
-    def set_data(self, data: list[int]) -> None:
-        """Устанавливает данные (24 значения — по одному на час)."""
-        self._data = data[:24] if len(data) >= 24 else data + [0] * (24 - len(data))
-        self.update()
+          self.setStyleSheet(
+              "QFrame {"
+              "  background: rgba(255,255,255,0.025);"
+              f" border: 1px solid rgba(139,92,246,0.12);"
+              "  border-radius: 12px;"
+              "}"
+          )
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+          layout = QVBoxLayout(self)
+          layout.setContentsMargins(18, 16, 18, 16)
+          layout.setSpacing(6)
 
-        w = self.width()
-        h = self.height()
-        pad_left = 48
-        pad_right = 16
-        pad_top = 12
-        pad_bottom = 30
+          self._title_lbl = QLabel(title.upper())
+          self._title_lbl.setStyleSheet(
+              f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
+              " font-weight: 600; letter-spacing: 0.08em;"
+              " background: transparent; border: none; text-transform: uppercase;"
+          )
+          layout.addWidget(self._title_lbl)
 
-        chart_w = w - pad_left - pad_right
-        chart_h = h - pad_top - pad_bottom
+          self.value_label = QLabel(self._fmt(value))
+          self.value_label.setStyleSheet(
+              f"color: {color}; font-size: 28px; font-weight: 700;"
+              " font-family: monospace; background: transparent; border: none;"
+          )
+          layout.addWidget(self.value_label)
 
-        max_val = max(self._data) if self._data and max(self._data) > 0 else 1
+          # Animated counter timer
+          self._anim_timer = QTimer()
+          self._anim_timer.setInterval(20)
+          self._anim_timer.timeout.connect(self._step)
 
-        # Фон
-        painter.fillRect(self.rect(), QColor(Colors.BG_SURFACE1))
+      def _fmt(self, v: float) -> str:
+          iv = int(v)
+          if iv >= 1_000_000:
+              return f"{iv/1_000_000:.1f}M"
+          if iv >= 1_000:
+              return f"{iv/1_000:.1f}K"
+          return str(iv)
 
-        # Dashed grid
-        grid_pen = QPen(QColor(50, 50, 80, 55))
-        grid_pen.setStyle(Qt.PenStyle.DashLine)
-        grid_pen.setDashPattern([4.0, 6.0])
-        grid_pen.setWidth(1)
-        painter.setPen(grid_pen)
+      def set_value(self, value: int, animate: bool = True) -> None:
+          self._target_value = float(value)
+          if animate and abs(value - self._current_value) > 0.5:
+              self._anim_timer.start()
+          else:
+              self._current_value = float(value)
+              self.value_label.setText(self._fmt(value))
 
-        for i in range(4):
-            y = pad_top + chart_h * i // 3
-            painter.drawLine(pad_left, y, pad_left + chart_w, y)
-            val = int(max_val * (3 - i) / 3)
-            painter.setPen(QColor(Colors.TEXT_MUTED))
-            if val >= 1000:
-                painter.drawText(2, y + 4, f"{val//1000}k")
-            else:
-                painter.drawText(2, y + 4, str(val))
-            painter.setPen(grid_pen)
+      def _step(self) -> None:
+          diff = self._target_value - self._current_value
+          if abs(diff) < 1.0:
+              self._current_value = self._target_value
+              self._anim_timer.stop()
+          else:
+              self._current_value += diff * 0.18
+          self.value_label.setText(self._fmt(self._current_value))
 
-        # X-метки (часы)
-        hour_now = datetime.now().hour
-        painter.setPen(QColor(Colors.TEXT_MUTED))
-        for i in range(0, 24, 6):
-            x = pad_left + chart_w * i // 23
-            hour = (hour_now - 23 + i) % 24
-            painter.drawText(x - 12, h - 4, f"{hour:02d}:00")
 
-        if len(self._data) < 2:
-            return
+  # ── Activity Chart ────────────────────────────────────────────────────────────
+  class ActivityChart(QWidget):
+      """CyberPro chart — violet→cyan gradient fill, smooth cubic bezier, glow dot."""
 
-        # Координаты точек
-        pts = []
-        for i, val in enumerate(self._data):
-            x = pad_left + chart_w * i // (len(self._data) - 1)
-            y = pad_top + chart_h - int(chart_h * val / max_val)
-            pts.append((float(x), float(y)))
+      def __init__(self, parent=None):
+          super().__init__(parent)
+          self.setMinimumHeight(150)
+          self.setObjectName("activity_chart")
+          self._data: list[int] = [0] * 24
+          self.setStyleSheet("background: transparent;")
 
-        # Smooth cubic bezier path
-        line_path = QPainterPath()
-        line_path.moveTo(pts[0][0], pts[0][1])
-        for i in range(len(pts) - 1):
-            x0, y0 = pts[i]
-            x1, y1 = pts[i + 1]
-            cp1x = x0 + (x1 - x0) / 3.0
-            cp1y = y0
-            cp2x = x0 + 2.0 * (x1 - x0) / 3.0
-            cp2y = y1
-            line_path.cubicTo(cp1x, cp1y, cp2x, cp2y, x1, y1)
+      def set_data(self, data: list[int]) -> None:
+          self._data = data[:24] if len(data) >= 24 else data + [0] * (24 - len(data))
+          self.update()
 
-        # Gradient fill
-        fill_path = QPainterPath(line_path)
-        fill_path.lineTo(pts[-1][0], float(pad_top + chart_h))
-        fill_path.lineTo(float(pad_left), float(pad_top + chart_h))
-        fill_path.closeSubpath()
+      def paintEvent(self, _event) -> None:
+          p = QPainter(self)
+          p.setRenderHint(QPainter.RenderHint.Antialiasing)
+          w, h = self.width(), self.height()
+          pl, pr, pt, pb = 46, 16, 10, 28
+          cw = w - pl - pr
+          ch = h - pt - pb
+          max_v = max(self._data) if self._data and max(self._data) > 0 else 1
 
-        from PyQt6.QtGui import QLinearGradient
-        grad = QLinearGradient(0, pad_top, 0, pad_top + chart_h)
-        grad.setColorAt(0.0, QColor(139, 92, 246, 72))
-        grad.setColorAt(0.55, QColor(6, 182, 212, 25))
-        grad.setColorAt(1.0, QColor(6, 182, 212, 0))
-        painter.fillPath(fill_path, QBrush(grad))
+          # Chart background
+          p.fillRect(0, 0, w, h, QColor(0, 0, 0, 0))
 
-        # Stroke — violet→cyan
-        line_pen = QPen(QColor(Colors.ACCENT))
-        line_pen.setWidth(2)
-        line_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        line_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.strokePath(line_path, line_pen)
+          # Dashed grid lines
+          gpen = QPen(QColor(80, 80, 140, 30))
+          gpen.setStyle(Qt.PenStyle.DashLine)
+          gpen.setDashPattern([4.0, 5.0])
+          for i in range(4):
+              y = pt + ch * i // 3
+              p.setPen(gpen)
+              p.drawLine(pl, y, pl + cw, y)
+              val = int(max_v * (3 - i) / 3)
+              p.setPen(QColor(Colors.TEXT_MUTED))
+              lbl = f"{val//1000}k" if val >= 1000 else str(val)
+              p.drawText(2, y + 4, lbl)
 
-        # Glow dot на последней точке
-        lx, ly = pts[-1]
-        painter.setPen(Qt.PenStyle.NoPen)
-        for radius, alpha in [(12, 10), (7, 32), (4, 80)]:
-            painter.setBrush(QBrush(QColor(139, 92, 246, alpha)))
-            painter.drawEllipse(int(lx) - radius, int(ly) - radius, radius * 2, radius * 2)
-        painter.setBrush(QBrush(QColor(Colors.ACCENT)))
-        painter.setPen(QPen(QColor(Colors.BG_BASE), 2))
-        painter.drawEllipse(int(lx) - 4, int(ly) - 4, 8, 8)
+          # X labels
+          hour_now = datetime.now().hour
+          p.setPen(QColor(Colors.TEXT_MUTED))
+          for i in range(0, 24, 6):
+              x = pl + cw * i // 23
+              hour = (hour_now - 23 + i) % 24
+              p.drawText(x - 14, h - 4, f"{hour:02d}:00")
 
-        painter.end()
+          if len(self._data) < 2:
+              return
 
-class DashboardScreen(QWidget):
-    """Главный экран — KPI + график активности."""
+          # Build points
+          pts = []
+          for i, val in enumerate(self._data):
+              x = pl + cw * i // (len(self._data) - 1)
+              y = pt + ch - int(ch * val / max_v)
+              pts.append((float(x), float(y)))
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._stats = {
-            "sent_today": 0,
-            "success": 0,
-            "errors": 0,
-            "queued": 0,
-        }
-        self._activity_data: list[int] = [0] * 24
-        self._setup_ui()
+          # Smooth bezier path
+          path = QPainterPath()
+          path.moveTo(pts[0][0], pts[0][1])
+          for i in range(len(pts) - 1):
+              x0, y0 = pts[i]; x1, y1 = pts[i+1]
+              path.cubicTo(x0 + (x1-x0)/3, y0,
+                           x0 + 2*(x1-x0)/3, y1,
+                           x1, y1)
 
-        # Авто-обновление демо-данных
-        self._refresh_timer = QTimer()
-        self._refresh_timer.setInterval(5000)
-        self._refresh_timer.timeout.connect(self._refresh_demo)
+          # Gradient fill
+          fill = QPainterPath(path)
+          fill.lineTo(pts[-1][0], float(pt + ch))
+          fill.lineTo(float(pl), float(pt + ch))
+          fill.closeSubpath()
+          grad = QLinearGradient(0, pt, 0, pt + ch)
+          grad.setColorAt(0.0, QColor(139, 92, 246, 60))
+          grad.setColorAt(0.55, QColor(6, 182, 212, 18))
+          grad.setColorAt(1.0, QColor(6, 182, 212, 0))
+          p.fillPath(fill, QBrush(grad))
 
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
-        layout.setSpacing(Spacing.LG)
+          # Stroke — violet neon
+          lpen = QPen(QColor(Colors.ACCENT))
+          lpen.setWidth(2)
+          lpen.setCapStyle(Qt.PenCapStyle.RoundCap)
+          lpen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+          p.strokePath(path, lpen)
 
-        # ── Заголовок ────────────────────────────
-        header_row = QHBoxLayout()
-        title = QLabel("Дашборд")
-        title.setObjectName("section_header")
-        header_row.addWidget(title)
-        header_row.addStretch()
+          # Glow dot at last point
+          lx, ly = pts[-1]
+          p.setPen(Qt.PenStyle.NoPen)
+          for radius, alpha in [(14, 8), (8, 28), (5, 70)]:
+              p.setBrush(QBrush(QColor(139, 92, 246, alpha)))
+              p.drawEllipse(int(lx)-radius, int(ly)-radius, radius*2, radius*2)
+          p.setBrush(QBrush(QColor(Colors.ACCENT)))
+          p.setPen(QPen(QColor(Colors.BG_BASE), 2))
+          p.drawEllipse(int(lx)-4, int(ly)-4, 8, 8)
+          p.end()
 
-        self.date_label = QLabel(datetime.now().strftime("%d %B %Y, %H:%M"))
-        self.date_label.setObjectName("label_muted")
-        header_row.addWidget(self.date_label)
 
-        layout.addLayout(header_row)
+  # ── Dashboard Screen ──────────────────────────────────────────────────────────
+  class DashboardScreen(QWidget):
+      """Дашборд — KPI карточки + график активности (CyberPro)."""
 
-        # Обновляем время
-        clock = QTimer(self)
-        clock.setInterval(60000)
-        clock.timeout.connect(
-            lambda: self.date_label.setText(datetime.now().strftime("%d %B %Y, %H:%M"))
-        )
-        clock.start()
+      def __init__(self, parent=None):
+          super().__init__(parent)
+          self._stats = {"sent_today": 0, "success": 0, "errors": 0, "queued": 0}
+          self._activity_data: list[int] = [0] * 24
+          self._setup_ui()
 
-        # ── KPI-карточки ─────────────────────────
-        kpi_grid = QHBoxLayout()
-        kpi_grid.setSpacing(Spacing.MD)
+          self._refresh_timer = QTimer()
+          self._refresh_timer.setInterval(5000)
+          self._refresh_timer.timeout.connect(self._refresh_demo)
 
-        self.kpi_sent = KpiCard("Отправлено сегодня", 0, Colors.TEXT_PRIMARY)
-        self.kpi_success = KpiCard("Успешно", 0, Colors.SUCCESS)
-        self.kpi_errors = KpiCard("Ошибки", 0, Colors.ERROR)
-        self.kpi_queued = KpiCard("В очереди", 0, Colors.WARNING)
+      def _setup_ui(self) -> None:
+          root = QVBoxLayout(self)
+          root.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+          root.setSpacing(Spacing.LG)
 
-        for card in [self.kpi_sent, self.kpi_success, self.kpi_errors, self.kpi_queued]:
-            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            card.setFixedHeight(100)
-            kpi_grid.addWidget(card)
+          # ── Header ────────────────────────────────────────────────────────
+          hdr = QHBoxLayout()
+          title = QLabel("Дашборд")
+          title.setStyleSheet(
+              f"color: {Colors.TEXT_PRIMARY}; font-size: 22px; font-weight: 700;"
+              " background: transparent; border: none;"
+          )
+          hdr.addWidget(title)
+          hdr.addStretch()
+          self.date_label = QLabel(datetime.now().strftime("%d %B %Y, %H:%M"))
+          self.date_label.setStyleSheet(
+              f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
+              " background: transparent; border: none;"
+          )
+          hdr.addWidget(self.date_label)
+          root.addLayout(hdr)
 
-        layout.addLayout(kpi_grid)
+          clock = QTimer(self)
+          clock.setInterval(60000)
+          clock.timeout.connect(
+              lambda: self.date_label.setText(datetime.now().strftime("%d %B %Y, %H:%M"))
+          )
+          clock.start()
 
-        # ── График активности ─────────────────────
-        chart_card = QFrame()
-        chart_card.setObjectName("card")
-        chart_layout = QVBoxLayout(chart_card)
-        chart_layout.setSpacing(Spacing.MD)
+          # ── KPI Row ───────────────────────────────────────────────────────
+          kpi_row = QHBoxLayout()
+          kpi_row.setSpacing(Spacing.MD)
+          self.kpi_sent    = KpiCard("Отправлено", 0, Colors.CYAN)
+          self.kpi_success = KpiCard("Успешно",    0, Colors.SUCCESS)
+          self.kpi_errors  = KpiCard("Ошибки",     0, Colors.ERROR)
+          self.kpi_queued  = KpiCard("В очереди",  0, Colors.WARNING)
+          for card in [self.kpi_sent, self.kpi_success, self.kpi_errors, self.kpi_queued]:
+              card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+              card.setFixedHeight(96)
+              kpi_row.addWidget(card)
+          root.addLayout(kpi_row)
 
-        chart_header = QHBoxLayout()
-        chart_title = QLabel("Активность за 24 часа")
-        chart_title.setObjectName("label_subtitle")
-        chart_header.addWidget(chart_title)
-        chart_header.addStretch()
+          # ── Activity Chart card ───────────────────────────────────────────
+          chart_card = QFrame()
+          chart_card.setStyleSheet(
+              "QFrame {"
+              "  background: rgba(255,255,255,0.02);"
+              "  border: 1px solid rgba(139,92,246,0.12);"
+              "  border-radius: 12px;"
+              "}"
+          )
+          cc_layout = QVBoxLayout(chart_card)
+          cc_layout.setContentsMargins(20, 16, 20, 16)
+          cc_layout.setSpacing(12)
 
-        self.chart_stat_label = QLabel("0 писем сегодня")
-        self.chart_stat_label.setObjectName("label_muted")
-        chart_header.addWidget(self.chart_stat_label)
+          cc_hdr = QHBoxLayout()
+          chart_title = QLabel("Активность за 24 часа")
+          chart_title.setStyleSheet(
+              f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
+              " background: transparent; border: none;"
+          )
+          cc_hdr.addWidget(chart_title)
+          cc_hdr.addStretch()
+          self.chart_stat_label = QLabel("0 писем сегодня")
+          self.chart_stat_label.setStyleSheet(
+              f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
+              " background: transparent; border: none;"
+          )
+          cc_hdr.addWidget(self.chart_stat_label)
+          cc_layout.addLayout(cc_hdr)
 
-        chart_layout.addLayout(chart_header)
+          self.activity_chart = ActivityChart()
+          cc_layout.addWidget(self.activity_chart)
+          root.addWidget(chart_card)
 
-        self.activity_chart = ActivityChart()
-        chart_layout.addWidget(self.activity_chart)
+          # ── Events card ───────────────────────────────────────────────────
+          ev_card = QFrame()
+          ev_card.setStyleSheet(
+              "QFrame {"
+              "  background: rgba(255,255,255,0.02);"
+              "  border: 1px solid rgba(139,92,246,0.12);"
+              "  border-radius: 12px;"
+              "}"
+          )
+          ev_layout = QVBoxLayout(ev_card)
+          ev_layout.setContentsMargins(20, 16, 20, 16)
+          ev_layout.setSpacing(8)
 
-        layout.addWidget(chart_card)
+          ev_title = QLabel("Последние события")
+          ev_title.setStyleSheet(
+              f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
+              " background: transparent; border: none;"
+          )
+          ev_layout.addWidget(ev_title)
 
-        # ── Последние события ─────────────────────
-        events_card = QFrame()
-        events_card.setObjectName("card")
-        events_layout = QVBoxLayout(events_card)
-        events_layout.setSpacing(Spacing.SM)
+          self.events_label = QLabel(
+              f'<span style="color:{Colors.TEXT_MUTED}">Нет активных кампаний. '
+              "Запустите рассылку для отображения событий.</span>"
+          )
+          self.events_label.setWordWrap(True)
+          self.events_label.setStyleSheet("background: transparent; border: none;")
+          ev_layout.addWidget(self.events_label)
+          root.addWidget(ev_card)
 
-        events_title = QLabel("Последние события")
-        events_title.setObjectName("label_subtitle")
-        events_layout.addWidget(events_title)
+          root.addStretch()
 
-        self.events_label = QLabel(
-            '<span style="color:#71717A">Нет активных кампаний. '
-            'Запустите рассылку для отображения событий.</span>'
-        )
-        self.events_label.setWordWrap(True)
-        events_layout.addWidget(self.events_label)
+      # ── Public API ────────────────────────────────────────────────────────────
 
-        layout.addWidget(events_card)
-        layout.addStretch()
+      def update_stats(self, stats: dict) -> None:
+          self._stats = stats
+          self.kpi_sent.set_value(stats.get("sent_today", 0))
+          self.kpi_success.set_value(stats.get("success", 0))
+          self.kpi_errors.set_value(stats.get("errors", 0))
+          self.kpi_queued.set_value(stats.get("queued", 0))
+          self.chart_stat_label.setText(f"{stats.get('sent_today', 0)} писем сегодня")
 
-    # ── Публичное API ─────────────────────────────────────────────────────────
+      def update_activity(self, hourly_data: list[int]) -> None:
+          self._activity_data = hourly_data
+          self.activity_chart.set_data(hourly_data)
 
-    def update_stats(self, stats: dict) -> None:
-        """Обновляет KPI-карточки из словаря статистики."""
-        self._stats = stats
-        self.kpi_sent.set_value(stats.get("sent_today", 0))
-        self.kpi_success.set_value(stats.get("success", 0))
-        self.kpi_errors.set_value(stats.get("errors", 0))
-        self.kpi_queued.set_value(stats.get("queued", 0))
-        total = stats.get("sent_today", 0)
-        self.chart_stat_label.setText(f"{total} писем сегодня")
+      def add_event(self, event_text: str) -> None:
+          ts = datetime.now().strftime("%H:%M:%S")
+          current = self.events_label.text()
+          if "Нет активных" in current:
+              new_text = f'<span style="color:{Colors.TEXT_SECONDARY}">[{ts}]</span> {event_text}'
+          else:
+              new_text = current + f'<br><span style="color:{Colors.TEXT_SECONDARY}">[{ts}]</span> {event_text}'
+          self.events_label.setText(new_text)
 
-    def update_activity(self, hourly_data: list[int]) -> None:
-        """Обновляет данные графика."""
-        self._activity_data = hourly_data
-        self.activity_chart.set_data(hourly_data)
+      def update_campaign_results(self, results: list) -> None:
+          total = len(results)
+          success = sum(1 for r in results if getattr(r, "success", False))
+          self._stats["sent_today"] += total
+          self._stats["success"] += success
+          self._stats["errors"] += total - success
+          self._stats["queued"] = 0
+          self.kpi_sent.set_value(self._stats["sent_today"])
+          self.kpi_success.set_value(self._stats["success"])
+          self.kpi_errors.set_value(self._stats["errors"])
+          self.kpi_queued.set_value(0)
+          hour = datetime.now().hour
+          self._activity_data[hour] += success
+          self.activity_chart.set_data(self._activity_data)
+          self.chart_stat_label.setText(f"{self._stats['sent_today']} писем сегодня")
 
-    def add_event(self, event_text: str) -> None:
-        """Добавляет событие в лог."""
-        ts = datetime.now().strftime("%H:%M:%S")
-        current = self.events_label.text()
-        if "Нет активных" in current:
-            new_text = f'<span style="color:#A1A1AA">[{ts}]</span> {event_text}'
-        else:
-            new_text = current + f'<br><span style="color:#A1A1AA">[{ts}]</span> {event_text}'
-        self.events_label.setText(new_text)
+      def start_demo_mode(self) -> None:
+          self._refresh_timer.start()
+          self._refresh_demo()
 
-    def update_campaign_results(self, results: list) -> None:
-        """Обновляет KPI и график по итогам кампании."""
-        total = len(results)
-        success = sum(1 for r in results if getattr(r, "success", False))
-        self._stats["sent_today"] += total
-        self._stats["success"] += success
-        self._stats["errors"] += total - success
-        self._stats["queued"] = 0
-        self.kpi_sent.set_value(self._stats["sent_today"])
-        self.kpi_success.set_value(self._stats["success"])
-        self.kpi_errors.set_value(self._stats["errors"])
-        self.kpi_queued.set_value(0)
-        hour = datetime.now().hour
-        self._activity_data[hour] += success
-        self.activity_chart.set_data(self._activity_data)
-        self.chart_stat_label.setText(f"{self._stats['sent_today']} писем сегодня")
-
-    def start_demo_mode(self) -> None:
-        """Запускает демо-режим с тестовыми данными."""
-        self._refresh_timer.start()
-        self._refresh_demo()
-
-    def _refresh_demo(self) -> None:
-        """Обновляет дашборд случайными демо-данными."""
-        self._stats["sent_today"] += random.randint(5, 25)
-        self._stats["success"] += random.randint(4, 22)
-        self._stats["errors"] = max(0, self._stats["sent_today"] - self._stats["success"])
-        self._stats["queued"] = random.randint(0, 50)
-        self.kpi_sent.set_value(self._stats["sent_today"])
-        self.kpi_success.set_value(self._stats["success"])
-        self.kpi_errors.set_value(self._stats["errors"])
-        self.kpi_queued.set_value(self._stats["queued"])
-        hour = datetime.now().hour
-        self._activity_data[hour] += random.randint(1, 10)
-        self.activity_chart.set_data(self._activity_data)
-        self.chart_stat_label.setText(f"{self._stats['sent_today']} писем сегодня")
+      def _refresh_demo(self) -> None:
+          self._stats["sent_today"] += random.randint(5, 25)
+          self._stats["success"] += random.randint(4, 22)
+          self._stats["errors"] = max(0, self._stats["sent_today"] - self._stats["success"])
+          self._stats["queued"] = random.randint(0, 50)
+          self.kpi_sent.set_value(self._stats["sent_today"])
+          self.kpi_success.set_value(self._stats["success"])
+          self.kpi_errors.set_value(self._stats["errors"])
+          self.kpi_queued.set_value(self._stats["queued"])
+          hour = datetime.now().hour
+          self._activity_data[hour] += random.randint(1, 10)
+          self.activity_chart.set_data(self._activity_data)
+          self.chart_stat_label.setText(f"{self._stats['sent_today']} писем сегодня")
+  
