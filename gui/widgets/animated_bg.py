@@ -2,10 +2,12 @@
 Animated particle background widget for FMail Sender.
 Floating violet/cyan particles with connecting lines and pulsing glow.
 ~30fps, WA_TransparentForMouseEvents — does not intercept clicks.
+v3: fills own dark gradient background so particles are visible
+    behind transparent QStackedWidget / screens.
 """
 import math
 import random
-from PyQt6.QtCore import Qt, QTimer, QObject, QEvent, QPointF
+from PyQt6.QtCore import Qt, QTimer, QEvent, QPointF
 from PyQt6.QtGui import (
     QPainter, QColor, QBrush, QPen, QLinearGradient, QRadialGradient,
 )
@@ -23,25 +25,27 @@ _COLORS = [
 ]
 
 _ORBS = [
-    (0.12, 0.18, 280, QColor(124, 58, 237, 18)),
-    (0.88, 0.75, 240, QColor(6, 182, 212, 14)),
-    (0.50, 0.92, 200, QColor(139, 92, 246, 12)),
-    (0.78, 0.10, 170, QColor(91, 33, 182, 10)),
+    (0.12, 0.18, 290, QColor(124, 58, 237, 24)),
+    (0.88, 0.75, 250, QColor(6, 182, 212, 20)),
+    (0.50, 0.92, 210, QColor(139, 92, 246, 18)),
+    (0.78, 0.10, 180, QColor(91, 33, 182, 15)),
 ]
 
 
 class AnimatedBackground(QWidget):
-    """Animated particle field background. Place as child widget, call .lower()."""
+    """
+    Animated particle field background.
+    Place as child widget and call .lower() — does not intercept mouse events.
+    Fills its own dark gradient background so it is fully self-contained.
+    """
 
     PARTICLE_COUNT = 60
-    CONNECTION_DIST_RATIO = 0.17
+    CONNECTION_DIST_RATIO = 0.18
     FPS = 30
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAutoFillBackground(False)
 
         self._t = 0.0
@@ -53,8 +57,8 @@ class AnimatedBackground(QWidget):
                 'y':     rng.uniform(0.0, 1.0),
                 'vx':    rng.uniform(-0.00025, 0.00025),
                 'vy':    rng.uniform(-0.00025, 0.00025),
-                'size':  rng.uniform(1.2, 3.2),
-                'alpha': rng.uniform(0.35, 0.80),
+                'size':  rng.uniform(1.4, 3.5),
+                'alpha': rng.uniform(0.45, 0.90),
                 'ci':    rng.randint(0, len(_COLORS) - 1),
                 'phase': rng.uniform(0.0, 6.283),
             }
@@ -93,12 +97,18 @@ class AnimatedBackground(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Transparent bg — parent handles dark surface; no fillRect to avoid black squares
+        # ── Dark gradient background (self-contained, no dependency on parent) ──
+        bg = QLinearGradient(0, 0, w, h)
+        bg.setColorAt(0.0, QColor(5, 5, 16))     # #050510
+        bg.setColorAt(0.5, QColor(7, 7, 20))
+        bg.setColorAt(1.0, QColor(10, 10, 26))   # #0A0A1A
+        painter.fillRect(0, 0, w, h, QBrush(bg))
 
+        # ── Pulsing ambient orbs ──────────────────────────────────────────────
         for ox, oy, radius, base_color in _ORBS:
             cx = int(ox * w)
             cy = int(oy * h)
-            pulse = math.sin(self._t * 0.4 + ox * 4.0) * 18
+            pulse = math.sin(self._t * 0.4 + ox * 4.0) * 20
             r = radius + int(pulse)
             grad = QRadialGradient(QPointF(cx, cy), r)
             grad.setColorAt(0.0, base_color)
@@ -107,20 +117,22 @@ class AnimatedBackground(QWidget):
             grad.setColorAt(1.0, faded)
             painter.fillRect(cx - r, cy - r, r * 2, r * 2, QBrush(grad))
 
+        # ── Particle positions ────────────────────────────────────────────────
         pts = [(p, int(p['x'] * w), int(p['y'] * h)) for p in self._particles]
 
+        # ── Connection lines between nearby particles ─────────────────────────
         max_d = min(w, h) * self.CONNECTION_DIST_RATIO
         max_d2 = max_d * max_d
-        for i, (pi, xi, yi) in enumerate(pts):
+        for i, (_pi, xi, yi) in enumerate(pts):
             for _pj, xj, yj in pts[i + 1:]:
                 dx, dy = xi - xj, yi - yj
                 d2 = dx * dx + dy * dy
                 if d2 < max_d2:
-                    alpha = int(45 * (1.0 - d2 / max_d2))
-                    pen = QPen(QColor(139, 92, 246, alpha), 1)
-                    painter.setPen(pen)
+                    alpha = int(60 * (1.0 - d2 / max_d2))
+                    painter.setPen(QPen(QColor(139, 92, 246, alpha), 1))
                     painter.drawLine(xi, yi, xj, yj)
 
+        # ── Particles with glow ───────────────────────────────────────────────
         painter.setPen(Qt.PenStyle.NoPen)
         for p, px, py in pts:
             color = _COLORS[p['ci']]
@@ -131,7 +143,7 @@ class AnimatedBackground(QWidget):
             gr = int(sz * 7)
             if gr > 1:
                 glow_c = QColor(color)
-                glow_c.setAlpha(max(1, int(alpha * 0.09)))
+                glow_c.setAlpha(max(1, int(alpha * 0.13)))
                 grad_out = QRadialGradient(QPointF(px, py), gr)
                 grad_out.setColorAt(0.0, glow_c)
                 t_out = QColor(glow_c)
@@ -142,7 +154,7 @@ class AnimatedBackground(QWidget):
             ir = int(sz * 3)
             if ir > 1:
                 inner_c = QColor(color)
-                inner_c.setAlpha(max(1, int(alpha * 0.35)))
+                inner_c.setAlpha(max(1, int(alpha * 0.48)))
                 grad_in = QRadialGradient(QPointF(px, py), ir)
                 grad_in.setColorAt(0.0, inner_c)
                 t_in = QColor(inner_c)
