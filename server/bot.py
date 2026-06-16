@@ -1543,6 +1543,8 @@ async def main():
     config = uvicorn.Config(
         api_app, host=API_HOST, port=API_PORT,
         log_level="warning", loop="none",
+        ssl_certfile=os.path.join(os.path.dirname(__file__), "ssl", "cert.pem"),
+        ssl_keyfile=os.path.join(os.path.dirname(__file__), "ssl", "key.pem"),
     )
     server = uvicorn.Server(config)
 
