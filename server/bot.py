@@ -105,15 +105,13 @@ _release_cache_ts: float = 0.0
 _RELEASE_CACHE_TTL = 300  # 5 minutes
 
 
-_release_cache_lock: asyncio.Lock | None = None  # FIX: asyncio.Lock против race condition
+_release_cache_lock: asyncio.Lock = asyncio.Lock()  # Module-level init: thread-safe в Python 3.10+
 
 async def fetch_latest_release() -> dict:
     """Auto-fetch latest GitHub release info. Cached for 5 min. FIX: asyncio.Lock."""
-    global _release_cache, _release_cache_ts, _release_cache_lock
+        global _release_cache, _release_cache_ts
     import time
-    if _release_cache_lock is None:
-        _release_cache_lock = asyncio.Lock()
-    async with _release_cache_lock:  # FIX: весь блок внутри lock — no race condition
+    async with _release_cache_lock:  # Module-level lock — no race condition
         if _release_cache and (time.time() - _release_cache_ts) < _RELEASE_CACHE_TTL:
             return _release_cache
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
