@@ -16,7 +16,8 @@ try:
 except ImportError:
     _DNS_AVAILABLE = False
 
-from core.sender import validate_email_format
+# BUG FIX #5: импортируем из utils чтобы избежать циклических импортов
+from core.utils import validate_email_format
 
 DEFAULT_SPAM_WORDS = [
     "free money",
