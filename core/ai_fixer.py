@@ -127,13 +127,11 @@ class AiSpamFixer:
             raise RuntimeError(
                 f"OpenAI API вернул неожиданный ответ: {str(data)[:300]}"
             ) from exc
-
-        import re as _re_j
-        _jm = _re_j.search(r'```(?:json)?\s*([\s\S]+?)```', content)
+        _jm = _re_module.search(r'```(?:json)?\s*([\s\S]+?)```', content)
         if _jm:
             content = _jm.group(1).strip()
         else:
-            _om = _re_j.search(r'\{[\s\S]+\}', content)
+            _om = _re_module.search(r'\{[\s\S]+\}', content)
             if _om:
                 content = _om.group(0).strip()
             elif "```" in content:
