@@ -35,6 +35,25 @@ jobs:
         run: |
           python -c "import sys; sys.path.insert(0, '.'); from core._version import APP_NAME, APP_VERSION; from core.sender import SendingEngine; from core.spam_checker import SpamChecker; from core.ai_fixer import AiSpamFixer; from core.warmup import WarmupScheduler; print(f'All imports OK - {APP_NAME} v{APP_VERSION}')"
 
+      - name: Secret scan before build
+        shell: bash
+        run: |
+          echo "=== Secret scan before .exe build ==="
+          FAILED=0
+          for pat in 'ghp_[A-Za-z0-9]{36}' 'github_pat_[A-Za-z0-9_]{82}'                      '[0-9]{8,12}:[A-Za-z0-9_-]{35}' 'sk-[A-Za-z0-9]{48}'                      'AKIA[0-9A-Z]{16}' 'sk-proj-[A-Za-z0-9_-]{20,}'; do
+            FOUND=$(grep -rE "$pat" --include="*.py" --include="*.json"               --exclude-dir=.git --exclude-dir=__pycache__ . 2>/dev/null || true)
+            if [ -n "$FOUND" ]; then
+              echo "CRITICAL: Secret found matching pattern: $pat"
+              echo "$FOUND" | head -5
+              FAILED=1
+            fi
+          done
+          if [ $FAILED -eq 1 ]; then
+            echo "Build BLOCKED: secrets found in codebase. Remove before building."
+            exit 1
+          fi
+          echo "Secret scan passed — no credentials found"
+
       - name: Build .exe via build.py
         run: python build.py
 
