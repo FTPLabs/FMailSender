@@ -36,19 +36,20 @@ logger = logging.getLogger("license")
 # ── Константы ─────────────────────────────────────────────────────────────────
 HWID_SALT: str = os.environ.get("HWID_SALT", "")
 
-# BUG FIX #1: Используем ENV vars для URL. Если не заданы — логируем предупреждение.
-# IP-адрес хардкожен только как fallback; в production всегда ставьте LICENSE_API_URL.
-_DEFAULT_LICENSE_HOST = "https://31.76.100.190:8000"
-LICENSE_API_URL = os.environ.get("LICENSE_API_URL", f"{_DEFAULT_LICENSE_HOST}/v1/activate")
-LICENSE_VERIFY_URL = os.environ.get("LICENSE_VERIFY_URL", f"{_DEFAULT_LICENSE_HOST}/v1/verify")
-if "31.76.100.190" in LICENSE_API_URL and not os.environ.get("LICENSE_API_URL"):
-    import logging as _l
-    _l.getLogger("license").warning(
-        "LICENSE_API_URL не задан в ENV — используется встроенный fallback IP. "
-        "Установите LICENSE_API_URL=https://<ваш-сервер>/v1/activate для production."
-    )
-if LICENSE_API_URL.startswith("http://") and not LICENSE_API_URL.startswith("https://"):
-    logger.warning("LICENSE_API_URL uses plain HTTP — data sent unencrypted! Set HTTPS URL in LICENSE_API_URL env var.")
+# SECURITY FIX: URL лицензионного сервера — ТОЛЬКО через ENV. Никакого hardcoded IP.
+def _require_env(key: str) -> str:
+    val = os.environ.get(key, "").strip()
+    if not val:
+        logger.error("SECURITY FATAL: Required env var '%s' is not set. "
+                     "The application cannot connect to the license server. "
+                     "Set %s to the full HTTPS URL.", key, key)
+        import sys as _sys; _sys.exit(1)
+    if val.startswith("http://"):
+        logger.warning("SECURITY: %s uses plain HTTP — data sent unencrypted! Use HTTPS.", key)
+    return val
+
+LICENSE_API_URL    = _require_env("LICENSE_API_URL")
+LICENSE_VERIFY_URL = _require_env("LICENSE_VERIFY_URL")
 
 OFFLINE_GRACE_HOURS = 72
 ONLINE_CHECK_INTERVAL_H = 24
@@ -78,12 +79,15 @@ def _get_ssl_verify() -> "bool | str":
     Default: False — сервер использует self-signed сертификат (IP-адрес, Let's Encrypt неприменим).
     Для production с CA-подписанным сертом: LICENSE_SSL_VERIFY=1 или путь к CA-bundle.
     """
-    _ssl_env = os.environ.get("LICENSE_SSL_VERIFY", "0").strip()
+    _ssl_env = os.environ.get("LICENSE_SSL_VERIFY", "1").strip()
     if _ssl_env == "1":
         return True
     if _ssl_env == "0":
-        logger.warning(
-            "SSL verify DISABLED (LICENSE_SSL_VERIFY=0). "
+        logger.error(
+            "SECURITY: SSL verify DISABLED (LICENSE_SSL_VERIFY=0). "
+            "Connections to license server are VULNERABLE to MITM attacks! "
+            "Set LICENSE_SSL_VERIFY=1 or path to CA bundle."
+        )
             "Self-signed cert — set LICENSE_SSL_VERIFY=1 or CA bundle path for full MITM protection."
         )
         return False
@@ -117,11 +121,12 @@ def _get_fernet_key() -> bytes:
     """
     salt = HWID_SALT.encode() if HWID_SALT else b""
     if not salt:
-        logger.warning(
-            "SECURITY: HWID_SALT не задан — все установки используют ОБЩИЙ ключ шифрования! "
-            "Задайте HWID_SALT на сервере лицензий."
+        logger.error(
+            "SECURITY FATAL: HWID_SALT env var is not set. "
+            "Without it, license.dat from any machine can be decrypted by anyone "
+            "who reads the source code. Set HWID_SALT to a strong random secret (32+ chars)."
         )
-        salt = b"fmail_default_fernet_salt_2024"
+        import sys as _sys; _sys.exit(1)
     key = hashlib.sha256(salt).digest()
     return base64.urlsafe_b64encode(key)
 
