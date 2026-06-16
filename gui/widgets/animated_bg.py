@@ -1,171 +1,110 @@
 """
-Animated particle background widget for FMail Sender.
-Floating violet/cyan particles with connecting lines and pulsing glow.
-~30fps, WA_TransparentForMouseEvents — does not intercept clicks.
-v3: fills own dark gradient background so particles are visible
-    behind transparent QStackedWidget / screens.
+AnimatedBackground — CyberPro style:
+  3 floating neon orbs (violet, cyan, deep violet)
+  Aurora sweep band (slow opacity pulse)
+  Dot-grid overlay
+  Dark gradient base: #040410
 """
 import math
-import random
-from PyQt6.QtCore import Qt, QTimer, QEvent, QPointF
-from PyQt6.QtGui import (
-    QPainter, QColor, QBrush, QPen, QLinearGradient, QRadialGradient,
-)
 from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QPainter, QColor, QRadialGradient, QLinearGradient, QPen
 
 
-_COLORS = [
-    QColor(139, 92, 246),
-    QColor(124, 58, 237),
-    QColor(6, 182, 212),
-    QColor(167, 139, 250),
-    QColor(91, 33, 182),
-    QColor(8, 145, 178),
-    QColor(196, 181, 253),
-]
+class _Orb:
+    """One floating orb with independent phase/speed."""
+    def __init__(self, cx: float, cy: float, r: float,
+                 color: tuple, speed_x: float, speed_y: float, phase: float = 0.0):
+        self.cx = cx; self.cy = cy; self.r = r
+        self.color = color
+        self.speed_x = speed_x; self.speed_y = speed_y
+        self.phase = phase
+        self.t = phase
 
-_ORBS = [
-    (0.12, 0.18, 290, QColor(124, 58, 237, 24)),
-    (0.88, 0.75, 250, QColor(6, 182, 212, 20)),
-    (0.50, 0.92, 210, QColor(139, 92, 246, 18)),
-    (0.78, 0.10, 180, QColor(91, 33, 182, 15)),
-]
+    def update(self, dt: float) -> None:
+        self.t += dt
+
+    def pos(self, w: int, h: int) -> tuple:
+        x = self.cx * w + math.sin(self.t * self.speed_x + self.phase) * 0.18 * w
+        y = self.cy * h + math.cos(self.t * self.speed_y + self.phase * 1.3) * 0.15 * h
+        return x, y
 
 
 class AnimatedBackground(QWidget):
     """
-    Animated particle field background.
-    Place as child widget and call .lower() — does not intercept mouse events.
-    Fills its own dark gradient background so it is fully self-contained.
+    Full-window animated background widget — CyberPro style.
+    Place as first child of main window; set WA_TranslucentBackground on all
+    stacked screens so orbs show through.
     """
 
-    PARTICLE_COUNT = 60
-    CONNECTION_DIST_RATIO = 0.18
-    FPS = 30
+    _ORBS = [
+        _Orb(0.25, 0.30, 0.40, (139, 92, 246),  0.35, 0.28, 0.0),
+        _Orb(0.75, 0.65, 0.38, (6, 182, 212),    0.28, 0.22, 2.1),
+        _Orb(0.60, 0.20, 0.32, (91, 33, 182),    0.22, 0.18, 4.3),
+    ]
+    _FPS = 30
+    _DT  = 1.0 / _FPS
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.setAutoFillBackground(False)
-
-        self._t = 0.0
-        rng = random.Random(7)
-
-        self._particles = [
-            {
-                'x':     rng.uniform(0.0, 1.0),
-                'y':     rng.uniform(0.0, 1.0),
-                'vx':    rng.uniform(-0.00025, 0.00025),
-                'vy':    rng.uniform(-0.00025, 0.00025),
-                'size':  rng.uniform(1.4, 3.5),
-                'alpha': rng.uniform(0.45, 0.90),
-                'ci':    rng.randint(0, len(_COLORS) - 1),
-                'phase': rng.uniform(0.0, 6.283),
-            }
-            for _ in range(self.PARTICLE_COUNT)
-        ]
-
-        if parent:
-            parent.installEventFilter(self)
-
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self._aurora_t = 0.0
         self._timer = QTimer(self)
-        self._timer.setInterval(1000 // self.FPS)
+        self._timer.setInterval(int(1000 / self._FPS))
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
-    def eventFilter(self, obj, event):
-        if obj is self.parent() and event.type() == QEvent.Type.Resize:
-            self.resize(event.size())
-        return False
-
-    def showEvent(self, event):
-        if self.parent():
-            self.resize(self.parent().size())
-        super().showEvent(event)
-
-    def _tick(self):
-        self._t += 0.04
-        for p in self._particles:
-            p['x'] = (p['x'] + p['vx']) % 1.0
-            p['y'] = (p['y'] + p['vy']) % 1.0
+    def _tick(self) -> None:
+        for orb in self._ORBS:
+            orb.update(self._DT)
+        self._aurora_t += self._DT * 0.15
         self.update()
 
-    def paintEvent(self, _event):
-        if not self.isVisible():
-            return
-        w, h = max(self.width(), 1), max(self.height(), 1)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    def paintEvent(self, _event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
 
-        # ── Dark gradient background (self-contained, no dependency on parent) ──
-        bg = QLinearGradient(0, 0, w, h)
-        bg.setColorAt(0.0, QColor(5, 5, 16))     # #050510
-        bg.setColorAt(0.5, QColor(7, 7, 20))
-        bg.setColorAt(1.0, QColor(10, 10, 26))   # #0A0A1A
-        painter.fillRect(0, 0, w, h, QBrush(bg))
+        # 1. Dark base gradient
+        base = QLinearGradient(0, 0, 0, h)
+        base.setColorAt(0.0, QColor("#040410"))
+        base.setColorAt(0.5, QColor("#060614"))
+        base.setColorAt(1.0, QColor("#040410"))
+        p.fillRect(0, 0, w, h, base)
 
-        # ── Pulsing ambient orbs ──────────────────────────────────────────────
-        for ox, oy, radius, base_color in _ORBS:
-            cx = int(ox * w)
-            cy = int(oy * h)
-            pulse = math.sin(self._t * 0.4 + ox * 4.0) * 20
-            r = radius + int(pulse)
-            grad = QRadialGradient(QPointF(cx, cy), r)
-            grad.setColorAt(0.0, base_color)
-            faded = QColor(base_color)
-            faded.setAlpha(0)
-            grad.setColorAt(1.0, faded)
-            painter.fillRect(cx - r, cy - r, r * 2, r * 2, QBrush(grad))
+        # 2. Dot grid
+        dot_pen = QPen(QColor(80, 80, 140, 18))
+        dot_pen.setWidth(1)
+        p.setPen(dot_pen)
+        step = 28
+        for gx in range(0, w + step, step):
+            for gy in range(0, h + step, step):
+                p.drawPoint(gx, gy)
 
-        # ── Particle positions ────────────────────────────────────────────────
-        pts = [(p, int(p['x'] * w), int(p['y'] * h)) for p in self._particles]
+        # 3. Aurora sweep band
+        aurora_opacity = 0.04 + 0.025 * math.sin(self._aurora_t * math.pi * 2)
+        aurora = QLinearGradient(0, int(h * 0.3), w, int(h * 0.7))
+        aurora.setColorAt(0.0, QColor(0, 0, 0, 0))
+        aurora.setColorAt(0.3, QColor(139, 92, 246, int(255 * aurora_opacity)))
+        aurora.setColorAt(0.6, QColor(6, 182, 212, int(255 * aurora_opacity * 0.6)))
+        aurora.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.fillRect(0, 0, w, h, aurora)
 
-        # ── Connection lines between nearby particles ─────────────────────────
-        max_d = min(w, h) * self.CONNECTION_DIST_RATIO
-        max_d2 = max_d * max_d
-        for i, (_pi, xi, yi) in enumerate(pts):
-            for _pj, xj, yj in pts[i + 1:]:
-                dx, dy = xi - xj, yi - yj
-                d2 = dx * dx + dy * dy
-                if d2 < max_d2:
-                    alpha = int(60 * (1.0 - d2 / max_d2))
-                    painter.setPen(QPen(QColor(139, 92, 246, alpha), 1))
-                    painter.drawLine(xi, yi, xj, yj)
+        # 4. Orbs (Screen blend for neon glow)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Screen)
+        for orb in self._ORBS:
+            ox, oy = orb.pos(w, h)
+            radius = orb.r * min(w, h)
+            r2, g2, b2 = orb.color
+            grad = QRadialGradient(ox, oy, radius)
+            grad.setColorAt(0.0, QColor(r2, g2, b2, 55))
+            grad.setColorAt(0.35, QColor(r2, g2, b2, 22))
+            grad.setColorAt(0.7, QColor(r2, g2, b2, 8))
+            grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+            p.setBrush(grad)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(int(ox - radius), int(oy - radius),
+                          int(radius * 2), int(radius * 2))
 
-        # ── Particles with glow ───────────────────────────────────────────────
-        painter.setPen(Qt.PenStyle.NoPen)
-        for p, px, py in pts:
-            color = _COLORS[p['ci']]
-            pulse = 0.72 + 0.28 * abs(math.sin(self._t * 0.8 + p['phase']))
-            alpha = int(p['alpha'] * pulse * 255)
-            sz = p['size'] * pulse
-
-            gr = int(sz * 7)
-            if gr > 1:
-                glow_c = QColor(color)
-                glow_c.setAlpha(max(1, int(alpha * 0.13)))
-                grad_out = QRadialGradient(QPointF(px, py), gr)
-                grad_out.setColorAt(0.0, glow_c)
-                t_out = QColor(glow_c)
-                t_out.setAlpha(0)
-                grad_out.setColorAt(1.0, t_out)
-                painter.fillRect(px - gr, py - gr, gr * 2, gr * 2, QBrush(grad_out))
-
-            ir = int(sz * 3)
-            if ir > 1:
-                inner_c = QColor(color)
-                inner_c.setAlpha(max(1, int(alpha * 0.48)))
-                grad_in = QRadialGradient(QPointF(px, py), ir)
-                grad_in.setColorAt(0.0, inner_c)
-                t_in = QColor(inner_c)
-                t_in.setAlpha(0)
-                grad_in.setColorAt(1.0, t_in)
-                painter.fillRect(px - ir, py - ir, ir * 2, ir * 2, QBrush(grad_in))
-
-            core = QColor(color)
-            core.setAlpha(alpha)
-            painter.setBrush(QBrush(core))
-            r = max(1, int(sz))
-            painter.drawEllipse(px - r, py - r, r * 2, r * 2)
-
-        painter.end()
+        p.end()
