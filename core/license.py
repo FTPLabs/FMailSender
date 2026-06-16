@@ -21,7 +21,7 @@ import time
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -48,8 +48,14 @@ def _require_env(key: str) -> str:
         logger.warning("SECURITY: %s uses plain HTTP — data sent unencrypted! Use HTTPS.", key)
     return val
 
-LICENSE_API_URL    = _require_env("LICENSE_API_URL")
-LICENSE_VERIFY_URL = _require_env("LICENSE_VERIFY_URL")
+def _get_license_api_url() -> str:
+    """Ленивый геттер — fail-fast только при фактической активации, не при импорте."""
+    return _require_env("LICENSE_API_URL")
+
+
+def _get_license_verify_url() -> str:
+    """Ленивый геттер — fail-fast только при фактической проверке лицензии."""
+    return _require_env("LICENSE_VERIFY_URL")
 
 OFFLINE_GRACE_HOURS = 72
 ONLINE_CHECK_INTERVAL_H = 24
@@ -329,12 +335,12 @@ class LicenseInfo:
 
     @property
     def days_left(self) -> int:
-        delta = self.expires_at - datetime.utcnow()
+        delta = self.expires_at - datetime.now(timezone.utc).replace(tzinfo=None)
         return max(0, delta.days)
 
     @property
     def is_expired(self) -> bool:
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc).replace(tzinfo=None) > self.expires_at
 
     def __repr__(self) -> str:
         return (
@@ -373,7 +379,7 @@ def _verify_key_online(key: str, hwid: str) -> Optional[bool]:
     try:
         _ssl_v = _get_ssl_verify()
         resp = requests.post(
-            LICENSE_VERIFY_URL,
+            _get_license_verify_url(),
             json={"key": key, "hwid": hwid},
             timeout=5,
             verify=_ssl_v,
@@ -440,7 +446,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
 
     try:
         resp = requests.post(
-            LICENSE_API_URL,
+            _get_license_api_url(),
             verify=_ssl_v,
             json={"key": key_upper, "hwid": hwid},
             timeout=10,

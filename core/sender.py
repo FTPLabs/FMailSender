@@ -272,9 +272,6 @@ class SendResult:
     timestamp: float = field(default_factory=time.time)
 
 
-_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
-
-
 def validate_email_format(email: str) -> bool:
     """Backward-compat wrapper — источник истины перенесён в core.utils."""
     from core.utils import validate_email_format as _vef
@@ -445,12 +442,15 @@ class SendingEngine:
         self._paused = False
         self._campaign_task = asyncio.current_task()
 
-        # Сбрасываем только часовой счётчик — дневные лимиты накапливаются
+        # Сбрасываем часовой счётчик только если час реально истёк —
+        # иначе кампания обнуляет лимиты, отправленные за текущий час
+        _now = time.time()
         for _acct in self.accounts:
             if _acct.is_active:
                 with _acct._lock:
-                    _acct.sent_this_hour = 0
-                    _acct._hour_reset = time.time()
+                    if _now - _acct._hour_reset >= 3600:
+                        _acct.sent_this_hour = 0
+                        _acct._hour_reset = _now
 
         results: List[SendResult] = []
         sem = asyncio.Semaphore(self.config.max_threads)
@@ -571,17 +571,21 @@ class SendingEngine:
         msg = _build_message(account, recipient, template)
         try:
             if account.use_ssl:
+                # SSL/TLS (порт 465) — передаём только use_tls=True
                 smtp = aiosmtplib.SMTP(
                     hostname=account.host, port=account.port,
-                    use_tls=True, start_tls=False, timeout=30,
+                    use_tls=True, timeout=30,
                 )
             else:
+                # STARTTLS (порт 587) — сначала plain, затем STARTTLS после connect()
                 smtp = aiosmtplib.SMTP(
                     hostname=account.host, port=account.port,
-                    use_tls=False, start_tls=account.use_tls, timeout=30,
+                    use_tls=False, timeout=30,
                 )
             await smtp.connect()
             try:
+                if not account.use_ssl and account.use_tls:
+                    await smtp.starttls()
                 await smtp.login(account.email, account.password)
                 await smtp.send_message(msg)
                 return SendResult(

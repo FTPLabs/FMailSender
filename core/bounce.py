@@ -35,23 +35,23 @@ class BounceRecord:
 
     def to_dict(self) -> dict:
         return {
-          "email": self.email,
-          "bounce_type": self.bounce_type.value,
-          "code": self.code,
-          "message": self.message,
-          "received_at": self.received_at,
-          "original_subject": self.original_subject,
+            "email": self.email,
+            "bounce_type": self.bounce_type.value,
+            "code": self.code,
+            "message": self.message,
+            "received_at": self.received_at,
+            "original_subject": self.original_subject,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "BounceRecord":
         return cls(
-          email=d["email"],
-          bounce_type=BounceType(d.get("bounce_type", "unknown")),
-          code=d.get("code", ""),
-          message=d.get("message", ""),
-          received_at=d.get("received_at", ""),
-          original_subject=d.get("original_subject", ""),
+            email=d["email"],
+            bounce_type=BounceType(d.get("bounce_type", "unknown")),
+            code=d.get("code", ""),
+            message=d.get("message", ""),
+            received_at=d.get("received_at", ""),
+            original_subject=d.get("original_subject", ""),
         )
 
 

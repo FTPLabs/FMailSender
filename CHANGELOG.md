@@ -1,5 +1,28 @@
 # Changelog
 
+## [3.3.0] — 2026-06-16
+
+### 🔴 Критические исправления
+
+- **core/license.py**: Устранён `sys.exit(1)` при импорте модуля — `_require_env()` теперь вызывается лениво через `_get_license_api_url()` / `_get_license_verify_url()`, только при фактическом обращении к серверу лицензий
+- **core/sender.py**: Исправлен конфликт параметров `aiosmtplib` ≥ 3.0 — удалён несуществующий `start_tls=` из конструктора SMTP; STARTTLS теперь корректно активируется через `await smtp.starttls()` после `connect()`
+
+### 🟠 Серьёзные исправления
+
+- **core/sender.py**: Исправлен сброс часового счётчика `sent_this_hour` — теперь обнуляется только если с момента предыдущего сброса прошло ≥ 3600 сек; ранее новая кампания обнуляла лимиты, отправленные за текущий час
+- **core/sender.py**: Удалено мёртвое определение `_EMAIL_RE` — regex определялся, но никогда не использовался (вся валидация идёт через `core.utils.validate_email_format`)
+- **core/license.py**: `datetime.utcnow()` заменён на `datetime.now(timezone.utc).replace(tzinfo=None)` — устранён `DeprecationWarning` в Python 3.12+
+
+### 🟡 Минорные исправления
+
+- **core/bounce.py**: Унифицированы отступы в `to_dict()` / `from_dict()` — смешение 2-пробельных и 4-пробельных отступов заменено единым 4-пробельным стандартом PEP 8
+
+### Новое
+
+- **`.agents/skills/build-guard`**: Новый скилл — полная проверка проекта перед сборкой `.exe` и созданием релиза: PyInstaller 6.x совместимость, aiosmtplib параметры, lazy license URLs, синтаксис, hourly counter, hiddenimports
+
+---
+
 ## [3.0.1] — 2026-06-14
 
   ### Исправлено (Bug Fixes)
