@@ -38,17 +38,23 @@ def _status_chip(text):
 
 
 def _kpi_mini(title, value, color=None):
-  color = color or Colors.TEXT_PRIMARY
+  from gui.theme import Colors as _C
+  color = color or _C.ACCENT
   card = QFrame()
   card.setObjectName("kpi_card")
+  card.setStyleSheet(
+      "QFrame { background: rgba(255,255,255,0.025); border: 1px solid rgba(139,92,246,0.14);"
+      " border-radius: 12px; }"
+  )
   layout = QVBoxLayout(card)
-  layout.setContentsMargins(12, 10, 12, 10)
-  layout.setSpacing(2)
+  layout.setContentsMargins(14, 12, 14, 12)
+  layout.setSpacing(4)
   val_lbl = QLabel(value)
-  val_lbl.setStyleSheet(f"font-size:18px;font-weight:bold;color:{color};")
+  val_lbl.setStyleSheet(f"font-size:22px;font-weight:700;color:{color};font-family:monospace;background:transparent;border:none;")
   val_lbl.setObjectName("_kpi_val")
   layout.addWidget(val_lbl)
   title_lbl = QLabel(title.upper())
+  title_lbl.setStyleSheet("color:#6666AA;font-size:11px;font-weight:600;letter-spacing:0.07em;background:transparent;border:none;")
   title_lbl.setObjectName("label_kpi_title")
   layout.addWidget(title_lbl)
   return card
