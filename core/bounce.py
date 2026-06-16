@@ -266,8 +266,28 @@ class BounceMonitor:
                 if uid_key in seen_uids:
                     continue
                 seen_uids.add(uid_key)
+                # BUG FIX #4: IMAP reconnect — при обрыве соединения переподключаемся
                 try:
                     _, msg_data = conn.uid("fetch", uid, "(RFC822)")
+                except imaplib.IMAP4.abort:
+                    logger.warning("IMAP connection dropped during fetch, reconnecting...")
+                    try:
+                        conn.logout()
+                    except Exception:
+                        pass
+                    try:
+                        if self.use_ssl:
+                            conn = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+                        else:
+                            conn = imaplib.IMAP4(self.imap_host, self.imap_port)
+                        conn.login(self.email_addr, self.password)
+                        conn.select("INBOX", readonly=False)
+                        _, msg_data = conn.uid("fetch", uid, "(RFC822)")
+                    except Exception as reconnect_err:
+                        logger.error("IMAP reconnect failed: %s", reconnect_err)
+                        break
+
+                try:
                     if not msg_data or not msg_data[0]:
                         continue
                     raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
