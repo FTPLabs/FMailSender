@@ -109,7 +109,7 @@ _release_cache_lock: asyncio.Lock = asyncio.Lock()  # Module-level init: thread-
 
 async def fetch_latest_release() -> dict:
     """Auto-fetch latest GitHub release info. Cached for 5 min. FIX: asyncio.Lock."""
-        global _release_cache, _release_cache_ts
+    global _release_cache, _release_cache_ts
     import time
     async with _release_cache_lock:  # Module-level lock — no race condition
         if _release_cache and (time.time() - _release_cache_ts) < _RELEASE_CACHE_TTL:
