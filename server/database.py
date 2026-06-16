@@ -105,10 +105,9 @@ def _generate_key() -> str:
 
 
 async def init_db() -> None:
+    # PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL
+    # уже применяются в _db() context manager — не дублируем.
     async with _db() as db:
-        await db.execute("PRAGMA journal_mode=WAL")
-        await db.execute("PRAGMA busy_timeout=5000")
-        await db.execute("PRAGMA synchronous=NORMAL")
         await db.executescript(CREATE_SQL)
         for plan_id, plan in PLANS.items():
             await db.execute(
