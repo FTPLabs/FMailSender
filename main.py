@@ -1,117 +1,118 @@
 """Entry point for FMail Sender Pro."""
-import sys
-import os
-import threading
-import time
+  import sys
+  import os
+  import threading
+  import time
+
+  sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+  from core._version import APP_NAME, APP_VERSION
 
 
-  def _check_mode():
-      """Режим быстрой проверки: импортирует все модули и выходит 0 если OK."""
+  def _check_mode() -> None:
+      """Smoke-test: проверяет все импорты и выходит 0 если OK, 1 если ошибка."""
       try:
-          from core._version import APP_NAME, APP_VERSION
-          from core.license import generate_hwid
           from core.sender import SendingEngine
           from core.spam_checker import SpamChecker
           from core.ai_fixer import AiSpamFixer
+          from core.warmup import WarmupScheduler
+          from core.license import generate_hwid
           print(f"FMailSender v{APP_VERSION} — startup check OK")
           sys.exit(0)
-      except Exception as e:
-          print(f"FMailSender startup check FAILED: {e}", file=sys.stderr)
+      except Exception as exc:
+          print(f"FMailSender startup check FAILED: {exc}", file=sys.stderr)
           sys.exit(1)
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core._version import APP_NAME, APP_VERSION
-
-
-def _load_icon(target):
-    """Загружает иконку приложения из assets (ICO > PNG)."""
-    from PyQt6.QtGui import QIcon
-    from pathlib import Path
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
-    for name in ("fmail_logo.ico", "fmail_logo.png"):
-        p = base / "assets" / "images" / name
-        if p.exists():
-            target.setWindowIcon(QIcon(str(p)))
-            return
+  def _load_icon(target):
+      """Загружает иконку приложения из assets (ICO > PNG)."""
+      from PyQt6.QtGui import QIcon
+      from pathlib import Path
+      base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+      for name in ("fmail_logo.ico", "fmail_logo.png"):
+          p = base / "assets" / "images" / name
+          if p.exists():
+              target.setWindowIcon(QIcon(str(p)))
+              return
 
 
-def main():
-    if "--check" in sys.argv:
-        _check_mode()
-    if "--version" in sys.argv:
-        from core._version import APP_VERSION
-        print(f"FMailSender v{APP_VERSION}")
-        sys.exit(0)
-    # Прогрев HWID кэша — запускаем в фоне и ждём завершения до check_license
-    from core.license import security_check, generate_hwid
-    hwid_ready = threading.Event()
+  def main():
+      if "--check" in sys.argv:
+          _check_mode()
+      if "--version" in sys.argv:
+          print(f"FMailSender v{APP_VERSION}")
+          sys.exit(0)
 
-    def _hwid_init():
-        generate_hwid()
-        hwid_ready.set()
+      # Прогрев HWID кэша — запускаем в фоне и ждём завершения до check_license
+      from core.license import security_check, generate_hwid
+      hwid_ready = threading.Event()
 
-    threading.Thread(target=_hwid_init, daemon=True).start()
-    threading.Thread(target=security_check, daemon=True).start()
+      def _hwid_init():
+          generate_hwid()
+          hwid_ready.set()
 
-    # Ждём HWID не более 3 сек, чтобы check_license получил актуальный кэш
-    hwid_ready.wait(timeout=3.0)
+      threading.Thread(target=_hwid_init, daemon=True).start()
+      threading.Thread(target=security_check, daemon=True).start()
 
-    from PyQt6.QtWidgets import QApplication
-    from PyQt6.QtGui import QFont
+      # Ждём HWID не более 3 сек, чтобы check_license получил актуальный кэш
+      hwid_ready.wait(timeout=3.0)
 
-    app = QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
-    app.setApplicationVersion(APP_VERSION)
-    app.setOrganizationName("FTPLabs")
+      from PyQt6.QtWidgets import QApplication
+      from PyQt6.QtGui import QFont
 
-    _load_icon(app)
+      app = QApplication(sys.argv)
+      app.setApplicationName(APP_NAME)
+      app.setApplicationVersion(APP_VERSION)
+      app.setOrganizationName("FTPLabs")
 
-    from gui.theme import load_fonts, get_stylesheet, Typography
-    load_fonts()
-    app.setStyleSheet(get_stylesheet())
-    font = QFont("Inter")
-    font.setPointSize(Typography.SIZE_SM)
-    app.setFont(font)
+      _load_icon(app)
 
-    from core.license import check_license
-    valid, license_info, message = check_license()
+      from gui.theme import load_fonts, get_stylesheet, Typography
+      load_fonts()
+      app.setStyleSheet(get_stylesheet())
+      font = QFont("Inter")
+      font.setPointSize(Typography.SIZE_SM)
+      app.setFont(font)
 
-    if valid and license_info:
-        from gui.app import MainWindow
-        app._main_window = MainWindow(license_info)
-        app._main_window.show()
-    else:
-        _show_activation_screen(app, message)
+      from core.license import check_license
+      valid, license_info, message = check_license()
 
-    sys.exit(app.exec())
+      if valid and license_info:
+          from gui.app import MainWindow
+          app._main_window = MainWindow(license_info)
+          app._main_window.show()
+      else:
+          _show_activation_screen(app, message)
 
-
-def _show_activation_screen(app, message: str = ""):
-    from PyQt6.QtWidgets import QMainWindow
-    from gui.screens.screen_activation import ActivationScreen
-    from gui.theme import Colors
-
-    container = QMainWindow()
-    container.setWindowTitle(f"{APP_NAME} — Активация")
-    container.setMinimumSize(560, 520)
-    container.resize(680, 620)
-    container.setStyleSheet(f"background-color: {Colors.BG_BASE};")
-    _load_icon(container)
-
-    activation = ActivationScreen(hint_message=message)
-
-    def on_success(license_info):
-        from gui.app import MainWindow
-        window = MainWindow(license_info)
-        app._main_window = window
-        window.show()
-        container.close()
-
-    activation.activation_success.connect(on_success)
-    container.setCentralWidget(activation)
-    container.show()
+      sys.exit(app.exec())
 
 
-if __name__ == "__main__":
-    main()
+  def _show_activation_screen(app, message: str = ""):
+      from PyQt6.QtWidgets import QMainWindow
+      from gui.screens.screen_activation import ActivationScreen
+      from gui.theme import Colors
+
+      container = QMainWindow()
+      container.setWindowTitle(f"{APP_NAME} — Активация")
+      container.setMinimumSize(560, 520)
+      container.resize(680, 620)
+      container.setStyleSheet(f"background-color: {Colors.BG_BASE};")
+      _load_icon(container)
+
+      activation = ActivationScreen(hint_message=message)
+
+      def on_success(license_info):
+          from gui.app import MainWindow
+          window = MainWindow(license_info)
+          app._main_window = window
+          window.show()
+          container.close()
+
+      activation.activation_success.connect(on_success)
+      container.setCentralWidget(activation)
+      container.show()
+
+
+  if __name__ == "__main__":
+      main()
+  
