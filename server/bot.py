@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 
 import jwt
 import uvicorn
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core._version import APP_VERSION
 import aiohttp
 from aiogram import Bot, Dispatcher, F
