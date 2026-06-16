@@ -1,6 +1,6 @@
 """
 Main window: sidebar navigation, header, QStackedWidget with all screens.
-v2.6.0: Added animated particle background to the main content area.
+v3.0: Transparent stack+screens so AnimatedBackground particles are visible.
 """
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
@@ -250,13 +250,17 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(_plan_frame)
         root.addWidget(sidebar)
 
-        # Main area with animated background
+        # ── Main content area ─────────────────────────────────────────────────
+        # The animated background fills the dark gradient + particles.
+        # The QStackedWidget and every screen are transparent so particles
+        # are visible in the empty areas between UI cards.
         main_area = QWidget()
+        main_area.setStyleSheet("background: transparent;")
         main_layout = QVBoxLayout(main_area)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Animated background sits behind everything else
+        # AnimatedBackground: child of main_area, sized to match it via eventFilter
         self._anim_bg = AnimatedBackground(main_area)
         self._anim_bg.lower()
 
@@ -272,6 +276,8 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(header)
 
         self._stack = QStackedWidget()
+        # Transparent so AnimatedBackground shows through the empty areas
+        self._stack.setStyleSheet("background: transparent;")
         self._screens: dict[str, QWidget] = {}
 
         screen_map = [
@@ -284,6 +290,9 @@ class MainWindow(QMainWindow):
             ("inbox",      InboxScreen()),
         ]
         for key, screen in screen_map:
+            # Transparent background: cards/panels inside each screen keep their
+            # own backgrounds; empty areas show the animated particle field.
+            screen.setStyleSheet("background: transparent;")
             self._stack.addWidget(screen)
             self._screens[key] = screen
 
