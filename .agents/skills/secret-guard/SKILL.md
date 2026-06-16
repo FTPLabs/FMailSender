@@ -1,189 +1,201 @@
 ---
-name: secret-guard
-description: Сканирует Python-файлы и весь репозиторий на утечку секретов перед пушем или сборкой .exe. Обнаруживает IP-адреса, токены, пароли, ключи API, приватные ключи. Активируй ОБЯЗАТЕЛЬНО перед любым git push, созданием релиза или сборкой PyInstaller.
----
+  name: secret-guard
+  description: Сканирует Python-файлы и весь репозиторий на утечку секретов перед пушем или сборкой .exe. Обнаруживает IP-адреса, токены, пароли, ключи API, приватные ключи, URL лицензионного сервера, структуру ключей лицензий. Активируй ОБЯЗАТЕЛЬНО перед любым git push, созданием релиза или сборкой PyInstaller.
+  ---
 
-# Secret Guard — Сканер Утечки Секретов
+  # Secret Guard — Сканер Утечки Секретов и Защита Проекта
 
-## Когда использовать
+  ## Когда использовать
 
-- **ОБЯЗАТЕЛЬНО** перед каждым `git push` или `git commit`
-- Перед сборкой `.exe` через PyInstaller / GitHub Actions
-- При добавлении нового кода, работающего с API, базами данных, сетью
-- При ревью Pull Request от внешних контрибьюторов
-- Когда пользователь сообщает: "токен утёк", "пароль попал в репо", "credentials в коде"
+  - **ОБЯЗАТЕЛЬНО** перед каждым `git push` или `git commit`
+  - Перед сборкой `.exe` через PyInstaller / GitHub Actions
+  - При добавлении нового кода, работающего с API, базами данных, сетью
+  - При ревью Pull Request от внешних контрибьюторов
+  - Когда пользователь сообщает: "токен утёк", "пароль попал в репо", "credentials в коде"
 
-## Что ищем
+  ## Что ищем
 
-### 🔴 Критично — БЛОКИРУЕМ push
-| Тип               | Пример паттерна                                |
-|-------------------|------------------------------------------------|
-| GitHub токены     | `ghp_[A-Za-z0-9]{36}`, `github_pat_...`        |
-| Telegram токены   | `\d{8,12}:[A-Za-z0-9_-]{35}`                  |
-| OpenAI API ключи  | `sk-[A-Za-z0-9]{48}`, `sk-proj-...`            |
-| AWS ключи         | `AKIA[0-9A-Z]{16}`                             |
-| Приватные ключи   | `-----BEGIN.*PRIVATE KEY-----`                 |
-| Пароли в коде     | `password\s*=\s*["'][^"']{6,}["']`             |
-| Hardcoded IP      | `\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b` в строках кода |
-| JWT токены        | `eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+` |
+  ### 🔴 Критично — БЛОКИРУЕМ push
 
-### 🟡 Предупреждение — требует ревью
-| Тип               | Пример                                         |
-|-------------------|------------------------------------------------|
-| IP в конфиге      | IP-адрес как дефолтное значение ENV            |
-| `verify=False`    | SSL проверка отключена без комментария         |
-| Чувствит. файлы   | `*.env`, `*.pem`, `*.key`, `*.p12`             |
-| `TODO: remove`    | Временный хардкод, который забыли убрать       |
+  | Тип | Пример паттерна |
+  |---|---|
+  | GitHub токены | `ghp_[A-Za-z0-9]{36}`, `github_pat_...` |
+  | Telegram токены | `\d{8,12}:[A-Za-z0-9_-]{35}` |
+  | OpenAI API ключи | `sk-[A-Za-z0-9]{48}`, `sk-proj-...` |
+  | AWS ключи | `AKIA[0-9A-Z]{16}` |
+  | Приватные ключи | `-----BEGIN.*PRIVATE KEY-----` |
+  | Пароли в коде | `password\s*=\s*["'][^"']{6,}["']` |
+  | **Hardcoded IP** | `["']\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}["']` в Python-файлах |
+  | JWT токены | `eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+` |
+  | **URL лицензионного сервера** | любой hardcoded https://IP или домен в license.py |
+  | **Структура ключей лицензий** | `KEY_PREFIX` значение не должно быть хардкодом в публичном коде |
+  | **HWID алгоритм** | детали HWID-генерации (CPU/MAC/disk) не должны описываться в README/комментариях |
+  | **Пароли SSH/VPS** | `root@\d+\.\d+\.\d+\.\d+`, `password=`, учётные данные сервера |
 
-## Шаг 1 — Автоматическое сканирование через ripgrep
+  ### 🟡 Предупреждение — требует ревью
 
-```bash
-# Установить gitleaks (если не установлен)
-# https://github.com/gitleaks/gitleaks
+  | Тип | Пример |
+  |---|---|
+  | IP в конфиге | IP-адрес как дефолтное значение ENV |
+  | `verify=False` | SSL проверка отключена без комментария |
+  | Чувствит. файлы | `*.env`, `*.pem`, `*.key`, `*.p12` |
+  | `TODO: remove` | Временный хардкод, который забыли убрать |
+  | **Download URL захардкожен** | URL для скачивания .exe в публичном коде |
+  | **Структура БД лицензий** | таблицы и поля не должны быть в README |
 
-# Запуск через встроенные паттерны
-rg --no-heading -n \
-  -e 'ghp_[A-Za-z0-9]{36}' \
-  -e 'github_pat_[A-Za-z0-9_]{82}' \
-  -e '[0-9]{8,12}:[A-Za-z0-9_-]{35}' \
-  -e 'sk-[A-Za-z0-9]{48}' \
-  -e 'sk-proj-[A-Za-z0-9_-]+' \
-  -e 'AKIA[0-9A-Z]{16}' \
-  -e '-----BEGIN.*(RSA |EC |OPENSSH )?PRIVATE KEY-----' \
-  -e 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}' \
-  --glob '!.git' \
-  --glob '!*.pyc' \
-  --glob '!__pycache__' \
-  . 2>/dev/null
+  ## Правила защиты от кражи проекта (публичный репозиторий)
 
-# Поиск хардкодных паролей в Python
-rg --no-heading -n \
-  -e 'password\s*=\s*["\x27][^"\x27]{6,}["\x27]' \
-  -e 'passwd\s*=\s*["\x27][^"\x27]{6,}["\x27]' \
-  -e 'secret\s*=\s*["\x27][^"\x27]{6,}["\x27]' \
-  -e 'token\s*=\s*["\x27][A-Za-z0-9_\-\.]{20,}["\x27]' \
-  --glob '*.py' \
-  --glob '!.git' \
-  . 2>/dev/null
+  Даже если репозиторий публичный — следующие данные НИКОГДА не должны попасть в код:
 
-# Поиск IP-адресов в Python-коде (исключая localhost и документацию)
-rg --no-heading -n \
-  -e '["x27]\s*\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}' \
-  --glob '*.py' \
-  --glob '!.git' \
-  . 2>/dev/null | grep -v '127\.0\.0\.' | grep -v '0\.0\.0\.0' | grep -v '255\.'
+  ### 🛡️ Защита лицензионной системы
+  - `LICENSE_API_URL` и `LICENSE_VERIFY_URL` — только через ENV переменные, никакого fallback
+  - IP-адрес лицензионного сервера — НИКОГДА в коде (ни как строка, ни как комментарий, ни в документации)
+  - `JWT_SECRET` — только ENV, никакого дефолтного значения
+  - `HWID_SALT` — только ENV, никакого fallback-значения
+  - Формат ключа лицензии (структура групп, длина) — не описывать в публичном README
 
-# Проверка случайных файлов с credentials
-find . -name "*.env" -o -name "*.pem" -o -name "*.key" -o -name "*.p12" \
-  -o -name "*.pfx" -o -name "credentials.json" -o -name "service-account*.json" \
-  2>/dev/null | grep -v ".git"
-```
+  ### 🛡️ Защита серверной инфраструктуры
+  - IP VPS/сервера — только в `.env` файлах (в .gitignore!)
+  - Логин/пароль SSH — только в secrets GitHub Actions или Vault
+  - `DB_PATH` — только ENV
+  - `BOT_TOKEN` — только ENV (блокировать в CI если найден)
+  - `CRYPTO_BOT_TOKEN` — только ENV
 
-## Шаг 2 — Проверка .gitignore
+  ### 🛡️ Защита бизнес-логики
+  - Алгоритм генерации HWID нельзя описывать детально в комментариях
+  - Анти-отладочные проверки нельзя документировать в README
+  - Структуру БД лицензий нельзя выкладывать в публичную документацию
 
-Убедитесь что эти паттерны есть в `.gitignore`:
+  ## Шаг 1 — Автоматическое сканирование
 
-```gitignore
-# Секреты и credentials
-.env
-.env.*
-*.env
-*.pem
-*.key
-*.p12
-*.pfx
-credentials.json
-service-account*.json
-*_credentials.json
-secrets/
-config/secrets/
+  ```bash
+  # Критичные секреты
+  rg --no-heading -n \
+    -e 'ghp_[A-Za-z0-9]{36}' \
+    -e 'github_pat_[A-Za-z0-9_]{82}' \
+    -e '[0-9]{8,12}:[A-Za-z0-9_-]{35}' \
+    -e 'sk-[A-Za-z0-9]{48}' \
+    -e 'sk-proj-[A-Za-z0-9_-]+' \
+    -e 'AKIA[0-9A-Z]{16}' \
+    -e '-----BEGIN.*(RSA |EC |OPENSSH )?PRIVATE KEY-----' \
+    -e 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}' \
+    --glob '!.git' --glob '!*.pyc' --glob '!__pycache__' . 2>/dev/null
 
-# Временные файлы с данными пользователей
-*_export_*.txt
-*_credentials_*.txt
-FmailSender_*.txt
-```
+  # Поиск хардкодных IP-адресов в Python (исключая localhost/any/broadcast)
+  rg --no-heading -n \
+    -e '"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}"' \
+    -e "'.\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'" \
+    --glob '*.py' --glob '!.git' . 2>/dev/null \
+    | grep -v '127\.0\.0\.' | grep -v '0\.0\.0\.0' | grep -v '255\.' | grep -v '127\.0\.1\.'
 
-## Шаг 3 — Если найдены секреты
+  # URL лицензионного сервера захардкожены?
+  rg --no-heading -n \
+    -e 'LICENSE_API_URL\s*=\s*["\''][^os\.environ]' \
+    -e 'LICENSE_VERIFY_URL\s*=\s*["\''][^os\.environ]' \
+    -e '_DEFAULT_LICENSE_HOST' \
+    --glob '*.py' . 2>/dev/null
 
-### Немедленные действия:
-1. **НЕ ПУШИТЬ** код с секретами
-2. **Отозвать** скомпрометированные токены/ключи НЕМЕДЛЕННО:
-   - GitHub токен: Settings → Developer settings → Personal access tokens → Revoke
-   - Telegram токен: @BotFather → `/mybots` → API Token → Revoke
-   - OpenAI ключ: platform.openai.com → API keys → Delete
-3. **Удалить** файл из истории git:
-   ```bash
-   git filter-branch --force --index-filter \
-     "git rm --cached --ignore-unmatch путь/к/файлу" \
-     --prune-empty --tag-name-filter cat -- --all
-   git push origin --force --all
-   ```
-4. **Использовать ENV переменные** вместо хардкода:
-   ```python
-   # ❌ Плохо
-   API_KEY = "sk-abc123..."
-   
-   # ✅ Хорошо
-   import os
-   API_KEY = os.environ.get("OPENAI_API_KEY")
-   if not API_KEY:
-       raise RuntimeError("OPENAI_API_KEY env var is required")
-   ```
+  # Пароли и токены
+  rg --no-heading -n \
+    -e 'password\s*=\s*["\''][^"\']{6,}["\'']' \
+    -e 'passwd\s*=\s*["\''][^"\']{6,}["\'']' \
+    -e 'secret\s*=\s*["\''][^"\']{6,}["\'']' \
+    -e 'token\s*=\s*["\''][A-Za-z0-9_\-\.]{20,}["\'']' \
+    --glob '*.py' --glob '!.git' . 2>/dev/null
 
-## Шаг 4 — Замена хардкодных значений
+  # SSH credentials в любых файлах
+  rg --no-heading -n \
+    -e 'root@\d+\.\d+\.\d+\.\d+' \
+    -e 'ssh.*password' \
+    --glob '!.git' . 2>/dev/null
+  ```
 
-### IP-адрес сервера:
-```python
-# ❌ Плохо — IP захардкожен
-LICENSE_URL = "https://31.76.100.190:8000/v1/activate"
+  ## Шаг 2 — Проверка ENV-only паттерна
 
-# ✅ Хорошо — через ENV с обязательной проверкой
-import os
-_raw = os.environ.get("LICENSE_API_URL", "").strip()
-if not _raw:
-    raise RuntimeError(
-        "LICENSE_API_URL env var is required.\n"
-        "Set it in .env or export before running."
-    )
-LICENSE_URL = _raw
-```
+  Каждый чувствительный параметр должен использовать шаблон:
+  ```python
+  # ✅ Правильно
+  VALUE = os.environ.get("KEY", "")  # без fallback значения!
+  # Ещё лучше — fail fast:
+  def _require_env(key):
+      val = os.environ.get(key, "").strip()
+      if not val: sys.exit(f"FATAL: {key} not set")
+      return val
+  VALUE = _require_env("KEY")
 
-### Пароли и токены:
-```python
-# Используйте dotenv для локальной разработки
-from dotenv import load_dotenv
-load_dotenv()  # читает .env (не в git!)
+  # ❌ ЗАПРЕЩЕНО
+  VALUE = os.environ.get("KEY", "https://31.76.100.190:8000")  # hardcoded fallback
+  VALUE = "secret_value"  # полностью хардкод
+  ```
 
-DB_PASSWORD = os.environ["DB_PASSWORD"]   # KeyError если не задан — явная ошибка
-BOT_TOKEN = os.environ.get("BOT_TOKEN")   # None если не задан — тихая ошибка
-```
+  ## Шаг 3 — Проверка .gitignore
 
-## Шаг 5 — Интеграция в CI (GitHub Actions)
+  ```gitignore
+  # Обязательно в .gitignore:
+  .env
+  *.env
+  *.pem
+  *.key
+  *.p12
+  *.pfx
+  *.dat         # license.dat
+  *.db          # licenses.db
+  fsm_storage.json
+  server/.env
+  credentials.json
+  hwid.dat
+  ```
 
-Добавьте в `.github/workflows/secret-scan.yml` (уже создан для этого репо):
+  ## Шаг 4 — Проверка GitHub Secrets (не в коде!)
 
-```yaml
-- name: Secret scan
-  uses: gitleaks/gitleaks-action@v2
-  env:
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
+  Все эти значения должны быть ТОЛЬКО в GitHub Secrets или .env (в .gitignore):
+  - `BOT_TOKEN`
+  - `CRYPTO_BOT_TOKEN`
+  - `JWT_SECRET`
+  - `HWID_SALT`
+  - `LICENSE_API_URL`
+  - `LICENSE_VERIFY_URL`
+  - `LICENSE_SSL_VERIFY`
+  - `ADMIN_IDS`
+  - `OPENAI_API_KEY`
 
-Или используйте встроенный скрипт из `secret-scan.yml`.
+  ## Шаг 5 — Автоматическая блокировка в CI
 
-## Связанные компоненты
+  Добавь в .github/workflows/secret-scan.yml проверку на IP и URL лицензии:
 
-- `.github/workflows/secret-scan.yml` — автосканирование в CI
-- `.github/workflows/build.yml` — шаг `Secret scan before build`  
-- `core/license.py` — правильное использование ENV для LICENSE_API_URL
-- `server/config.py` — правильное использование ENV для BOT_TOKEN, JWT_SECRET
+  ```yaml
+  - name: Scan for hardcoded IPs and license URLs
+    shell: bash
+    run: |
+      FAILED=0
+      # Ищем хардкодные IP в Python файлах
+      FOUND=$(grep -rE '"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}"' \
+        --include="*.py" --exclude-dir=.git --exclude-dir=__pycache__ . 2>/dev/null \
+        | grep -v '127.0.0' | grep -v '0.0.0.0' | grep -v '255.' || true)
+      if [ -n "$FOUND" ]; then
+        echo "CRITICAL: Hardcoded IP found in Python files:"; echo "$FOUND"; FAILED=1
+      fi
+      # Ищем хардкодные URL лицензии
+      FOUND2=$(grep -rE '_DEFAULT_LICENSE_HOST|LICENSE_API_URL\s*=\s*"https?://' \
+        --include="*.py" . 2>/dev/null || true)
+      if [ -n "$FOUND2" ]; then
+        echo "CRITICAL: Hardcoded license URL found:"; echo "$FOUND2"; FAILED=1
+      fi
+      [ $FAILED -eq 1 ] && exit 1 || echo "IP/URL scan passed"
+  ```
 
-## Исторический контекст
+  ## Реакция на находку
 
-⚠️ В июне 2026 года в репозиторий был случайно закоммичен файл с credentials:
-- GitHub PAT token (`ghp_b0q7lv8...`) — **отозван, замените на новый**
-- VPS root password и IP-адрес — **смените root пароль на VPS**
-- Telegram bot tokens — **отзовите через @BotFather**
+  1. **GitHub Token / Telegram Token** → немедленно отозвать в настройках аккаунта
+  2. **IP сервера** → сменить IP VPS или закрыть порт на фаерволе
+  3. **JWT_SECRET / HWID_SALT утечка** → сменить значение + аннулировать все лицензии
+  4. **SSH пароль** → сменить пароль немедленно, проверить логи подключений
 
-Все эти credentials скомпрометированы и не должны использоваться.
+  ## Автоматизация
+
+  Добавь в pre-commit hook (`.git/hooks/pre-commit`):
+  ```bash
+  #!/bin/bash
+  python .agents/skills/secret-guard/pre_commit_check.py || exit 1
+  ```
+  
