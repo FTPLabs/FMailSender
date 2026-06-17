@@ -1,12 +1,14 @@
 """
 Система лицензирования: HWID-генератор, проверка ключа, JWT-токен.
-v2.8.0 security fixes:
-  - _get_fernet_key(): HWID_SALT обязателен для шифрования; fallback только для dev
-  - JWT_SECRET: требуется ENV, иначе offline-проверка отключена с ясным предупреждением
-  - generate_hwid(): стабильный HWID из файла между перезапусками
-  - WMI-вызовы параллельны через ThreadPoolExecutor, таймаут 2 с
-  - Онлайн-отзыв лицензии: сервер вернул 403/404 — файл удаляется
-  - Периодическая онлайн-проверка раз в 24 ч (в фоне)
+
+HWID v3.3.2 — стабильная привязка к железу:
+  - Состав: CPU ProcessorId + Motherboard SerialNumber + GPU Name (sorted)
+  - НЕ включает: MAC-адрес (нестабилен при VPN/Docker/Hyper-V),
+    серийник диска, HWID_SALT (серверная константа)
+  - Меняется при замене CPU / материнской платы / видеокарты
+  - НЕ меняется при: переустановке Windows, смене сети, VPN, обновлениях
+  - Нет файлового кэша — HWID всегда вычисляется из оборудования
+  - Кэш в памяти только на время одной сессии
 """
 import base64
 import ctypes
@@ -141,6 +143,12 @@ def _load_license_data() -> Optional[dict]:
 
 
 # ── HWID-генератор ────────────────────────────────────────────────────────────
+# Состав: CPU ProcessorId + Motherboard SerialNumber + GPU Name(s, sorted).
+# НЕ используем: MAC (нестабилен — VPN/Docker/Hyper-V меняют его в любой момент),
+#                серийник диска (незначительная замена железа),
+#                HWID_SALT (серверная константа, не должна влиять на клиентский ID).
+# Изменится только если заменить CPU, материнскую плату или видеокарту.
+
 
 def _run_safe(fn, timeout: float = 2.0) -> str:
     with ThreadPoolExecutor(max_workers=1) as ex:
@@ -152,15 +160,16 @@ def _run_safe(fn, timeout: float = 2.0) -> str:
 
 
 def _get_cpu_id() -> str:
+    """CPU ProcessorId — не меняется без замены процессора."""
     if platform.system() != "Windows":
-        return str(uuid.getnode())
+        return platform.node() or "UNKNOWN_CPU"
     try:
         import wmi
         c = wmi.WMI()
         for proc in c.Win32_Processor():
-            pid = getattr(proc, "ProcessorId", "")
+            pid = getattr(proc, "ProcessorId", "").strip()
             if pid:
-                return str(pid).strip()
+                return pid
     except Exception:
         pass
     try:
@@ -170,53 +179,25 @@ def _get_cpu_id() -> str:
         )
         for line in result.stdout.splitlines():
             if "ProcessorId=" in line:
-                return line.split("=")[1].strip()
-    except Exception:
-        pass
-    return str(uuid.getnode())
-
-
-def _get_mac_address() -> str:
-    return hex(uuid.getnode())[2:].upper().zfill(12)
-
-
-def _get_disk_serial() -> str:
-    if platform.system() != "Windows":
-        return "UNKNOWN_DISK"
-    try:
-        import wmi
-        c = wmi.WMI()
-        for disk in c.Win32_DiskDrive():
-            s = getattr(disk, "SerialNumber", "")
-            if s and s.strip():
-                return s.strip()
-    except Exception:
-        pass
-    try:
-        result = subprocess.run(
-            ["wmic", "diskdrive", "get", "SerialNumber", "/value"],
-            capture_output=True, text=True, timeout=2,
-        )
-        for line in result.stdout.splitlines():
-            if "SerialNumber=" in line:
-                val = line.split("=")[1].strip()
+                val = line.split("=", 1)[1].strip()
                 if val:
                     return val
     except Exception:
         pass
-    return "UNKNOWN_DISK"
+    return "UNKNOWN_CPU"
 
 
 def _get_board_id() -> str:
+    """Серийник материнской платы — не меняется без замены платы."""
     if platform.system() != "Windows":
         return "UNKNOWN_BOARD"
     try:
         import wmi
         c = wmi.WMI()
         for board in c.Win32_BaseBoard():
-            s = getattr(board, "SerialNumber", "")
-            if s and s.strip():
-                return s.strip()
+            s = getattr(board, "SerialNumber", "").strip()
+            if s and s not in ("", "None", "Default string", "To be filled by O.E.M."):
+                return s
     except Exception:
         pass
     try:
@@ -226,67 +207,101 @@ def _get_board_id() -> str:
         )
         for line in result.stdout.splitlines():
             if "SerialNumber=" in line:
-                val = line.split("=")[1].strip()
-                if val:
+                val = line.split("=", 1)[1].strip()
+                if val and val not in ("None", "Default string", "To be filled by O.E.M."):
                     return val
     except Exception:
         pass
     return "UNKNOWN_BOARD"
 
 
-def _load_hwid_from_file() -> Optional[str]:
+def _get_gpu_id() -> str:
+    """Название(я) видеокарт — меняется при замене/добавлении GPU."""
+    if platform.system() != "Windows":
+        return "UNKNOWN_GPU"
     try:
-        if not _HWID_FILE.exists():
-            return None
-        f = Fernet(_get_fernet_key())
-        val = f.decrypt(_HWID_FILE.read_bytes()).decode()
-        return val if len(val) == 32 and val.isalnum() else None
-    except Exception:
-        return None
-
-
-def _save_hwid_to_file(hwid: str) -> None:
-    try:
-        _HWID_FILE.parent.mkdir(parents=True, exist_ok=True)
-        f = Fernet(_get_fernet_key())
-        _HWID_FILE.write_bytes(f.encrypt(hwid.encode()))
+        import wmi
+        c = wmi.WMI()
+        names = sorted(
+            getattr(g, "Name", "").strip()
+            for g in c.Win32_VideoController()
+            if getattr(g, "Name", "").strip()
+        )
+        if names:
+            return "|".join(names)
     except Exception:
         pass
+    try:
+        result = subprocess.run(
+            ["wmic", "path", "win32_VideoController", "get", "Name", "/value"],
+            capture_output=True, text=True, timeout=2,
+        )
+        names = sorted(
+            line.split("=", 1)[1].strip()
+            for line in result.stdout.splitlines()
+            if "Name=" in line and line.split("=", 1)[1].strip()
+        )
+        if names:
+            return "|".join(names)
+    except Exception:
+        pass
+    return "UNKNOWN_GPU"
 
 
 def generate_hwid() -> str:
     """
-    Генерирует HWID. Кэшируется в памяти И на диске.
-    Стабилен между перезапусками.
+    Вычисляет HWID из стабильных аппаратных идентификаторов.
+
+    Формула: SHA256(CPU_ProcessorId | MB_SerialNumber | GPU_Name)[:32]
+
+    Стабилен при:
+      - переустановке Windows / обновлении ОС
+      - смене сетевой карты, VPN, Docker, Hyper-V
+      - замене жёсткого диска / SSD
+      - изменении HWID_SALT на сервере
+
+    Меняется при замене:
+      - процессора (CPU)
+      - материнской платы
+      - видеокарты (или добавлении/удалении GPU)
+
+    Кэшируется в памяти на время сессии. При каждом запуске пересчитывается
+    из оборудования — файловый кэш НЕ используется (файл hwid.dat удаляется
+    при первом запуске новой версии, чтобы не тянуть старые нестабильные ID).
     """
     global _hwid_cache
     with _hwid_lock:
         if _hwid_cache is not None:
             return _hwid_cache
-        saved = _load_hwid_from_file()
-        if saved:
-            _hwid_cache = saved
-            return _hwid_cache
-        mac = _get_mac_address()
+
+        # Удаляем устаревший файловый кэш при наличии (однократно при обновлении)
+        try:
+            if _HWID_FILE.exists():
+                _HWID_FILE.unlink()
+        except Exception:
+            pass
+
         with ThreadPoolExecutor(max_workers=3) as ex:
             f_cpu   = ex.submit(_get_cpu_id)
-            f_disk  = ex.submit(_get_disk_serial)
             f_board = ex.submit(_get_board_id)
+            f_gpu   = ex.submit(_get_gpu_id)
             try:
                 cpu = f_cpu.result(timeout=2.0) or ""
             except Exception:
                 cpu = ""
             try:
-                disk = f_disk.result(timeout=2.0) or ""
-            except Exception:
-                disk = ""
-            try:
                 board = f_board.result(timeout=2.0) or ""
             except Exception:
                 board = ""
-        raw = f"{cpu}|{mac}|{disk}|{board}|{HWID_SALT}"
+            try:
+                gpu = f_gpu.result(timeout=2.0) or ""
+            except Exception:
+                gpu = ""
+
+        raw = f"{cpu}|{board}|{gpu}"
         _hwid_cache = hashlib.sha256(raw.encode()).hexdigest()[:32].upper()
-        _save_hwid_to_file(_hwid_cache)
+        logger.debug("HWID computed: cpu=%s… board=%s… gpu=%s…",
+                     cpu[:8], board[:8], gpu[:16])
         return _hwid_cache
 
 
