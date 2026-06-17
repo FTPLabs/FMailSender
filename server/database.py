@@ -106,50 +106,50 @@ def _generate_key() -> str:
 
 
 async def _migrate_db() -> None:
-      """ALTER TABLE миграции для существующих БД без пересоздания таблиц."""
-      for _sql in ["ALTER TABLE users ADD COLUMN terms_accepted INTEGER DEFAULT 0"]:
-          async with _db() as conn:
-              try:
-                  await conn.execute(_sql)
-                  await conn.commit()
-              except Exception:
-                  pass  # колонка уже существует
+    """ALTER TABLE миграции для существующих БД без пересоздания таблиц."""
+    for _sql in ["ALTER TABLE users ADD COLUMN terms_accepted INTEGER DEFAULT 0"]:
+        async with _db() as conn:
+            try:
+                await conn.execute(_sql)
+                await conn.commit()
+            except Exception:
+                pass  # колонка уже существует
 
 
-  async def set_terms_accepted(telegram_id: int) -> None:
-      """Сохраняет факт принятия условий — переживает перезапуск бота."""
-      async with _db() as conn:
-          await conn.execute(
-              "UPDATE users SET terms_accepted=1 WHERE telegram_id=?", (telegram_id,)
+async def set_terms_accepted(telegram_id: int) -> None:
+    """Сохраняет факт принятия условий — переживает перезапуск бота."""
+    async with _db() as conn:
+        await conn.execute(
+            "UPDATE users SET terms_accepted=1 WHERE telegram_id=?", (telegram_id,)
+        )
+        await conn.commit()
+
+
+async def get_terms_accepted(telegram_id: int) -> bool:
+    """True если пользователь ранее принял условия."""
+    async with _db() as conn:
+        async with conn.execute(
+            "SELECT terms_accepted FROM users WHERE telegram_id=?", (telegram_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return bool(row and row[0])
+
+
+async def init_db() -> None:
+  # PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL
+  # уже применяются в _db() context manager — не дублируем.
+  async with _db() as db:
+      # FIX: executescript() auto-commits — заменён на отдельные execute() для корректной транзакции
+      for _stmt in [s.strip() for s in CREATE_SQL.split(";") if s.strip()]:
+          await db.execute(_stmt)
+      for plan_id, plan in PLANS.items():
+          await db.execute(
+              "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+              (f"price_{plan_id}", str(plan["price_usdt"])),
           )
-          await conn.commit()
-
-
-  async def get_terms_accepted(telegram_id: int) -> bool:
-      """True если пользователь ранее принял условия."""
-      async with _db() as conn:
-          async with conn.execute(
-              "SELECT terms_accepted FROM users WHERE telegram_id=?", (telegram_id,)
-          ) as cur:
-              row = await cur.fetchone()
-              return bool(row and row[0])
-
-
-  async def init_db() -> None:
-    # PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL
-    # уже применяются в _db() context manager — не дублируем.
-    async with _db() as db:
-        # FIX: executescript() auto-commits — заменён на отдельные execute() для корректной транзакции
-        for _stmt in [s.strip() for s in CREATE_SQL.split(";") if s.strip()]:
-            await db.execute(_stmt)
-        for plan_id, plan in PLANS.items():
-            await db.execute(
-                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-                (f"price_{plan_id}", str(plan["price_usdt"])),
-            )
-        await db.commit()
-    await _migrate_db()
-    logger.info("Database initialized: %s", DB_PATH)
+      await db.commit()
+  await _migrate_db()
+  logger.info("Database initialized: %s", DB_PATH)
 
 
 async def upsert_user(telegram_id: int, username: str, first_name: str) -> None:
