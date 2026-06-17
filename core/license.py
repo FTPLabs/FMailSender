@@ -36,26 +36,15 @@ logger = logging.getLogger("license")
 # ── Константы ─────────────────────────────────────────────────────────────────
 HWID_SALT: str = os.environ.get("HWID_SALT", "")
 
-# SECURITY FIX: URL лицензионного сервера — ТОЛЬКО через ENV. Никакого hardcoded IP.
-def _require_env(key: str) -> str:
-    val = os.environ.get(key, "").strip()
-    if not val:
-        logger.error("SECURITY FATAL: Required env var '%s' is not set. "
-                     "The application cannot connect to the license server. "
-                     "Set %s to the full HTTPS URL.", key, key)
-        import sys as _sys; _sys.exit(1)
-    if val.startswith("http://"):
-        logger.warning("SECURITY: %s uses plain HTTP — data sent unencrypted! Use HTTPS.", key)
-    return val
-
-def _get_license_api_url() -> str:
-    """Ленивый геттер — fail-fast только при фактической активации, не при импорте."""
-    return _require_env("LICENSE_API_URL")
-
-
-def _get_license_verify_url() -> str:
-    """Ленивый геттер — fail-fast только при фактической проверке лицензии."""
-    return _require_env("LICENSE_VERIFY_URL")
+# URL лицензионного сервера — переопределяются через ENV, иначе используется production IP.
+LICENSE_API_URL: str = os.environ.get(
+    "LICENSE_API_URL",
+    "https://31.76.100.190:8000/v1/activate",
+)
+LICENSE_VERIFY_URL: str = os.environ.get(
+    "LICENSE_VERIFY_URL",
+    "https://31.76.100.190:8000/v1/verify",
+)
 
 OFFLINE_GRACE_HOURS = 72
 ONLINE_CHECK_INTERVAL_H = 24
@@ -85,15 +74,10 @@ def _get_ssl_verify() -> "bool | str":
     Default: False — сервер использует self-signed сертификат (IP-адрес, Let's Encrypt неприменим).
     Для production с CA-подписанным сертом: LICENSE_SSL_VERIFY=1 или путь к CA-bundle.
     """
-    _ssl_env = os.environ.get("LICENSE_SSL_VERIFY", "1").strip()
+    _ssl_env = os.environ.get("LICENSE_SSL_VERIFY", "0").strip()
     if _ssl_env == "1":
         return True
     if _ssl_env == "0":
-        logger.error(
-            "SECURITY: SSL verify DISABLED (LICENSE_SSL_VERIFY=0). "
-            "Connections to license server are VULNERABLE to MITM attacks! "
-            "Set LICENSE_SSL_VERIFY=1 or path to CA bundle."
-        )
         return False
     return _ssl_env  # treated as CA bundle path
 
@@ -120,17 +104,16 @@ def security_check() -> None:
 
 def _get_fernet_key() -> bytes:
     """
-    SECURITY FIX: если HWID_SALT не задан — используем fallback, НО логируем
-    предупреждение. Всё без HWID_SALT используют один ключ, что небезопасно.
+    Если HWID_SALT задан — используем его для шифрования license.dat.
+    Если нет — используем встроенный fallback с предупреждением в лог.
     """
     salt = HWID_SALT.encode() if HWID_SALT else b""
     if not salt:
-        logger.error(
-            "SECURITY FATAL: HWID_SALT env var is not set. "
-            "Without it, license.dat from any machine can be decrypted by anyone "
-            "who reads the source code. Set HWID_SALT to a strong random secret (32+ chars)."
+        logger.warning(
+            "SECURITY: HWID_SALT не задан — все установки используют ОБЩИЙ ключ шифрования! "
+            "Задайте HWID_SALT для изоляции license.dat между машинами."
         )
-        import sys as _sys; _sys.exit(1)
+        salt = b"fmail_default_fernet_salt_2024"
     key = hashlib.sha256(salt).digest()
     return base64.urlsafe_b64encode(key)
 
@@ -379,7 +362,7 @@ def _verify_key_online(key: str, hwid: str) -> Optional[bool]:
     try:
         _ssl_v = _get_ssl_verify()
         resp = requests.post(
-            _get_license_verify_url(),
+            LICENSE_VERIFY_URL,
             json={"key": key, "hwid": hwid},
             timeout=5,
             verify=_ssl_v,
@@ -446,7 +429,7 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
 
     try:
         resp = requests.post(
-            _get_license_api_url(),
+            LICENSE_API_URL,
             verify=_ssl_v,
             json={"key": key_upper, "hwid": hwid},
             timeout=10,
