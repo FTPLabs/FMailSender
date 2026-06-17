@@ -107,6 +107,8 @@ class WarmupScheduler:
         try:
             start = date.fromisoformat(record.start_date)
             expected_day = (date.today() - start).days + 1
+            if expected_day < 1:
+                return  # FIX: start_date в будущем — некорректная запись, пропускаем
             if expected_day > record.current_day:
                 record.current_day = min(expected_day, 60)
         except (ValueError, TypeError):
