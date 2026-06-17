@@ -1,7 +1,7 @@
 """
 Система лицензирования: HWID-генератор, проверка ключа, JWT-токен.
 
-HWID v3.3.2 — стабильная привязка к железу:
+HWID v3.4.0 — стабильная привязка к железу:
   - Состав: CPU ProcessorId + Motherboard SerialNumber + GPU Name (sorted)
   - НЕ включает: MAC-адрес (нестабилен при VPN/Docker/Hyper-V),
     серийник диска, HWID_SALT (серверная константа)
@@ -51,7 +51,8 @@ LICENSE_VERIFY_URL: str = os.environ.get(
 OFFLINE_GRACE_HOURS = 72
 ONLINE_CHECK_INTERVAL_H = 24
 LICENSE_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "license.dat"
-_HWID_FILE   = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "hwid.dat"
+_HWID_FILE         = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "hwid.dat"
+_HWID_COMPONENTS_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "hwid_components.json"
 
 KEY_PREFIX = "FMSND"
 
@@ -159,7 +160,44 @@ def _run_safe(fn, timeout: float = 2.0) -> str:
             return ""
 
 
-def _get_cpu_id() -> str:
+
+  def _load_component_cache() -> dict:
+      """Загружает кэш аппаратных компонентов — резерв при таймауте WMI."""
+      try:
+          if _HWID_COMPONENTS_FILE.exists():
+              return json.loads(_HWID_COMPONENTS_FILE.read_text(encoding="utf-8"))
+      except Exception:
+          pass
+      return {}
+
+
+  def _save_component_cache(cache: dict) -> None:
+      """Сохраняет успешно прочитанные компоненты для следующих запусков."""
+      try:
+          _HWID_COMPONENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+          _HWID_COMPONENTS_FILE.write_text(
+              json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+      except Exception:
+          pass
+
+
+  def _get_machine_guid() -> str:
+      """Читает Windows MachineGuid — уникален и стабилен для каждой установки ОС."""
+      if platform.system() != "Windows":
+          return ""
+      try:
+          import winreg
+          key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                               r"SOFTWARE\Microsoft\Cryptography")
+          val, _ = winreg.QueryValueEx(key, "MachineGuid")
+          winreg.CloseKey(key)
+          return str(val).strip()
+      except Exception:
+          return ""
+
+
+  def _get_cpu_id() -> str:
     """CPU ProcessorId — не меняется без замены процессора."""
     if platform.system() != "Windows":
         return platform.node() or "UNKNOWN_CPU"
@@ -281,25 +319,46 @@ def generate_hwid() -> str:
         except Exception:
             pass
 
+        # Кэш компонентов — резерв при таймауте WMI
+        comp_cache = _load_component_cache()
+
         with ThreadPoolExecutor(max_workers=3) as ex:
             f_cpu   = ex.submit(_get_cpu_id)
             f_board = ex.submit(_get_board_id)
             f_gpu   = ex.submit(_get_gpu_id)
             try:
-                cpu = f_cpu.result(timeout=2.0) or ""
+                cpu = f_cpu.result(timeout=3.0) or ""
             except Exception:
                 cpu = ""
             try:
-                board = f_board.result(timeout=2.0) or ""
+                board = f_board.result(timeout=3.0) or ""
             except Exception:
                 board = ""
             try:
-                gpu = f_gpu.result(timeout=2.0) or ""
+                gpu = f_gpu.result(timeout=3.0) or ""
             except Exception:
                 gpu = ""
 
-        raw = f"{cpu}|{board}|{gpu}"
-        _hwid_cache = hashlib.sha256(raw.encode()).hexdigest()[:32].upper()
+        # При таймауте WMI — берём значение из прошлого успешного запуска
+          if not cpu or cpu == "UNKNOWN_CPU":
+              cpu = comp_cache.get("cpu", "UNKNOWN_CPU")
+          if not board or board == "UNKNOWN_BOARD":
+              board = comp_cache.get("board", "UNKNOWN_BOARD")
+          if not gpu or gpu == "UNKNOWN_GPU":
+              gpu = comp_cache.get("gpu", "UNKNOWN_GPU")
+          # Обновляем кэш только успешно прочитанными значениями
+          _cu = False
+          if cpu != "UNKNOWN_CPU" and comp_cache.get("cpu") != cpu:
+              comp_cache["cpu"] = cpu; _cu = True
+          if board != "UNKNOWN_BOARD" and comp_cache.get("board") != board:
+              comp_cache["board"] = board; _cu = True
+          if gpu != "UNKNOWN_GPU" and comp_cache.get("gpu") != gpu:
+              comp_cache["gpu"] = gpu; _cu = True
+          if _cu:
+              _save_component_cache(comp_cache)
+
+          raw = f"{cpu}|{board}|{gpu}"
+          _hwid_cache = hashlib.sha256(raw.encode()).hexdigest()[:32].upper()
         logger.debug("HWID computed: cpu=%s… board=%s… gpu=%s…",
                      cpu[:8], board[:8], gpu[:16])
         return _hwid_cache
