@@ -481,15 +481,7 @@ async def _show_main_menu(target, user) -> None:
         f"Выбери действие:"
     )
     markup = kb_main(is_admin(user.id))
-    if hasattr(target, "edit_text"):
-        try:
-            await target.edit_text(text, reply_markup=markup)
-            return
-        except Exception:
-            pass
-        await target.message.answer(text, reply_markup=markup)
-    else:
-        await target.answer(text, reply_markup=markup)
+    await send_or_edit(target, text, reply_markup=markup)
 
 
 @dp.message(CommandStart())
