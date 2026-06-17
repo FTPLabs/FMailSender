@@ -340,25 +340,25 @@ def generate_hwid() -> str:
                 gpu = ""
 
         # При таймауте WMI — берём значение из прошлого успешного запуска
-          if not cpu or cpu == "UNKNOWN_CPU":
-              cpu = comp_cache.get("cpu", "UNKNOWN_CPU")
-          if not board or board == "UNKNOWN_BOARD":
-              board = comp_cache.get("board", "UNKNOWN_BOARD")
-          if not gpu or gpu == "UNKNOWN_GPU":
-              gpu = comp_cache.get("gpu", "UNKNOWN_GPU")
-          # Обновляем кэш только успешно прочитанными значениями
-          _cu = False
-          if cpu != "UNKNOWN_CPU" and comp_cache.get("cpu") != cpu:
-              comp_cache["cpu"] = cpu; _cu = True
-          if board != "UNKNOWN_BOARD" and comp_cache.get("board") != board:
-              comp_cache["board"] = board; _cu = True
-          if gpu != "UNKNOWN_GPU" and comp_cache.get("gpu") != gpu:
-              comp_cache["gpu"] = gpu; _cu = True
-          if _cu:
-              _save_component_cache(comp_cache)
+        if not cpu or cpu == "UNKNOWN_CPU":
+            cpu = comp_cache.get("cpu", "UNKNOWN_CPU")
+        if not board or board == "UNKNOWN_BOARD":
+            board = comp_cache.get("board", "UNKNOWN_BOARD")
+        if not gpu or gpu == "UNKNOWN_GPU":
+            gpu = comp_cache.get("gpu", "UNKNOWN_GPU")
+        # Обновляем кэш только успешно прочитанными значениями
+        _cu = False
+        if cpu != "UNKNOWN_CPU" and comp_cache.get("cpu") != cpu:
+            comp_cache["cpu"] = cpu; _cu = True
+        if board != "UNKNOWN_BOARD" and comp_cache.get("board") != board:
+            comp_cache["board"] = board; _cu = True
+        if gpu != "UNKNOWN_GPU" and comp_cache.get("gpu") != gpu:
+            comp_cache["gpu"] = gpu; _cu = True
+        if _cu:
+            _save_component_cache(comp_cache)
 
-          raw = f"{cpu}|{board}|{gpu}"
-          _hwid_cache = hashlib.sha256(raw.encode()).hexdigest()[:32].upper()
+        raw = f"{cpu}|{board}|{gpu}"
+        _hwid_cache = hashlib.sha256(raw.encode()).hexdigest()[:32].upper()
         logger.debug("HWID computed: cpu=%s… board=%s… gpu=%s…",
                      cpu[:8], board[:8], gpu[:16])
         return _hwid_cache
