@@ -110,7 +110,8 @@ _release_cache_lock: asyncio.Lock | None = None
 # ─── Канал + CAPTCHA ─────────────────────────────────────────────────────────
 CHANNEL_ID: int = -1003769139793  # ID канала для обязательной подписки
 
-_captcha_passed: set[int] = set()  # in-memory кеш успешно прошедших капчу
+_captcha_passed: set[int] = set()   # in-memory кеш успешно прошедших капчу
+_terms_accepted: set[int] = set()   # in-memory кеш принявших условия и политику
 
 _CAPTCHA_POOL: list[str] = [
     "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼",
@@ -236,14 +237,31 @@ def kb_support() -> InlineKeyboardMarkup:
     ])
 
 
-def kb_doc_back() -> InlineKeyboardMarkup:
-    """Клавиатура «назад» для документов."""
+def kb_doc_back(accepted: bool = True) -> InlineKeyboardMarkup:
+    """Клавиатура «назад» для документов.
+    Если пользователь ещё не принял условия — показывает кнопку «Принимаю».
+    """
+    rows = [
+        [
+            InlineKeyboardButton(text="📜 Конфиденциальность", callback_data="show_privacy"),
+            InlineKeyboardButton(text="📋 Оферта", callback_data="show_terms"),
+        ],
+    ]
+    if accepted:
+        rows.append([InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")])
+    else:
+        rows.append([InlineKeyboardButton(text="✅ Принимаю оба документа", callback_data="accept_terms")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_terms_gate() -> InlineKeyboardMarkup:
+    """Клавиатура ворот принятия условий."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="📜 Конфиденциальность", callback_data="show_privacy"),
             InlineKeyboardButton(text="📋 Оферта", callback_data="show_terms"),
         ],
-        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
+        [InlineKeyboardButton(text="✅ Принимаю оба документа", callback_data="accept_terms")],
     ])
 
 
@@ -473,6 +491,20 @@ async def _send_media(chat_id: int, file_id: str, file_type: str, caption: str =
 
 # ─── /start ─────────────────────────────────────────────────────────────────
 
+_TERMS_GATE_TEXT = (
+    "📋 <b>Условия использования</b>\n\n"
+    "Перед началом ознакомься с документами:\n"
+    "• <b>Политика конфиденциальности</b> — принцип полной анонимности, что мы храним и почему\n"
+    "• <b>Публичная оферта</b> — условия лицензии, оплаты и запрещённые действия\n\n"
+    "Нажми кнопки ниже чтобы прочитать, затем подтверди принятие."
+)
+
+
+async def _show_terms_gate(target, user) -> None:
+    """Шаг 3 флоу: принятие политики конфиденциальности и оферты."""
+    await send_or_edit(target, _TERMS_GATE_TEXT, reply_markup=kb_terms_gate())
+
+
 async def _show_main_menu(target, user) -> None:
     """Показывает главное меню (используется после CAPTCHA и проверки подписки)."""
     text = (
@@ -492,12 +524,7 @@ async def cmd_start(message: Message, state: FSMContext):
     except Exception as e:
         logger.error("DB error in cmd_start: %s", e)
 
-    # Администраторы пропускают CAPTCHA и проверку канала
-    if is_admin(user.id):
-        await _show_main_menu(message, user)
-        return
-
-    # Шаг 1: emoji-капча (только при первом запуске или после рестарта бота)
+    # Шаг 1: emoji-капча — обязательна для ВСЕХ (включая админов)
     if user.id not in _captcha_passed:
         correct, emojis = _gen_captcha()
         await state.set_state(CaptchaFlow.waiting)
@@ -509,7 +536,7 @@ async def cmd_start(message: Message, state: FSMContext):
         )
         return
 
-    # Шаг 2: проверка подписки на канал
+    # Шаг 2: подписка на канал — обязательна для ВСЕХ
     if not await _check_subscription(user.id):
         invite = await _make_invite_link(user.id)
         await message.answer(
@@ -518,6 +545,11 @@ async def cmd_start(message: Message, state: FSMContext):
             "После вступления нажми кнопку <b>«Я вступил»</b>.",
             reply_markup=kb_subscription(invite),
         )
+        return
+
+    # Шаг 3: принятие условий — обязательно для ВСЕХ
+    if user.id not in _terms_accepted:
+        await _show_terms_gate(message, user)
         return
 
     await _show_main_menu(message, user)
@@ -535,7 +567,7 @@ async def cb_captcha(query: CallbackQuery, state: FSMContext):
         await state.clear()
         await query.answer("✅ Верно!")
 
-        # После капчи — проверяем подписку
+        # Шаг 2: после капчи — проверяем подписку на канал
         if not await _check_subscription(user.id):
             invite = await _make_invite_link(user.id)
             try:
@@ -550,8 +582,14 @@ async def cb_captcha(query: CallbackQuery, state: FSMContext):
                     "📢 <b>Вступи в канал для доступа:</b>",
                     reply_markup=kb_subscription(invite),
                 )
-        else:
-            await _show_main_menu(query.message, user)
+            return
+
+        # Шаг 3: проверяем принятие условий
+        if user.id not in _terms_accepted:
+            await _show_terms_gate(query, user)
+            return
+
+        await _show_main_menu(query, user)
     else:
         await query.answer("❌ Неверно! Попробуй ещё раз.", show_alert=False)
         # Генерируем новую капчу
@@ -573,18 +611,40 @@ async def cb_check_subscription(query: CallbackQuery):
     user = query.from_user
     await query.answer("⏳ Проверяем подписку...")
 
-    if await _check_subscription(user.id):
-        await _show_main_menu(query.message, user)
-    else:
+    if not await _check_subscription(user.id):
         invite = await _make_invite_link(user.id)
-        await query.answer(
-            "❌ Вы ещё не вступили в канал! Нажмите кнопку выше.",
-            show_alert=True,
-        )
+        await query.answer("❌ Вы ещё не вступили в канал! Нажмите кнопку выше.", show_alert=True)
         try:
             await query.message.edit_reply_markup(reply_markup=kb_subscription(invite))
         except Exception:
             pass
+        return
+
+    # Шаг 3: подписка есть — проверяем принятие условий
+    if user.id not in _terms_accepted:
+        await _show_terms_gate(query, user)
+        return
+
+    await _show_main_menu(query, user)
+
+
+@dp.callback_query(F.data == "accept_terms")
+async def cb_accept_terms(query: CallbackQuery, state: FSMContext):
+    """Пользователь принял политику конфиденциальности и оферту."""
+    user = query.from_user
+
+    # Проверяем что предыдущие шаги тоже пройдены
+    if user.id not in _captcha_passed:
+        await query.answer("⚠️ Сначала пройди проверку безопасности. Напиши /start.", show_alert=True)
+        return
+    if not await _check_subscription(user.id):
+        await query.answer("⚠️ Сначала вступи в канал.", show_alert=True)
+        return
+
+    _terms_accepted.add(user.id)
+    await query.answer("✅ Условия приняты! Добро пожаловать.")
+    await state.clear()
+    await _show_main_menu(query, user)
 
 
 @dp.callback_query(F.data == "menu_main")
@@ -790,14 +850,16 @@ _TERMS_TEXT = """📋 <b>ПУБЛИЧНАЯ ОФЕРТА</b>
 async def cb_show_privacy(query: CallbackQuery, state: FSMContext):
     """Показывает политику конфиденциальности."""
     await state.clear()
-    await send_or_edit(query, _PRIVACY_TEXT, reply_markup=kb_doc_back())
+    accepted = query.from_user.id in _terms_accepted
+    await send_or_edit(query, _PRIVACY_TEXT, reply_markup=kb_doc_back(accepted=accepted))
 
 
 @dp.callback_query(F.data == "show_terms")
 async def cb_show_terms(query: CallbackQuery, state: FSMContext):
     """Показывает условия публичной оферты."""
     await state.clear()
-    await send_or_edit(query, _TERMS_TEXT, reply_markup=kb_doc_back())
+    accepted = query.from_user.id in _terms_accepted
+    await send_or_edit(query, _TERMS_TEXT, reply_markup=kb_doc_back(accepted=accepted))
 
 
 # ─── Поддержка ───────────────────────────────────────────────────────────────
