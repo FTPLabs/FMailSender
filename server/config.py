@@ -138,3 +138,6 @@ PLANS = {
 
 # URL для скачивания актуальной версии программы (обновляется через /setdownload)
 DOWNLOAD_URL: str = os.environ.get("DOWNLOAD_URL", "https://github.com/FTPLabs/FMailSender/releases/latest/download/FMailSender.exe")
+
+# ID Telegram-канала для обязательной подписки (переопределяется через env CHANNEL_ID)
+CHANNEL_ID: int = int(os.environ.get("CHANNEL_ID", "-1003769139793"))
