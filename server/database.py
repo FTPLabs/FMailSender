@@ -378,7 +378,7 @@ async def delete_all_licenses() -> int:
     WARNING: irreversible — admin confirmation is required before calling.
     """
     async with _db() as db:
-        await db.execute("PRAGMA journal_mode=WAL")
+        # PRAGMA journal_mode=WAL уже применяется в _db() — дублирование удалено
         try:
             cur = await db.execute("SELECT COUNT(*) FROM licenses")
             count = (await cur.fetchone())[0]

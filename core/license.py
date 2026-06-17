@@ -321,11 +321,11 @@ class LicenseInfo:
         self.max_threads: int = payload.get("max_threads", 999999)
         self.max_recipients: int = payload.get("max_recipients", 999999)
         exp = payload.get("exp", 0)
-        # FIX ERR-3: use timezone-aware UTC datetime to avoid TZ-offset license expiry bugs
+        # FIX ERR-3: храним timezone-aware UTC datetime — сравниваем только aware с aware
         from datetime import timezone as _tz
         self.expires_at: datetime = (
-            datetime.fromtimestamp(exp, tz=_tz.utc).replace(tzinfo=None)
-            if exp else datetime(2099, 12, 31)
+            datetime.fromtimestamp(exp, tz=_tz.utc)
+            if exp else datetime(2099, 12, 31, tzinfo=_tz.utc)
         )
         self.email: str = payload.get("email", "")
         self.hwid: str = payload.get("hwid", "")
@@ -333,12 +333,13 @@ class LicenseInfo:
 
     @property
     def days_left(self) -> int:
-        delta = self.expires_at - datetime.now(timezone.utc).replace(tzinfo=None)
+        # FIX: сравниваем aware с aware — нет naive/aware мешанины
+        delta = self.expires_at - datetime.now(timezone.utc)
         return max(0, delta.days)
 
     @property
     def is_expired(self) -> bool:
-        return datetime.now(timezone.utc).replace(tzinfo=None) > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
     def __repr__(self) -> str:
         return (

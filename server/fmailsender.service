@@ -1,0 +1,21 @@
+[Unit]
+Description=FMailSender License Server + Telegram Bot
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/fmailsender/server
+Environment="PATH=/opt/fmailsender/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="NO_SSL=1"
+EnvironmentFile=-/opt/fmailsender/server/.env
+ExecStart=/opt/fmailsender/venv/bin/python bot.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fmailsender
+
+[Install]
+WantedBy=multi-user.target

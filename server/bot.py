@@ -104,14 +104,25 @@ _release_cache: dict = {}
 _release_cache_ts: float = 0.0
 _RELEASE_CACHE_TTL = 300  # 5 minutes
 
+# asyncio.Lock инициализируется в main() во избежание привязки к неверному event loop
+_release_cache_lock: asyncio.Lock | None = None
 
-_release_cache_lock: asyncio.Lock = asyncio.Lock()  # Module-level init: thread-safe в Python 3.10+
+# ─── Канал + CAPTCHA ─────────────────────────────────────────────────────────
+CHANNEL_ID: int = -1003769139793  # ID канала для обязательной подписки
+
+_captcha_passed: set[int] = set()  # in-memory кеш успешно прошедших капчу
+
+_CAPTCHA_POOL: list[str] = [
+    "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼",
+    "🐨", "🐯", "🦁", "🐮", "🐸", "🐵", "🐔", "🦆",
+]
 
 async def fetch_latest_release() -> dict:
-    """Auto-fetch latest GitHub release info. Cached for 5 min. FIX: asyncio.Lock."""
+    """Auto-fetch latest GitHub release info. Cached for 5 min."""
     global _release_cache, _release_cache_ts
     import time
-    async with _release_cache_lock:  # Module-level lock — no race condition
+    lock = _release_cache_lock or asyncio.Lock()
+    async with lock:  # Lock инициализируется в main()
         if _release_cache and (time.time() - _release_cache_ts) < _RELEASE_CACHE_TTL:
             return _release_cache
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -186,6 +197,11 @@ class AdminFlow(StatesGroup):
     set_vt_url        = State()
     upload_file       = State()
     ticket_reply      = State()   # admin replies to ticket
+
+
+class CaptchaFlow(StatesGroup):
+    """Состояния для emoji-капчи при первом запуске."""
+    waiting = State()
 
 
 # ─── Keyboards ──────────────────────────────────────────────────────────────
@@ -284,6 +300,78 @@ def kb_ticket_user(ticket_id: int) -> InlineKeyboardMarkup:
     ])
 
 
+def kb_captcha(emojis: list[str], correct: str) -> InlineKeyboardMarkup:
+    """Клавиатура emoji-капчи: 6 кнопок в 2 ряда по 3."""
+    rows = []
+    for i in range(0, len(emojis), 3):
+        row = [
+            InlineKeyboardButton(
+                text=e,
+                callback_data=f"captcha:{'ok' if e == correct else 'fail'}:{e}",
+            )
+            for e in emojis[i : i + 3]
+        ]
+        rows.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_subscription(invite_url: str) -> InlineKeyboardMarkup:
+    """Клавиатура для обязательной подписки на канал."""
+    rows: list[list[InlineKeyboardButton]] = []
+    if invite_url:
+        rows.append([InlineKeyboardButton(text="📢 Вступить в канал", url=invite_url)])
+    rows.append([InlineKeyboardButton(text="✅ Я вступил — проверить", callback_data="check_sub")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ─── CAPTCHA + Channel helpers ────────────────────────────────────────────────
+
+import random as _random
+
+
+def _gen_captcha() -> tuple[str, list[str]]:
+    """Генерирует (правильный_смайлик, список_6_смайликов_в_перемешку)."""
+    emojis = _random.sample(_CAPTCHA_POOL, 6)
+    correct = _random.choice(emojis)
+    return correct, emojis
+
+
+async def _check_subscription(user_id: int) -> bool:
+    """Проверяет подписку пользователя на обязательный канал."""
+    try:
+        member = await bot.get_chat_member(CHANNEL_ID, user_id)
+        return member.status in ("member", "administrator", "creator", "restricted")
+    except Exception as e:
+        logger.debug("check_subscription error for %d: %s", user_id, e)
+        return False
+
+
+async def _make_invite_link(user_id: int) -> str:
+    """Создаёт одноразовую 24-часовую ссылку для конкретного пользователя."""
+    from datetime import timedelta
+    try:
+        expire = datetime.now(timezone.utc) + timedelta(hours=24)
+        link = await bot.create_chat_invite_link(
+            CHANNEL_ID,
+            name=f"user_{user_id}",
+            expire_date=expire,
+            member_limit=1,
+            creates_join_request=False,
+        )
+        return link.invite_link
+    except Exception as e:
+        logger.warning("invite link failed for user %d: %s", user_id, e)
+        return ""
+
+
+def parse_utc_dt(s: str) -> datetime:
+    """Единая функция парсинга UTC datetime-строк из БД (заменяет 5 дублей в bot.py)."""
+    dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
 def is_admin(user_id: int) -> bool:
@@ -366,19 +454,126 @@ async def _send_media(chat_id: int, file_id: str, file_type: str, caption: str =
 
 # ─── /start ─────────────────────────────────────────────────────────────────
 
-@dp.message(CommandStart())
-async def cmd_start(message: Message):
-    user = message.from_user
-    try:
-        await db.upsert_user(user.id, user.username or "", user.first_name or "")
-    except Exception as e:
-        logger.error("DB error in cmd_start: %s", e)
+async def _show_main_menu(target, user) -> None:
+    """Показывает главное меню (используется после CAPTCHA и проверки подписки)."""
     text = (
         f"👋 Привет, <b>{user.first_name}</b>!\n\n"
         f"<b>FMail Sender</b> — профессиональный инструмент для email-рассылок.\n\n"
         f"Выбери действие:"
     )
-    await message.answer(text, reply_markup=kb_main(is_admin(user.id)))
+    markup = kb_main(is_admin(user.id))
+    if hasattr(target, "edit_text"):
+        try:
+            await target.edit_text(text, reply_markup=markup)
+            return
+        except Exception:
+            pass
+        await target.message.answer(text, reply_markup=markup)
+    else:
+        await target.answer(text, reply_markup=markup)
+
+
+@dp.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext):
+    user = message.from_user
+    try:
+        await db.upsert_user(user.id, user.username or "", user.first_name or "")
+    except Exception as e:
+        logger.error("DB error in cmd_start: %s", e)
+
+    # Администраторы пропускают CAPTCHA и проверку канала
+    if is_admin(user.id):
+        await _show_main_menu(message, user)
+        return
+
+    # Шаг 1: emoji-капча (только при первом запуске или после рестарта бота)
+    if user.id not in _captcha_passed:
+        correct, emojis = _gen_captcha()
+        await state.set_state(CaptchaFlow.waiting)
+        await state.update_data(captcha_correct=correct)
+        await message.answer(
+            "🔒 <b>Проверка безопасности</b>\n\n"
+            f"Найди и нажми на этот смайлик: <b>{correct}</b>",
+            reply_markup=kb_captcha(emojis, correct),
+        )
+        return
+
+    # Шаг 2: проверка подписки на канал
+    if not await _check_subscription(user.id):
+        invite = await _make_invite_link(user.id)
+        await message.answer(
+            "📢 <b>Обязательное условие доступа</b>\n\n"
+            "Для использования бота необходимо вступить в наш канал.\n"
+            "После вступления нажми кнопку <b>«Я вступил»</b>.",
+            reply_markup=kb_subscription(invite),
+        )
+        return
+
+    await _show_main_menu(message, user)
+
+
+@dp.callback_query(F.data.startswith("captcha:"), CaptchaFlow.waiting)
+async def cb_captcha(query: CallbackQuery, state: FSMContext):
+    """Обработчик ответа на emoji-капчу."""
+    parts = query.data.split(":", 2)
+    result = parts[1]  # "ok" или "fail"
+    user = query.from_user
+
+    if result == "ok":
+        _captcha_passed.add(user.id)
+        await state.clear()
+        await query.answer("✅ Верно!")
+
+        # После капчи — проверяем подписку
+        if not await _check_subscription(user.id):
+            invite = await _make_invite_link(user.id)
+            try:
+                await query.message.edit_text(
+                    "📢 <b>Обязательное условие доступа</b>\n\n"
+                    "Для использования бота необходимо вступить в наш канал.\n"
+                    "После вступления нажми кнопку <b>«Я вступил»</b>.",
+                    reply_markup=kb_subscription(invite),
+                )
+            except Exception:
+                await query.message.answer(
+                    "📢 <b>Вступи в канал для доступа:</b>",
+                    reply_markup=kb_subscription(invite),
+                )
+        else:
+            await _show_main_menu(query.message, user)
+    else:
+        await query.answer("❌ Неверно! Попробуй ещё раз.", show_alert=False)
+        # Генерируем новую капчу
+        correct, emojis = _gen_captcha()
+        await state.update_data(captcha_correct=correct)
+        try:
+            await query.message.edit_text(
+                "🔒 <b>Проверка безопасности</b>\n\n"
+                f"Найди и нажми на этот смайлик: <b>{correct}</b>",
+                reply_markup=kb_captcha(emojis, correct),
+            )
+        except Exception:
+            pass
+
+
+@dp.callback_query(F.data == "check_sub")
+async def cb_check_subscription(query: CallbackQuery):
+    """Проверяет подписку пользователя на канал после нажатия кнопки."""
+    user = query.from_user
+    await query.answer("⏳ Проверяем подписку...")
+
+    if await _check_subscription(user.id):
+        await _show_main_menu(query.message, user)
+    else:
+        invite = await _make_invite_link(user.id)
+        await query.answer(
+            "❌ Вы ещё не вступили в канал! Нажмите кнопку выше.",
+            show_alert=True,
+        )
+        try:
+            await query.message.edit_reply_markup(reply_markup=kb_subscription(invite))
+        except Exception:
+            pass
 
 
 @dp.callback_query(F.data == "menu_main")
@@ -1156,17 +1351,10 @@ async def msg_upload_file(message: Message, state: FSMContext):
     try:
         os.makedirs("downloads", exist_ok=True)
         save_path = os.path.join("downloads", fname)
-        file_info = await bot.get_file(doc.file_id)
-        file_url = f"https://api.telegram.org/file/bot{bot.token}/{file_info.file_path}"
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(file_url) as resp:
-                if resp.status != 200:
-                    await message.answer("❌ Не удалось скачать файл с Telegram.", reply_markup=kb_back_admin())
-                    return
-                with open(save_path, "wb") as f:
-                    async for chunk in resp.content.iter_chunked(65536):
-                        f.write(chunk)
+        # BUG-FIX: используем bot.download() — токен не попадает в логи URL
+        file_bytes = await bot.download(doc.file_id)
+        with open(save_path, "wb") as f:
+            f.write(file_bytes.read())
 
         server_host = os.environ.get("SERVER_HOST", "")
         if not server_host:
@@ -1312,11 +1500,23 @@ async def msg_admin_broadcast(message: Message, state: FSMContext):
     user_ids = await db.get_distinct_user_ids()
     sent = 0
     failed = 0
+    # BUG-FIX: добавлена обработка TelegramRetryAfter — без этого бот банится
+    from aiogram.exceptions import TelegramRetryAfterError, TelegramForbiddenError
     for uid in user_ids:
         try:
             await bot.send_message(uid, text)
             sent += 1
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.04)  # ~25 msg/sec — безопасный лимит Telegram
+        except TelegramRetryAfterError as e:
+            logger.warning("Rate limited in broadcast, waiting %ds", e.retry_after)
+            await asyncio.sleep(e.retry_after + 1)
+            try:
+                await bot.send_message(uid, text)
+                sent += 1
+            except Exception:
+                failed += 1
+        except TelegramForbiddenError:
+            failed += 1  # Пользователь заблокировал бота
         except Exception:
             failed += 1
     await message.answer(
@@ -1535,14 +1735,24 @@ async def _poll_pending_payments():
 
 
 async def main():
+    global _release_cache_lock
+    _release_cache_lock = asyncio.Lock()  # BUG-FIX: инициализируем Lock внутри event loop
     await db.init_db()
     logger.info("Starting FMail Sender Bot + API v%s...", APP_VERSION)
 
+    # NO_SSL=1 → nginx/Cloudflare обрабатывает TLS (рекомендуется в production)
+    # NO_SSL не задан → uvicorn использует self-signed сертификат из ssl/
+    _use_ssl = not os.environ.get("NO_SSL")
+    _ssl_kwargs: dict = {}
+    if _use_ssl:
+        _ssl_kwargs = {
+            "ssl_certfile": os.path.join(os.path.dirname(__file__), "ssl", "cert.pem"),
+            "ssl_keyfile": os.path.join(os.path.dirname(__file__), "ssl", "key.pem"),
+        }
     config = uvicorn.Config(
         api_app, host=API_HOST, port=API_PORT,
         log_level="warning", loop="none",
-        ssl_certfile=os.path.join(os.path.dirname(__file__), "ssl", "cert.pem"),
-        ssl_keyfile=os.path.join(os.path.dirname(__file__), "ssl", "key.pem"),
+        **_ssl_kwargs,
     )
     server = uvicorn.Server(config)
 

@@ -1,9 +1,12 @@
 """
-Общие утилиты FMailSender — единственный источник истины для validate_email_format.
-Импортируйте validate_email_format ТОЛЬКО отсюда, чтобы избежать циклических импортов.
+Общие утилиты FMailSender.
+- validate_email_format: единственный источник истины для валидации email
+- strip_html: единственный источник истины для очистки HTML
+Импортируйте только отсюда, чтобы избежать циклических импортов.
 """
 from __future__ import annotations
 
+import html as _html_stdlib
 import re
 
 _EMAIL_RE = re.compile(
@@ -29,3 +32,26 @@ def validate_email_format(email: str) -> bool:
     if len(local) > 64 or len(domain) > 253:
         return False
     return bool(_EMAIL_RE.match(email))
+
+
+def strip_html(html_str: str, max_len: int | None = None) -> str:
+    """Удаляет HTML-теги и декодирует entities (&amp;, &nbsp; и т.д.).
+
+    Единственный источник истины для HTML→plain-text конвертации.
+    Используется в sender.py, spam_checker.py и ai_fixer.py.
+
+    Args:
+        html_str: Строка с HTML-разметкой.
+        max_len: Если задан — усекает результат до max_len символов.
+
+    Returns:
+        Чистый текст без тегов и с декодированными entities.
+    """
+    if not html_str:
+        return ""
+    text = re.sub(r"<[^>]+>", "", html_str)
+    text = _html_stdlib.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if max_len is not None:
+        text = text[:max_len]
+    return text

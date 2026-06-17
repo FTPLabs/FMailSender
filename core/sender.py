@@ -273,7 +273,7 @@ class SendResult:
 
 
 def validate_email_format(email: str) -> bool:
-    """Backward-compat wrapper — источник истины перенесён в core.utils."""
+    """Backward-compat wrapper — источник истины в core.utils."""
     from core.utils import validate_email_format as _vef
     return _vef(email)
 
@@ -284,7 +284,9 @@ def _build_message(
     template: EmailTemplate,
 ) -> MIMEMultipart:
     """Build MIME message: multipart/mixed -> multipart/alternative -> html."""
-    msg_id = f"<{uuid.uuid4().hex}@{account.host}>"
+    # BUG-FIX: используем домен отправителя, не SMTP-хост (RFC 2822)
+    _sender_domain = account.email.split("@")[-1] if "@" in account.email else account.host
+    msg_id = f"<{uuid.uuid4().hex}@{_sender_domain}>"
     from_addr = (
         f"{account.display_name} <{account.email}>"
         if account.display_name else account.email
@@ -301,7 +303,9 @@ def _build_message(
         outer["CC"] = ", ".join(template.cc)
 
     alt = MIMEMultipart("alternative")
-    plain = template.body_text or re.sub(r"<[^>]+>", "", template.body_html)
+    # BUG-FIX: декодируем HTML entities (&amp;, &nbsp; и т.д.) в plain-text версии
+    from core.utils import strip_html as _strip
+    plain = template.body_text or _strip(template.body_html)
     alt.attach(MIMEText(plain, "plain", "utf-8"))
     alt.attach(MIMEText(template.body_html, "html", "utf-8"))
     outer.attach(alt)
