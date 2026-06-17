@@ -161,68 +161,68 @@ def _run_safe(fn, timeout: float = 2.0) -> str:
 
 
 
-  def _load_component_cache() -> dict:
-      """Загружает кэш аппаратных компонентов — резерв при таймауте WMI."""
-      try:
-          if _HWID_COMPONENTS_FILE.exists():
-              return json.loads(_HWID_COMPONENTS_FILE.read_text(encoding="utf-8"))
-      except Exception:
-          pass
-      return {}
-
-
-  def _save_component_cache(cache: dict) -> None:
-      """Сохраняет успешно прочитанные компоненты для следующих запусков."""
-      try:
-          _HWID_COMPONENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-          _HWID_COMPONENTS_FILE.write_text(
-              json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8"
-          )
-      except Exception:
-          pass
-
-
-  def _get_machine_guid() -> str:
-      """Читает Windows MachineGuid — уникален и стабилен для каждой установки ОС."""
-      if platform.system() != "Windows":
-          return ""
-      try:
-          import winreg
-          key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                               r"SOFTWARE\Microsoft\Cryptography")
-          val, _ = winreg.QueryValueEx(key, "MachineGuid")
-          winreg.CloseKey(key)
-          return str(val).strip()
-      except Exception:
-          return ""
-
-
-  def _get_cpu_id() -> str:
-    """CPU ProcessorId — не меняется без замены процессора."""
-    if platform.system() != "Windows":
-        return platform.node() or "UNKNOWN_CPU"
+def _load_component_cache() -> dict:
+    """Загружает кэш аппаратных компонентов — резерв при таймауте WMI."""
     try:
-        import wmi
-        c = wmi.WMI()
-        for proc in c.Win32_Processor():
-            pid = getattr(proc, "ProcessorId", "").strip()
-            if pid:
-                return pid
+        if _HWID_COMPONENTS_FILE.exists():
+            return json.loads(_HWID_COMPONENTS_FILE.read_text(encoding="utf-8"))
     except Exception:
         pass
+    return {}
+
+
+def _save_component_cache(cache: dict) -> None:
+    """Сохраняет успешно прочитанные компоненты для следующих запусков."""
     try:
-        result = subprocess.run(
-            ["wmic", "cpu", "get", "ProcessorId", "/value"],
-            capture_output=True, text=True, timeout=2,
+        _HWID_COMPONENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _HWID_COMPONENTS_FILE.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        for line in result.stdout.splitlines():
-            if "ProcessorId=" in line:
-                val = line.split("=", 1)[1].strip()
-                if val:
-                    return val
     except Exception:
         pass
-    return "UNKNOWN_CPU"
+
+
+def _get_machine_guid() -> str:
+    """Читает Windows MachineGuid — уникален и стабилен для каждой установки ОС."""
+    if platform.system() != "Windows":
+        return ""
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"SOFTWARE\Microsoft\Cryptography")
+        val, _ = winreg.QueryValueEx(key, "MachineGuid")
+        winreg.CloseKey(key)
+        return str(val).strip()
+    except Exception:
+        return ""
+
+
+def _get_cpu_id() -> str:
+  """CPU ProcessorId — не меняется без замены процессора."""
+  if platform.system() != "Windows":
+      return platform.node() or "UNKNOWN_CPU"
+  try:
+      import wmi
+      c = wmi.WMI()
+      for proc in c.Win32_Processor():
+          pid = getattr(proc, "ProcessorId", "").strip()
+          if pid:
+              return pid
+  except Exception:
+      pass
+  try:
+      result = subprocess.run(
+          ["wmic", "cpu", "get", "ProcessorId", "/value"],
+          capture_output=True, text=True, timeout=2,
+      )
+      for line in result.stdout.splitlines():
+          if "ProcessorId=" in line:
+              val = line.split("=", 1)[1].strip()
+              if val:
+                  return val
+  except Exception:
+      pass
+  return "UNKNOWN_CPU"
 
 
 def _get_board_id() -> str:
