@@ -94,7 +94,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 import database as db
-from config import ADMIN_IDS, API_HOST, API_PORT, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL
+from database import set_terms_accepted, get_terms_accepted
+from config import ADMIN_IDS, API_HOST, API_PORT, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL, CHANNEL_ID
 from crypto_pay import crypto_client
 
 # ─── GitHub Release Auto-Fetch ───────────────────────────────────────────────
@@ -105,10 +106,10 @@ _release_cache_ts: float = 0.0
 _RELEASE_CACHE_TTL = 300  # 5 minutes
 
 # asyncio.Lock инициализируется в main() во избежание привязки к неверному event loop
-_release_cache_lock: asyncio.Lock | None = None
+_release_cache_lock: asyncio.Lock = asyncio.Lock()  # FIX: module-level init, not None
 
 # ─── Канал + CAPTCHA ─────────────────────────────────────────────────────────
-CHANNEL_ID: int = -1003769139793  # ID канала для обязательной подписки
+# CHANNEL_ID теперь берётся из config.py (env var CHANNEL_ID)
 
 _captcha_passed: set[int] = set()   # in-memory кеш успешно прошедших капчу
 _terms_accepted: set[int] = set()   # in-memory кеш принявших условия и политику
@@ -122,7 +123,7 @@ async def fetch_latest_release() -> dict:
     """Auto-fetch latest GitHub release info. Cached for 5 min."""
     global _release_cache, _release_cache_ts
     import time
-    lock = _release_cache_lock or asyncio.Lock()
+    lock = _release_cache_lock  # FIX: always module-level lock
     async with lock:  # Lock инициализируется в main()
         if _release_cache and (time.time() - _release_cache_ts) < _RELEASE_CACHE_TTL:
             return _release_cache
