@@ -529,34 +529,34 @@ class SendingEngine:
                     error="Отменено",
                 )
             # ── Retry: до 3 разных аккаунтов ─────────────────────────────────
-              _MAX_RETRIES = 3
-              _tried: set = set()
-              _last_result = None
-              for _attempt in range(_MAX_RETRIES):
-                  account = self._pick_account(exclude=_tried)
-                  if account is None:
-                      break
-                  _tried.add(account.email)
-                  _result = await self._send_one(sem, account, recipient, template)
-                  if _result.success:
-                      if _attempt > 0 and self._log_queue:
-                          self._log_queue.put_nowait({"type": "log", "message":
-                              f"[{time.strftime('%H:%M:%S')}] ↩ {recipient.email}: успех с {account.email} (попытка {_attempt + 1})"})
-                      return _result
-                  _last_result = _result
-                  if _attempt < _MAX_RETRIES - 1 and self._log_queue:
-                      self._log_queue.put_nowait({"type": "log", "message":
-                          f"[{time.strftime('%H:%M:%S')}] ↩ {recipient.email}: {_result.error[:60]} — пробую другой аккаунт..."})
-              if _last_result is not None:
-                  return _last_result
-              if self._log_queue:
-                  self._log_queue.put_nowait({"type": "log", "message":
-                      f"[{time.strftime('%H:%M:%S')}] ⚠ {recipient.email}: все аккаунты недоступны"})
-              return SendResult(
-                  recipient_email=recipient.email,
-                  success=False,
-                  error="Нет доступных аккаунтов",
-              )
+            _MAX_RETRIES = 3
+            _tried: set = set()
+            _last_result = None
+            for _attempt in range(_MAX_RETRIES):
+                account = self._pick_account(exclude=_tried)
+                if account is None:
+                    break
+                _tried.add(account.email)
+                _result = await self._send_one(sem, account, recipient, template)
+                if _result.success:
+                    if _attempt > 0 and self._log_queue:
+                        self._log_queue.put_nowait({"type": "log", "message":
+                            f"[{time.strftime('%H:%M:%S')}] ↩ {recipient.email}: успех с {account.email} (попытка {_attempt + 1})"})
+                    return _result
+                _last_result = _result
+                if _attempt < _MAX_RETRIES - 1 and self._log_queue:
+                    self._log_queue.put_nowait({"type": "log", "message":
+                        f"[{time.strftime('%H:%M:%S')}] ↩ {recipient.email}: {_result.error[:60]} — пробую другой аккаунт..."})
+            if _last_result is not None:
+                return _last_result
+            if self._log_queue:
+                self._log_queue.put_nowait({"type": "log", "message":
+                    f"[{time.strftime('%H:%M:%S')}] ⚠ {recipient.email}: все аккаунты недоступны"})
+            return SendResult(
+                recipient_email=recipient.email,
+                success=False,
+                error="Нет доступных аккаунтов",
+            )
 
         async def _process_batch(batch_recipients: List[Recipient]) -> List[SendResult]:
             tasks = [_send_with_acct_delay(r) for r in batch_recipients]
