@@ -90,7 +90,6 @@ def build_spec() -> str:
         "        'email.mime.multipart', 'email.mime.text', 'email.mime.base',",
         "        'PyQt6', 'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui',",
         "        'PyQt6.QtSvg', 'PyQt6.QtSvgWidgets', 'PyQt6.QtNetwork',",
-        "        'PyQt6.QtWebEngineWidgets', 'PyQt6.QtWebEngineCore',",
         "        'psutil', 'wmi',",
         "    ] + extra_hidden,",
         "    hookspath=[],",
