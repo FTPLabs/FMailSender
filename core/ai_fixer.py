@@ -119,6 +119,10 @@ class AiSpamFixer:
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"OpenAI API ошибка {e.code}: {body[:300]}")
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Сетевая ошибка при обращении к OpenAI API: {e.reason}")
+        except TimeoutError:
+            raise RuntimeError("Таймаут OpenAI API (>60с). Проверьте интернет-соединение.")
 
         try:
             content = data["choices"][0]["message"]["content"]
