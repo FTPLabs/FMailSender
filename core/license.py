@@ -341,27 +341,27 @@ def generate_hwid() -> str:
                 gpu = ""
 
         # При таймауте WMI — берём значение из прошлого успешного запуска
-          if not cpu or cpu == "UNKNOWN_CPU":
-              cpu = comp_cache.get("cpu", "UNKNOWN_CPU")
-          if not board or board == "UNKNOWN_BOARD":
-              board = comp_cache.get("board", "UNKNOWN_BOARD")
-          if not gpu or gpu == "UNKNOWN_GPU":
-              gpu = comp_cache.get("gpu", "UNKNOWN_GPU")
-          # FIX H-2: если все компоненты UNKNOWN (таймаут WMI + пустой кэш) —
-          # добавляем MachineGuid как уникальный per-machine идентификатор.
-          if cpu == "UNKNOWN_CPU" and board == "UNKNOWN_BOARD" and gpu == "UNKNOWN_GPU":
-              machine_guid = _get_machine_guid()
-              if machine_guid:
-                  cpu = machine_guid
-                  logger.warning(
-                      "HWID: все WMI-компоненты UNKNOWN, используем MachineGuid как fallback."
-                  )
-              else:
-                  logger.error(
-                      "HWID: все компоненты UNKNOWN и MachineGuid недоступен. "
-                      "HWID не уникален — возможна коллизия лицензий!"
-                  )
-                  # Обновляем кэш только успешно прочитанными значениями
+        if not cpu or cpu == "UNKNOWN_CPU":
+            cpu = comp_cache.get("cpu", "UNKNOWN_CPU")
+        if not board or board == "UNKNOWN_BOARD":
+            board = comp_cache.get("board", "UNKNOWN_BOARD")
+        if not gpu or gpu == "UNKNOWN_GPU":
+            gpu = comp_cache.get("gpu", "UNKNOWN_GPU")
+        # FIX H-2: если все компоненты UNKNOWN (таймаут WMI + пустой кэш) —
+        # добавляем MachineGuid как уникальный per-machine идентификатор.
+        if cpu == "UNKNOWN_CPU" and board == "UNKNOWN_BOARD" and gpu == "UNKNOWN_GPU":
+            machine_guid = _get_machine_guid()
+            if machine_guid:
+                cpu = machine_guid
+                logger.warning(
+                    "HWID: все WMI-компоненты UNKNOWN, используем MachineGuid как fallback."
+                )
+            else:
+                logger.error(
+                    "HWID: все компоненты UNKNOWN и MachineGuid недоступен. "
+                    "HWID не уникален — возможна коллизия лицензий!"
+                )
+                # Обновляем кэш только успешно прочитанными значениями
         _cu = False
         if cpu != "UNKNOWN_CPU" and comp_cache.get("cpu") != cpu:
             comp_cache["cpu"] = cpu; _cu = True
