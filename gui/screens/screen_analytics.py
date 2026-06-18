@@ -252,11 +252,9 @@ class AnalyticsScreen(QWidget):
 
         open_rate = f"{int(opens/total*100)}%" if total > 0 else "0%"
         click_rate = f"{int(clicks/total*100)}%" if total > 0 else "0%"
-        bounce_rate = f"{int(errors/total*100)}%" if total > 0 else "0%"
-
         self.card_opens.set_value(open_rate)
         self.card_clicks.set_value(click_rate)
-        
+
 
     def _save_campaign(self, results: List[SendResult]) -> None:
         campaign = {
