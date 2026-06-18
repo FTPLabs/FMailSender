@@ -140,38 +140,38 @@ async def get_terms_accepted(telegram_id: int) -> bool:
 
 
 
-  async def set_captcha_passed(telegram_id: int) -> None:
-      """Сохраняет факт прохождения капчи — переживает перезапуск бота."""
-      async with _db() as conn:
-          await conn.execute(
-              "UPDATE users SET captcha_passed=1 WHERE telegram_id=?", (telegram_id,)
-          )
-          await conn.commit()
+async def set_captcha_passed(telegram_id: int) -> None:
+    """Сохраняет факт прохождения капчи — переживает перезапуск бота."""
+    async with _db() as conn:
+        await conn.execute(
+            "UPDATE users SET captcha_passed=1 WHERE telegram_id=?", (telegram_id,)
+        )
+        await conn.commit()
 
 
-  async def get_captcha_passed(telegram_id: int) -> bool:
-      """True если пользователь ранее прошёл капчу."""
-      async with _db() as conn:
-          async with conn.execute(
-              "SELECT captcha_passed FROM users WHERE telegram_id=?", (telegram_id,)
-          ) as cur:
-              row = await cur.fetchone()
-              return bool(row and row[0])
+async def get_captcha_passed(telegram_id: int) -> bool:
+    """True если пользователь ранее прошёл капчу."""
+    async with _db() as conn:
+        async with conn.execute(
+            "SELECT captcha_passed FROM users WHERE telegram_id=?", (telegram_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return bool(row and row[0])
 
 
-  async def get_all_passed_users() -> tuple[set[int], set[int]]:
-      """Возвращает (captcha_passed_ids, terms_accepted_ids) для прогрева кэша при старте."""
-      async with _db() as conn:
-          async with conn.execute(
-              "SELECT telegram_id, captcha_passed, terms_accepted FROM users "
-              "WHERE captcha_passed=1 OR terms_accepted=1"
-          ) as cur:
-              rows = await cur.fetchall()
-      captcha = {r[0] for r in rows if r[1]}
-      terms   = {r[0] for r in rows if r[2]}
-      return captcha, terms
+async def get_all_passed_users() -> tuple[set[int], set[int]]:
+    """Возвращает (captcha_passed_ids, terms_accepted_ids) для прогрева кэша при старте."""
+    async with _db() as conn:
+        async with conn.execute(
+            "SELECT telegram_id, captcha_passed, terms_accepted FROM users "
+            "WHERE captcha_passed=1 OR terms_accepted=1"
+        ) as cur:
+            rows = await cur.fetchall()
+    captcha = {r[0] for r in rows if r[1]}
+    terms   = {r[0] for r in rows if r[2]}
+    return captcha, terms
 
-  
+
 async def init_db() -> None:
   # PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL
   # уже применяются в _db() context manager — не дублируем.
