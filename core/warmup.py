@@ -172,10 +172,12 @@ class WarmupScheduler:
         return dict(self.records)
 
     def advance_days(self) -> None:
-        """Обновляет текущий день для всех активных аккаунтов."""
+        """Обновляет текущий день для всех активных аккаунтов.
+        FIX: используем _save() напрямую — состояние прогрева критично,
+        нельзя терять данные при крэше между редкими вызовами."""
         for r in self.records.values():
             self._advance_pending_days(r)
-        self._maybe_save()
+        self._save()  # FIX: прямое сохранение, не _maybe_save()
 
     def pause_account(self, email: str, until_date: Optional[str] = None) -> None:
         r = self.records.get(email)
