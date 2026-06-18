@@ -1,49 +1,46 @@
 name: Python Syntax Check
 
-  on:
-    push:
-      branches: [main]
-      paths: ['**.py']
-    pull_request:
-      branches: [main]
-      paths: ['**.py']
+on:
+  push:
+    branches: [main]
+    paths: ['**.py']
+  pull_request:
+    branches: [main]
+    paths: ['**.py']
 
-  jobs:
-    syntax-check:
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v4
+jobs:
+  syntax-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-        - uses: actions/setup-python@v5
-          with:
-            python-version: '3.11'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-        - name: py_compile — проверка всех .py файлов
-          run: |
-            echo "=== Syntax check: py_compile ==="
-            find . -name "*.py" \
-              -not -path "./.git/*" \
-              -not -path "./.venv/*" \
-              -not -path "./venv/*" \
-              -not -path "./__pycache__/*" | sort | while read f; do
-              if ! python -m py_compile "$f" 2>/tmp/err_out; then
-                echo "FAIL: $f"
-                cat /tmp/err_out
-                touch /tmp/syntax_failed
-              else
-                echo "OK: $f"
-              fi
-            done
-            if [ -f /tmp/syntax_failed ]; then
-              echo ""
-              echo "=== SYNTAX ERRORS FOUND — build blocked ==="
-              exit 1
+      - name: py_compile check all .py files
+        shell: bash
+        run: |
+          echo "=== Syntax check: py_compile ==="
+          SYNTAX_FAILED=0
+          while IFS= read -r -d "" f; do
+            if ! python -m py_compile "$f" 2>/tmp/py_err; then
+              echo "FAIL: $f"
+              cat /tmp/py_err
+              SYNTAX_FAILED=1
+            else
+              echo "OK: $f"
             fi
-            echo "All .py files passed syntax check."
+          done < <(find . -name "*.py" -not -path "./.git/*" -not -path "./.venv/*" -not -path "./venv/*" -not -path "./__pycache__/*" -print0)
+          if [ "$SYNTAX_FAILED" -eq 1 ]; then
+            echo "=== SYNTAX ERRORS FOUND - build blocked ==="
+            exit 1
+          fi
+          echo "All .py files passed syntax check."
 
-        - name: pyflakes — undefined names и неиспользуемые импорты
-          run: |
-            pip install pyflakes --quiet
-            python -m pyflakes . 2>&1 | grep -v "__pycache__" | grep -v ".venv" || true
-            echo "pyflakes check complete"
-  
+      - name: pyflakes check
+        shell: bash
+        run: |
+          pip install pyflakes --quiet
+          python -m pyflakes . 2>&1 | grep -v "__pycache__" | grep -v ".venv" || true
+          echo "pyflakes check complete"
