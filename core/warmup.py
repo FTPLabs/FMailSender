@@ -50,9 +50,10 @@ class WarmupRecord:
                 if _d.fromisoformat(self.paused_until) > _d.today():
                     return False
                 else:
-                    # Дата паузы прошла — сбрасываем
+                    # FIX БАГ-5: дата паузы прошла — сбрасываем и помечаем для сохранения
                     self.paused_until = None
                     self.is_active = True
+                    self._needs_save = True  # scheduler проверяет этот флаг и вызовет _maybe_save
             except (ValueError, TypeError):
                 pass
         return self.is_active and self.today_sent < self.today_limit
@@ -119,12 +120,20 @@ class WarmupScheduler:
             try:
                 with open(self.data_path, "r", encoding="utf-8") as f:
                     raw = json.load(f)
-                for email, data in raw.items():
+            except Exception:
+                self.records = {}
+                return
+            # FIX БАГ-4: try/except внутри цикла — одна порченая запись не сбрасывает все остальные
+            for email, data in raw.items():
+                try:
                     r = WarmupRecord.from_dict(data)
                     self._advance_pending_days(r)
                     self.records[email] = r
-            except Exception:
-                self.records = {}
+                except Exception as e:
+                    import logging as _lg
+                    _lg.getLogger("warmup").warning(
+                        "Пропуск повреждённой warmup-записи для %s: %s", email, e
+                    )
 
     def _save(self) -> None:
         self.data_path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +172,12 @@ class WarmupScheduler:
         r = self.records.get(email)
         if r:
             r.record_sent(count)
-            self._maybe_save()  # FIX: используем _maybe_save вместо прямого _save
+            # FIX БАГ-5: проверяем флаг _needs_save (выставляется в can_send_today при сбросе паузы)
+            if getattr(r, "_needs_save", False):
+                r._needs_save = False
+                self._save()
+            else:
+                self._maybe_save()  # FIX: используем _maybe_save вместо прямого _save
 
     def get_record(self, email: str) -> Optional[WarmupRecord]:
         return self.records.get(email)
