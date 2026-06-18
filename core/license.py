@@ -200,7 +200,7 @@ def _get_machine_guid() -> str:
 
 
 def _get_cpu_id() -> str:
-      """CPU ProcessorId — не меняется без замены процессора."""
+    """CPU ProcessorId — не меняется без замены процессора."""
       if platform.system() != "Windows":
           return platform.node() or "UNKNOWN_CPU"
       try:
