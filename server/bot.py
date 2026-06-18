@@ -2402,7 +2402,7 @@ async def admin_web_panel(
         # FIX C-1: защищаем от 500 при неожиданных данных
         try:
          rows = []
-        for lic in licenses:
+         for lic in licenses:
             plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", "—"))
             exp = lic.get("expires_at", "")[:10]
             sc = "ok" if lic.get("is_active") else "rev"
