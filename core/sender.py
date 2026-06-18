@@ -604,15 +604,17 @@ class SendingEngine:
                     use_tls=True, timeout=30,
                 )
             else:
-                # STARTTLS (порт 587) — сначала plain, затем STARTTLS после connect()
+                # STARTTLS (порт 587): start_tls=True передаётся в конструктор.
+                # FIX: ручной starttls() после connect() в aiosmtplib 3.x вызывает
+                # "Connection already using TLS" — библиотека сама поднимает TLS
+                # при connect() когда сервер объявил STARTTLS в EHLO.
                 smtp = aiosmtplib.SMTP(
                     hostname=account.host, port=account.port,
-                    use_tls=False, timeout=30,
+                    use_tls=False, start_tls=account.use_tls, timeout=30,
                 )
             await smtp.connect()
             try:
-                if not account.use_ssl and account.use_tls:
-                    await smtp.starttls()
+                pass  # FIX: STARTTLS управляется start_tls= в конструкторе
                 await smtp.login(account.email, account.password)
                 await smtp.send_message(msg)
                 return SendResult(
@@ -648,6 +650,7 @@ class SendingEngine:
                 s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=30)
             else:
                 s = smtplib.SMTP(account.host, account.port, timeout=30)
+                s.ehlo()  # FIX: явный EHLO до STARTTLS — Exchange/корп. серверы требуют явного EHLO
                 if account.use_tls:
                     s.starttls(context=ctx)
                     s.ehlo()  # RFC 3207: повторный EHLO обязателен после STARTTLS
