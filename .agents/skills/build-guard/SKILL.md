@@ -1,213 +1,194 @@
 ---
-name: build-guard
-description: Проверяет готовность проекта к сборке .exe через PyInstaller и к созданию GitHub Release. Активируй перед любым запуском build.py, github push с тегом, или ручным workflow_dispatch. Обнаруживает: bitchin CI/блокеры PyInstaller 6.x, отсутствующие hiddenimports, неверные параметры aiosmtplib, module-level sys.exit(), устаревший datetime.utcnow().
----
+  name: build-guard
+  description: Проверяет готовность проекта к сборке .exe через PyInstaller и к созданию GitHub Release. Активируй перед любым запуском build.py, push с тегом, или workflow_dispatch. Документирует patch-систему обновлений.
+  ---
 
-# Build Guard — Проверка перед сборкой EXE и релизом
+  # Build Guard — Проверка перед сборкой EXE и релизом
 
-## Когда использовать
+  ## Когда использовать
 
-- Перед `python build.py` или `pyinstaller FMailSender.spec`
-- Перед пушем тега `v*` (триггер GitHub Actions build.yml)
-- Перед ручным запуском workflow_dispatch с tag_name
-- После любых изменений в `core/`, `gui/`, `main.py`, `build.py`
-- Когда EXE падает при запуске с ImportError или ModuleNotFoundError
+  - Перед `python build.py` или `pyinstaller FMailSender.spec`
+  - Перед пушем тега `v*` (триггер build.yml)
+  - После изменений в `core/`, `gui/`, `main.py`, `build.py`
+  - Когда EXE падает при запуске с ImportError/ModuleNotFoundError
 
-## Блок 1 — PyInstaller 6.x совместимость
+  ---
 
-```bash
-# PyInstaller >= 6.0 убрал параметр cipher= из PYZ() и EXE()
-grep -n "cipher=block_cipher\|cipher=None" build.py FMailSender.spec 2>/dev/null \
-  && echo "FAIL: устаревший cipher= параметр — удали его" || echo "OK: cipher= не найден"
+  ## Блок 1 — PyInstaller 6.x совместимость
 
-# Проверка что block_cipher не передаётся
-grep -n "pyz = PYZ\|exe = EXE" build.py | grep -v "#"
-```
+  ```bash
+  grep -n "cipher=block_cipher" build.py && echo "FAIL: устаревший cipher= — удали" || echo "OK"
+  ```
 
-**Исправление:**
-```python
-# ❌ PyInstaller < 6.0
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-exe = EXE(pyz, ..., cipher=block_cipher)
+  **Исправление:**
+  ```python
+  # ❌ PyInstaller < 6.0
+  pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+  # ✅ PyInstaller >= 6.0
+  pyz = PYZ(a.pure, a.zipped_data)
+  ```
 
-# ✅ PyInstaller >= 6.0
-pyz = PYZ(a.pure, a.zipped_data)
-exe = EXE(pyz, ...)
-```
+  ---
 
-## Блок 2 — Критические импорты (module-level sys.exit)
+  ## Блок 2 — aiosmtplib >= 3.0
 
-Проверь что ни один `import core.*` не вызывает sys.exit() при отсутствии ENV:
+  ```bash
+  grep -n "start_tls=" core/sender.py && echo "FAIL: убран в aiosmtplib 3.0" || echo "OK"
+  ```
 
-```bash
-# Опасный паттерн: _require_env() вызывается на уровне модуля
-grep -n "_require_env\|sys.exit" core/license.py | head -20
+  **Правильный паттерн:**
+  ```python
+  # SSL (порт 465):
+  smtp = aiosmtplib.SMTP(hostname=host, port=465, use_tls=True, timeout=30)
+  await smtp.connect()
+  # STARTTLS (порт 587):
+  smtp = aiosmtplib.SMTP(hostname=host, port=587, use_tls=False, timeout=30)
+  await smtp.connect()
+  await smtp.starttls()
+  ```
 
-# ПРАВИЛЬНО: lazy-геттеры вместо module-level вызовов
-grep -n "def _get_license_api_url\|def _get_license_verify_url" core/license.py
-```
+  ---
 
-**Ожидаемый результат после фикса v3.3.0:**
-- `_get_license_api_url()` и `_get_license_verify_url()` — ленивые функции
-- На уровне модуля: только константы, без вызовов _require_env()
+  ## Блок 3 — datetime.utcnow() deprecated
 
-## Блок 3 — aiosmtplib >= 3.0 параметры
+  ```bash
+  grep -rn "datetime.utcnow()" core/ gui/ main.py && echo "WARN: замени на datetime.now(timezone.utc)" || echo "OK"
+  ```
 
-```bash
-# Устаревший параметр start_tls= в конструкторе SMTP() (убран в aiosmtplib 3.0)
-grep -n "start_tls=" core/sender.py
-# Ожидается: 0 совпадений (исправлено в v3.3.0)
+  ---
 
-# STARTTLS должен вызываться после connect():
-grep -n "starttls()" core/sender.py
-# Ожидается: 1 строка: await smtp.starttls()
-```
+  ## Блок 4 — hiddenimports полнота
 
-**Правильный паттерн для aiosmtplib >= 3.0:**
-```python
-# SSL/TLS (порт 465):
-smtp = aiosmtplib.SMTP(hostname=host, port=465, use_tls=True, timeout=30)
-await smtp.connect()
+  ```bash
+  python3 -c "
+  import os
+  screens = ['gui.screens.' + f[:-3] for f in os.listdir('gui/screens') if f.endswith('.py') and f != '__init__.py']
+  cores = ['core.' + f[:-3] for f in os.listdir('core') if f.endswith('.py') and f != '__init__.py']
+  bp = open('build.py').read()
+  missing = [m for m in screens + cores if m not in bp]
+  print('MISSING:', missing) if missing else print('OK: все модули в hiddenimports')
+  "
+  ```
 
-# STARTTLS (порт 587):
-smtp = aiosmtplib.SMTP(hostname=host, port=587, use_tls=False, timeout=30)
-await smtp.connect()
-await smtp.starttls()  # ← после connect(), не в конструкторе
-```
+  ---
 
-## Блок 4 — datetime.utcnow() (Python 3.12+ deprecation)
+  ## Блок 5 — Синтаксис (AST)
 
-```bash
-grep -rn "datetime.utcnow()" core/ gui/ main.py 2>/dev/null \
-  && echo "WARN: устаревший datetime.utcnow() — замени на datetime.now(timezone.utc)" \
-  || echo "OK: utcnow() не используется"
-```
+  ```bash
+  python3 -c "
+  import ast, os
+  errors = []
+  for root, dirs, files in os.walk('.'):
+      dirs[:] = [d for d in dirs if d not in ('.git','__pycache__','venv','build','dist')]
+      for f in files:
+          if f.endswith('.py'):
+              path = os.path.join(root, f)
+              try: ast.parse(open(path).read())
+              except SyntaxError as e: errors.append(f'{path}:{e.lineno}: {e.msg}')
+  [print(e) for e in errors] or print('OK: синтаксических ошибок нет')
+  raise SystemExit(1) if errors else None
+  "
+  ```
 
-**Исправление:**
-```python
-# ❌ Устаревший (Python 3.12+ выводит DeprecationWarning)
-from datetime import datetime
-datetime.utcnow()
+  ---
 
-# ✅ Правильный
-from datetime import datetime, timezone
-datetime.now(timezone.utc).replace(tzinfo=None)  # для naive datetime сравнений
-datetime.now(timezone.utc)  # для aware datetime
-```
+  ## Блок 6 — Patch-система (v2.0+)
 
-## Блок 5 — hiddenimports полнота
+  Начиная с v3.4.2 FMailSender поддерживает **patch-обновления**:
 
-```bash
-# Все gui.screens.* должны быть в hiddenimports build.py
-python3 -c "
-import os
-screens = [f'gui.screens.{f[:-3]}' for f in os.listdir('gui/screens') if f.endswith('.py') and f != '__init__.py']
-buildpy = open('build.py').read()
-missing = [s for s in screens if s not in buildpy]
-if missing:
-    print('MISSING hiddenimports:', missing)
-else:
-    print('OK: все gui.screens.* в hiddenimports')
-"
+  ### Как работает
+  1. `main.py` при старте добавляет `_patches/` в `sys.path[0]`
+  2. Каждый релиз содержит `patch_manifest_vX.Y.Z.json` с SHA-256 изменённых .py
+  3. Клиент скачивает только изменённые файлы (~КБ вместо ~МБ полного EXE)
+  4. Файлы помещаются в `_patches/core/...`, `_patches/gui/...` рядом с EXE
+  5. При следующем запуске Python загружает их вместо встроенных
 
-# Аналогично для core.*
-python3 -c "
-import os
-cores = [f'core.{f[:-3]}' for f in os.listdir('core') if f.endswith('.py') and f != '__init__.py']
-buildpy = open('build.py').read()
-missing = [s for s in cores if s not in buildpy]
-if missing:
-    print('MISSING core hiddenimports:', missing)
-else:
-    print('OK: все core.* в hiddenimports')
-"
-```
+  ### Генерация патча (CI/CD делает автоматически)
+  ```bash
+  python make_patch.py v3.4.1 v3.4.2
+  # → dist/patch_manifest_v3.4.2.json
+  ```
 
-## Блок 6 — Синтаксис перед сборкой
+  ### Структура манифеста
+  ```json
+  {
+    "version": "3.4.2",
+    "base_version": "3.4.1",
+    "files": [
+      {
+        "path": "core/updater.py",
+        "sha256": "abc123...",
+        "url": "https://raw.githubusercontent.com/FTPLabs/FMailSender/v3.4.2/core/updater.py",
+        "size": 8192
+      }
+    ]
+  }
+  ```
 
-```bash
-python3 -c "
-import ast, os
-errors = []
-for root, dirs, files in os.walk('.'):
-    dirs[:] = [d for d in dirs if d not in ('.git', '__pycache__', 'venv', 'build', 'dist')]
-    for f in files:
-        if f.endswith('.py'):
-            path = os.path.join(root, f)
-            try:
-                ast.parse(open(path).read())
-            except SyntaxError as e:
-                errors.append(f'SYNTAX ERROR {path}:{e.lineno}: {e.msg}')
-if errors:
-    for e in errors: print(e)
-    raise SystemExit(1)
-else:
-    print('OK: синтаксических ошибок не найдено')
-"
-```
+  ### Проверка _patches injection в main.py
+  ```bash
+  grep -n "_patch_dir\|_patches" main.py || echo "WARN: patch loader не найден в main.py"
+  ```
 
-## Блок 7 — hourly counter корректность (отправитель)
+  ### Очистка патчей (сброс к состоянию EXE)
+  ```python
+  from core.updater import clear_patches
+  clear_patches()
+  ```
 
-```bash
-# Баг: sent_this_hour = 0 для всех аккаунтов при старте кампании
-grep -n "sent_this_hour = 0" core/sender.py
-# В v3.3.0 должен быть IF с проверкой >= 3600
+  ---
 
-grep -A3 "sent_this_hour = 0" core/sender.py
-# Ожидается: if _now - _acct._hour_reset >= 3600:
-```
+  ## Полный pre-build чеклист
 
-## Полный pre-build чеклист
+  ```bash
+  echo "=== Build Guard v2.0 ==="
 
-Запускай по порядку перед каждым тегом/релизом:
+  # 1. Синтаксис
+  python3 -c "import ast,os; [ast.parse(open(os.path.join(r,f)).read()) for r,d,fs in os.walk('.') for f in fs if f.endswith('.py') and '.git' not in r and '__pycache__' not in r]" && echo "1. Syntax OK" || echo "1. SYNTAX ERROR"
 
-```bash
-echo "=== Build Guard Check v3.3.0 ==="
+  # 2. PyInstaller 6.x
+  ! grep -q "cipher=block_cipher" build.py && echo "2. PyInstaller 6.x OK" || echo "2. FAIL: cipher="
 
-# 1. Синтаксис
-python3 -c "import ast,os; [ast.parse(open(os.path.join(r,f)).read()) for r,d,fs in os.walk('.') for f in fs if f.endswith('.py') and '.git' not in r and '__pycache__' not in r]" && echo "1. Syntax OK" || echo "1. SYNTAX ERROR"
+  # 3. aiosmtplib
+  ! grep -q "start_tls=" core/sender.py && echo "3. aiosmtplib OK" || echo "3. FAIL: start_tls="
 
-# 2. cipher= устарел
-! grep -q "cipher=block_cipher" build.py && echo "2. PyInstaller 6.x OK" || echo "2. FAIL: cipher= в build.py"
+  # 4. datetime
+  ! grep -rq "datetime.utcnow()" core/ && echo "4. datetime OK" || echo "4. WARN: utcnow()"
 
-# 3. aiosmtplib start_tls
-! grep -q "start_tls=" core/sender.py && echo "3. aiosmtplib OK" || echo "3. FAIL: start_tls= найден"
+  # 5. patch loader
+  grep -q "_patch_dir" main.py && echo "5. Patch loader OK" || echo "5. WARN: patch loader нет"
 
-# 4. utcnow
-! grep -rq "datetime.utcnow()" core/ && echo "4. datetime OK" || echo "4. FAIL: utcnow() найден"
+  # 6. Версия
+  python3 -c "from core._version import APP_VERSION; print(f'6. Version: {APP_VERSION}')"
 
-# 5. lazy license URLs
-grep -q "_get_license_api_url\|_get_license_verify_url" core/license.py && echo "5. License lazy OK" || echo "5. FAIL: module-level _require_env"
+  echo "=== Done ==="
+  ```
 
-# 6. версия
-python3 -c "from core._version import APP_VERSION; print(f'6. Version: {APP_VERSION}')"
+  ---
 
-echo "=== Done ==="
-```
+  ## Дерево артефактов релиза
 
-## После сборки — smoke test
+  ```
+  dist/
+  ├── FMailSender.exe               ← полный EXE (всегда)
+  ├── FMailSender_v3.4.2.exe        ← копия с тегом в имени
+  └── patch_manifest_v3.4.2.json   ← только изменённые файлы
+  ```
 
-GitHub Actions выполняет `FMailSender.exe --check` — убедись что main.py обрабатывает этот флаг:
+  ---
 
-```python
-# main.py должен содержать:
-if "--check" in sys.argv:
-    from core._version import APP_NAME, APP_VERSION
-    print(f"{APP_NAME} v{APP_VERSION} — startup check OK")
-    sys.exit(0)
-```
+  ## После сборки — smoke test
 
-```bash
-grep -n "\-\-check" main.py || echo "WARN: --check флаг не реализован в main.py"
-```
+  ```bash
+  ./dist/FMailSender.exe --check
+  # Ожидается: "FMailSender v3.4.2 — startup check OK" и exit 0
+  ```
 
-## Создание релиза (после успешной сборки)
+  ## Создание релиза
 
-```bash
-# Тег и push (триггерит GitHub Actions build.yml автоматически)
-git tag v3.3.0
-git push origin v3.3.0
-
-# Или через workflow_dispatch (без тега):
-# GitHub → Actions → Release FMailSender .exe → Run workflow → tag: v3.3.0
-```
+  ```bash
+  git tag v3.4.2
+  git push origin v3.4.2
+  # GitHub Actions сам соберёт EXE, прогонит 6 gate'ов и создаст Release
+  ```
+  
