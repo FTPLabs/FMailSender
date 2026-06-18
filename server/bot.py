@@ -63,7 +63,6 @@ class JsonFileStorage(BaseStorage):
         return f"{key.chat_id}:{key.user_id}"
 
     async def set_state(self, key: StorageKey, state: Any = None) -> None:
-    async def set_state(self, key: StorageKey, state: Any = None) -> None:
         async with self._lock:
             k = self._key(key)
             if k not in self._data:
@@ -82,11 +81,9 @@ class JsonFileStorage(BaseStorage):
                 self._data[k] = {}
             self._data[k]["data"] = data
         await self._dump()
-        await self._dump()
     async def get_data(self, key: StorageKey) -> Dict[str, Any]:
         async with self._lock:
             return dict(self._data.get(self._key(key), {}).get("data", {}))
-        return self._data.get(self._key(key), {}).get("data", {})
 
     async def close(self) -> None:
         await self._dump()
