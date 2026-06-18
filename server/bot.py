@@ -100,8 +100,12 @@ from pydantic import BaseModel
 
 import database as db
 from database import set_terms_accepted, get_terms_accepted, set_captcha_passed, get_all_passed_users
-from config import ADMIN_IDS, API_HOST, API_PORT, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL, CHANNEL_ID
+from config import ADMIN_IDS, MODERATOR_IDS, ADMIN_WEB_SECRET, API_HOST, API_PORT, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL, CHANNEL_ID
 from crypto_pay import crypto_client
+
+# ─── Moderator in-memory cache ────────────────────────────────────────────────
+# Совокупность: env MODERATOR_IDS + модераторы добавленные через бот (из БД)
+_moderator_ids: set[int] = set(MODERATOR_IDS)
 
 # ─── GitHub Release Auto-Fetch ───────────────────────────────────────────────
 
@@ -204,6 +208,17 @@ class AdminFlow(StatesGroup):
     set_vt_url        = State()
     upload_file       = State()
     ticket_reply      = State()   # admin replies to ticket
+    add_moderator_id  = State()   # admin adds moderator by telegram ID
+
+
+class ModeratorFlow(StatesGroup):
+    """FSM состояния для модераторов — подмножество AdminFlow."""
+    issue_plan        = State()
+    issue_telegram_id = State()
+    issue_hwid        = State()
+    issue_note        = State()
+    revoke_key        = State()
+    ticket_reply      = State()
 
 
 class CaptchaFlow(StatesGroup):
@@ -213,7 +228,7 @@ class CaptchaFlow(StatesGroup):
 
 # ─── Keyboards ──────────────────────────────────────────────────────────────
 
-def kb_main(is_admin_user: bool = False) -> InlineKeyboardMarkup:
+def kb_main(is_admin_user: bool = False, is_mod_user: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="👤 Личный кабинет", callback_data="menu_cabinet")],
         [
@@ -228,6 +243,8 @@ def kb_main(is_admin_user: bool = False) -> InlineKeyboardMarkup:
     ]
     if is_admin_user:
         rows.append([InlineKeyboardButton(text="⚙️ Панель администратора", callback_data="admin_panel")])
+    elif is_mod_user:
+        rows.append([InlineKeyboardButton(text="🛡 Панель модератора", callback_data="mod_panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -311,7 +328,26 @@ def kb_admin() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🛡 VirusTotal ссылка",     callback_data="admin_set_vt")],
         [InlineKeyboardButton(text="📤 Загрузить файл (.exe)", callback_data="admin_upload_file")],
         [InlineKeyboardButton(text="🗑 Удалить все ключи",     callback_data="admin_clear_keys")],
+        [InlineKeyboardButton(text="👥 Управление модераторами", callback_data="manage_moderators")],
         [InlineKeyboardButton(text="◀️ Главное меню",          callback_data="menu_main")],
+    ])
+
+
+def kb_moderator() -> InlineKeyboardMarkup:
+    """Панель модератора — ограниченный набор действий без опасных операций."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎟 Выдать ключ",      callback_data="mod_issue")],
+        [InlineKeyboardButton(text="📋 Все лицензии",      callback_data="mod_list")],
+        [InlineKeyboardButton(text="📊 Статистика",        callback_data="mod_stats")],
+        [InlineKeyboardButton(text="🚫 Отозвать ключ",     callback_data="mod_revoke")],
+        [InlineKeyboardButton(text="🎫 Тикеты поддержки", callback_data="mod_tickets")],
+        [InlineKeyboardButton(text="◀️ Главное меню",      callback_data="menu_main")],
+    ])
+
+
+def kb_back_mod() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Панель модератора", callback_data="mod_panel")]
     ])
 
 
@@ -419,6 +455,16 @@ def parse_utc_dt(s: str) -> datetime:
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
+
+
+def is_moderator(user_id: int) -> bool:
+    """True если пользователь является модератором (но НЕ администратором)."""
+    return user_id in _moderator_ids and user_id not in ADMIN_IDS
+
+
+def is_admin_or_mod(user_id: int) -> bool:
+    """True если пользователь — администратор ИЛИ модератор."""
+    return user_id in ADMIN_IDS or user_id in _moderator_ids
 
 
 def _get_active_license(licenses: list) -> Optional[dict]:
@@ -533,7 +579,7 @@ async def _show_main_menu(target, user) -> None:
         f"<b>FMail Sender</b> — профессиональный инструмент для email-рассылок.\n\n"
         f"Выбери действие:"
     )
-    markup = kb_main(is_admin(user.id))
+    markup = kb_main(is_admin(user.id), is_mod_user=is_moderator(user.id))
     await send_or_edit(target, text, reply_markup=markup)
 
 
@@ -673,7 +719,7 @@ async def cb_accept_terms(query: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "menu_main")
 async def cb_menu_main(query: CallbackQuery, state: FSMContext):
     await state.clear()
-    await send_or_edit(query, "🏠 <b>Главное меню</b>", reply_markup=kb_main(is_admin(query.from_user.id)))
+    await send_or_edit(query, "🏠 <b>Главное меню</b>", reply_markup=kb_main(is_admin(query.from_user.id), is_mod_user=is_moderator(query.from_user.id)))
 
 
 # ─── Личный кабинет ─────────────────────────────────────────────────────────
@@ -734,7 +780,7 @@ async def cb_menu_download(query: CallbackQuery):
         await send_or_edit(
             query,
             "❌ <b>Скачивание недоступно</b>\n\nУ тебя нет активной подписки.\nНажми «Купить лицензию» для получения доступа.",
-            reply_markup=kb_main(is_admin(user_id)),
+            reply_markup=kb_main(is_admin(user_id), is_mod_user=is_moderator(user_id)),
         )
         return
 
@@ -946,18 +992,19 @@ async def msg_ticket_create(message: Message, state: FSMContext):
     body = html.escape(text) if text else "📎 медиафайл"
     admin_kb = kb_ticket_admin(ticket_id)
 
-    for admin_id in ADMIN_IDS:
+    _staff_ids = list(ADMIN_IDS) + [uid for uid in _moderator_ids if uid not in ADMIN_IDS]
+    for staff_id in _staff_ids:
         try:
             if file_id:
-                await _send_media(admin_id, file_id, file_type, caption=header + body, reply_markup=admin_kb)
+                await _send_media(staff_id, file_id, file_type, caption=header + body, reply_markup=admin_kb)
             else:
-                await bot.send_message(admin_id, header + body, reply_markup=admin_kb)
+                await bot.send_message(staff_id, header + body, reply_markup=admin_kb)
         except Exception as e:
-            logger.warning("Cannot send ticket #%d to admin %d: %s", ticket_id, admin_id, e)
+            logger.warning("Cannot send ticket #%d to staff %d: %s", ticket_id, staff_id, e)
 
     await message.answer(
         f"✅ <b>Тикет #{ticket_id} создан</b>\n\nОтветим в этот чат. Обычно в течение нескольких часов.",
-        reply_markup=kb_main(is_admin(user.id)),
+        reply_markup=kb_main(is_admin(user.id), is_mod_user=is_moderator(user.id)),
     )
 
 
@@ -1006,14 +1053,15 @@ async def msg_ticket_user_reply(message: Message, state: FSMContext):
     body = html.escape(text) if text else "📎 медиафайл"
     admin_kb = kb_ticket_admin(ticket_id)
 
-    for admin_id in ADMIN_IDS:
+    _staff_ids = list(ADMIN_IDS) + [uid for uid in _moderator_ids if uid not in ADMIN_IDS]
+    for staff_id in _staff_ids:
         try:
             if file_id:
-                await _send_media(admin_id, file_id, file_type, caption=header + body, reply_markup=admin_kb)
+                await _send_media(staff_id, file_id, file_type, caption=header + body, reply_markup=admin_kb)
             else:
-                await bot.send_message(admin_id, header + body, reply_markup=admin_kb)
+                await bot.send_message(staff_id, header + body, reply_markup=admin_kb)
         except Exception as e:
-            logger.warning("Cannot forward reply ticket #%d to admin %d: %s", ticket_id, admin_id, e)
+            logger.warning("Cannot forward reply ticket #%d to staff %d: %s", ticket_id, staff_id, e)
 
     await message.answer("✅ Ответ отправлен.", reply_markup=kb_back_main())
 
@@ -1094,7 +1142,7 @@ async def cb_ticket_close(query: CallbackQuery):
         await bot.send_message(
             user_id,
             f"✅ <b>Тикет #{ticket_id} закрыт</b>\n\nЕсли вопрос остался — создай новый тикет.",
-            reply_markup=kb_main(is_admin(user_id)),
+            reply_markup=kb_main(is_admin(user_id), is_mod_user=is_moderator(user_id)),
         )
     except Exception as _e:
         logger.warning("Failed to notify user about ticket close: %s", _e)
@@ -1226,7 +1274,7 @@ async def msg_hwid(message: Message, state: FSMContext):
         await state.clear()
         await message.answer(
             f"✅ HWID сохранён: <code>{hwid}</code>",
-            reply_markup=kb_main(is_admin(message.from_user.id)),
+            reply_markup=kb_main(is_admin(message.from_user.id), is_mod_user=is_moderator(message.from_user.id)),
         )
         return
     plan_id = data.get("plan_id", "week")
@@ -1301,7 +1349,7 @@ async def cb_check_pay(query: CallbackQuery, state: FSMContext):
         f"Введите его в программе на экране активации.\n"
         f"💻 HWID: <code>{payment.get('hwid') or 'привязывается при первой активации'}</code>"
     )
-    await send_or_edit(query, text, reply_markup=kb_main(is_admin(query.from_user.id)))
+    await send_or_edit(query, text, reply_markup=kb_main(is_admin(query.from_user.id), is_mod_user=is_moderator(query.from_user.id)))
 
 
 # ─── Admin Panel ─────────────────────────────────────────────────────────────
@@ -1757,6 +1805,350 @@ async def cmd_admin(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=kb_admin())
 
 
+# ─── Moderator Panel ─────────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "mod_panel")
+async def cb_mod_panel(query: CallbackQuery, state: FSMContext):
+    if not is_admin_or_mod(query.from_user.id):
+        return
+    await state.clear()
+    stats = await db.get_stats()
+    tickets_note = f"\n🎫 Открытых тикетов: <b>{stats.get('open_tickets', 0)}</b>" if stats.get("open_tickets") else ""
+    text = (
+        f"🛡 <b>Панель модератора</b>\n\n"
+        f"✅ Активных лицензий: <b>{stats.get('active', 0)}</b>\n"
+        f"👥 Пользователей: <b>{stats.get('users', 0)}</b>"
+        f"{tickets_note}"
+    )
+    await send_or_edit(query, text, reply_markup=kb_moderator())
+
+
+@dp.callback_query(F.data == "mod_stats")
+async def cb_mod_stats(query: CallbackQuery):
+    if not is_admin_or_mod(query.from_user.id):
+        return
+    stats = await db.get_stats()
+    text = (
+        f"📊 <b>Статистика</b>\n\n"
+        f"✅ Активных лицензий: <b>{stats.get('active', 0)}</b>\n"
+        f"📦 Всего лицензий: <b>{stats.get('total', 0)}</b>\n"
+        f"💳 Оплаченных заказов: <b>{stats.get('paid', 0)}</b>\n"
+        f"👥 Пользователей: <b>{stats.get('users', 0)}</b>\n"
+        f"🎫 Открытых тикетов: <b>{stats.get('open_tickets', 0)}</b>"
+    )
+    await send_or_edit(query, text, reply_markup=kb_back_mod())
+
+
+@dp.callback_query(F.data == "mod_list")
+async def cb_mod_list(query: CallbackQuery):
+    if not is_admin_or_mod(query.from_user.id):
+        return
+    licenses = await db.get_all_licenses(limit=10)
+    if not licenses:
+        await send_or_edit(query, "📋 Лицензий пока нет.", reply_markup=kb_back_mod())
+        return
+    parts = [f"📋 <b>Последние {len(licenses)} лицензий:</b>\n"]
+    for lic in licenses:
+        plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", "—"))
+        exp = lic.get("expires_at", "")[:10]
+        hwid = lic.get("hwid") or "—"
+        status = "✅" if lic.get("is_active") else "❌"
+        parts.append(f"{status} <code>{lic['key']}</code>\n   {plan_name} | до {exp} | HWID: {hwid}")
+        parts.append("")
+    await send_or_edit(query, "\n".join(parts), reply_markup=kb_back_mod())
+
+
+# ─── Moderator Issue Flow ─────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "mod_issue")
+async def cb_mod_issue(query: CallbackQuery, state: FSMContext):
+    if not is_admin_or_mod(query.from_user.id):
+        return
+    await state.set_state(ModeratorFlow.issue_plan)
+    await send_or_edit(query, "🎟 <b>Выдача ключа</b>\n\nВыбери тарифный план:", reply_markup=kb_admin_plans())
+
+
+@dp.callback_query(F.data.startswith("admin_plan:"), ModeratorFlow.issue_plan)
+async def cb_mod_plan_selected(query: CallbackQuery, state: FSMContext):
+    if not is_admin_or_mod(query.from_user.id):
+        return
+    plan_id = query.data.split(":", 1)[1]
+    await state.update_data(plan_id=plan_id)
+    await state.set_state(ModeratorFlow.issue_telegram_id)
+    plan = PLANS.get(plan_id, {})
+    await send_or_edit(
+        query,
+        f"🎟 Тариф: <b>{plan.get('name', plan_id)}</b>\n\n"
+        f"Отправь Telegram ID получателя (числовой) или <code>-</code> пропустить:",
+        reply_markup=kb_back_mod(),
+    )
+
+
+@dp.message(ModeratorFlow.issue_telegram_id)
+async def msg_mod_telegram_id(message: Message, state: FSMContext):
+    if not is_admin_or_mod(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    telegram_id = 0
+    if raw != "-":
+        try:
+            telegram_id = int(raw)
+        except ValueError:
+            await message.answer("❌ Telegram ID должен быть числом или <code>-</code>")
+            return
+    await state.update_data(telegram_id=telegram_id)
+    await state.set_state(ModeratorFlow.issue_hwid)
+    await message.answer("💻 Отправь HWID получателя или <code>-</code> пропустить:")
+
+
+@dp.message(ModeratorFlow.issue_hwid)
+async def msg_mod_hwid(message: Message, state: FSMContext):
+    if not is_admin_or_mod(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    hwid = "" if raw == "-" else raw.upper()
+    await state.update_data(hwid=hwid)
+    await state.set_state(ModeratorFlow.issue_note)
+    await message.answer("📝 Добавь примечание или <code>-</code> пропустить:")
+
+
+@dp.message(ModeratorFlow.issue_note)
+async def msg_mod_note(message: Message, state: FSMContext):
+    if not is_admin_or_mod(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    note = "" if raw == "-" else raw
+    data = await state.get_data()
+    await state.clear()
+    telegram_id = data.get("telegram_id", 0)
+    license_data = await db.create_license(
+        plan=data["plan_id"],
+        hwid=data.get("hwid", ""),
+        telegram_id=telegram_id,
+        note=note,
+    )
+    plan = PLANS.get(data["plan_id"], {})
+    key = license_data["key"]
+    await message.answer(
+        f"✅ <b>Ключ создан!</b>\n\n"
+        f"📦 {plan.get('name', data['plan_id'])} | до {license_data['expires_at'][:10]}\n"
+        f"💻 HWID: <code>{data.get('hwid') or 'не задан'}</code>\n"
+        f"📝 {note or '—'}\n\n"
+        f"🔑 <code>{key}</code>",
+        reply_markup=kb_moderator(),
+    )
+    if telegram_id:
+        try:
+            await bot.send_message(
+                telegram_id,
+                f"🎉 <b>Ваш лицензионный ключ FMail Sender</b>\n\n"
+                f"📦 {plan.get('name', data['plan_id'])} | до {license_data['expires_at'][:10]}\n\n"
+                f"🔑 <code>{key}</code>\n\nВведите в программе на экране активации."
+            )
+        except Exception as _e:
+            logger.warning("mod_issue: failed to notify user %d: %s", telegram_id, _e)
+
+
+# ─── Moderator Revoke Flow ────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "mod_revoke")
+async def cb_mod_revoke(query: CallbackQuery, state: FSMContext):
+    if not is_admin_or_mod(query.from_user.id):
+        return
+    await state.set_state(ModeratorFlow.revoke_key)
+    await send_or_edit(query, "🚫 <b>Отзыв ключа</b>\n\nОтправь лицензионный ключ для отзыва:", reply_markup=kb_back_mod())
+
+
+@dp.message(ModeratorFlow.revoke_key)
+async def msg_mod_revoke(message: Message, state: FSMContext):
+    if not is_admin_or_mod(message.from_user.id):
+        return
+    key = (message.text or "").strip().upper()
+    await state.clear()
+    success = await db.revoke_license(key)
+    text = f"✅ Ключ <code>{key}</code> отозван." if success else f"❌ Ключ не найден: <code>{key}</code>"
+    await message.answer(text, reply_markup=kb_moderator())
+
+
+# ─── Moderator Tickets ────────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "mod_tickets")
+async def cb_mod_tickets(query: CallbackQuery):
+    if not is_admin_or_mod(query.from_user.id):
+        return
+    tickets = await db.get_open_tickets()
+    if not tickets:
+        await send_or_edit(query, "🎫 Открытых тикетов нет.", reply_markup=kb_back_mod())
+        return
+    rows = []
+    for t in tickets[:15]:
+        label = f"#{t['id']} {t.get('first_name', '')} @{t.get('username', '')}"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"mod_ticket_view:{t['id']}")])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="mod_panel")])
+    await send_or_edit(query, f"🎫 <b>Открытые тикеты ({len(tickets)}):</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+@dp.callback_query(F.data.startswith("mod_ticket_view:"))
+async def cb_mod_ticket_view(query: CallbackQuery, state: FSMContext):
+    if not is_admin_or_mod(query.from_user.id):
+        return
+    ticket_id = int(query.data.split(":", 1)[1])
+    ticket = await db.get_ticket(ticket_id)
+    if not ticket:
+        await query.answer("Тикет не найден.", show_alert=True)
+        return
+    msgs = await db.get_ticket_messages(ticket_id)
+    lines = [f"🎫 <b>Тикет #{ticket_id}</b> · {ticket.get('first_name', '')} @{ticket.get('username', '')}"]
+    lines.append(f"📅 {ticket['created_at'][:16].replace('T', ' ')}\n")
+    for m in msgs[-10:]:
+        who = "👤" if m["sender"] == "user" else "🛡"
+        lines.append(f"{who} {m['text']}")
+    rows = [
+        [InlineKeyboardButton(text="✍️ Ответить", callback_data=f"mod_ticket_reply:{ticket_id}")],
+        [InlineKeyboardButton(text="◀️ Назад к тикетам", callback_data="mod_tickets")],
+    ]
+    await send_or_edit(query, "\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+@dp.callback_query(F.data.startswith("mod_ticket_reply:"))
+async def cb_mod_ticket_reply_start(query: CallbackQuery, state: FSMContext):
+    if not is_admin_or_mod(query.from_user.id):
+        return
+    ticket_id = int(query.data.split(":", 1)[1])
+    await state.update_data(reply_ticket_id=ticket_id)
+    await state.set_state(ModeratorFlow.ticket_reply)
+    await send_or_edit(
+        query,
+        f"✍️ Введи ответ на тикет #{ticket_id}:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Отмена", callback_data=f"mod_ticket_view:{ticket_id}")]
+        ]),
+    )
+
+
+@dp.message(ModeratorFlow.ticket_reply)
+async def msg_mod_ticket_reply(message: Message, state: FSMContext):
+    if not is_admin_or_mod(message.from_user.id):
+        return
+    data = await state.get_data()
+    ticket_id = data.get("reply_ticket_id")
+    await state.clear()
+    if not ticket_id:
+        await message.answer("❌ Ошибка: тикет не найден.", reply_markup=kb_moderator())
+        return
+    ticket = await db.get_ticket(ticket_id)
+    if not ticket:
+        await message.answer("❌ Тикет не найден.", reply_markup=kb_moderator())
+        return
+    reply_text = message.text or ""
+    await db.add_ticket_message(ticket_id, "staff", reply_text)
+    try:
+        mod_info = f"@{message.from_user.username}" if message.from_user.username else str(message.from_user.id)
+        await bot.send_message(
+            ticket["user_id"],
+            f"📩 <b>Ответ по тикету #{ticket_id}</b>\n\n{reply_text}\n\n<i>— Поддержка ({mod_info})</i>",
+        )
+    except Exception as _e:
+        logger.warning("mod_ticket_reply: failed to notify user: %s", _e)
+    await message.answer(f"✅ Ответ отправлен по тикету #{ticket_id}.", reply_markup=kb_moderator())
+
+
+# ─── Admin Manage Moderators ──────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "manage_moderators")
+async def cb_manage_moderators(query: CallbackQuery, state: FSMContext):
+    if not is_admin(query.from_user.id):
+        return
+    await state.clear()
+    mods = await db.get_all_moderators()
+    env_mods = [uid for uid in MODERATOR_IDS if uid not in ADMIN_IDS]
+    lines = ["👮 <b>Модераторы</b>\n"]
+    if env_mods:
+        lines.append(f"📌 Из env (постоянные): {', '.join(f'<code>{m}</code>' for m in env_mods)}")
+    if mods:
+        lines.append(f"\n🗃 Из БД:")
+        for m in mods:
+            lines.append(f"  · <code>{m['telegram_id']}</code> — {m.get('note') or '—'}")
+    else:
+        lines.append("\n<i>Модераторов в БД нет.</i>")
+    rows = [
+        [InlineKeyboardButton(text="➕ Добавить модератора", callback_data="admin_add_mod")],
+    ]
+    if mods:
+        rows.append([InlineKeyboardButton(text="➖ Удалить модератора", callback_data="admin_remove_mod")])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
+    await send_or_edit(query, "\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+@dp.callback_query(F.data == "admin_add_mod")
+async def cb_admin_add_mod(query: CallbackQuery, state: FSMContext):
+    if not is_admin(query.from_user.id):
+        return
+    await state.set_state(AdminFlow.add_moderator_id)
+    await send_or_edit(
+        query,
+        "➕ <b>Добавить модератора</b>\n\nОтправь Telegram ID нового модератора:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Отмена", callback_data="manage_moderators")]
+        ]),
+    )
+
+
+@dp.message(AdminFlow.add_moderator_id)
+async def msg_admin_add_mod(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    try:
+        mod_id = int(raw)
+    except ValueError:
+        await message.answer("❌ Telegram ID должен быть числом.")
+        return
+    await state.clear()
+    await db.add_moderator(mod_id, note=f"добавлен {message.from_user.id}")
+    _moderator_ids.add(mod_id)
+    await message.answer(
+        f"✅ Модератор <code>{mod_id}</code> добавлен.",
+        reply_markup=kb_admin(),
+    )
+
+
+@dp.callback_query(F.data == "admin_remove_mod")
+async def cb_admin_remove_mod(query: CallbackQuery, state: FSMContext):
+    if not is_admin(query.from_user.id):
+        return
+    mods = await db.get_all_moderators()
+    if not mods:
+        await query.answer("Модераторов в БД нет.", show_alert=True)
+        return
+    rows = []
+    for m in mods:
+        label = f"❌ {m['telegram_id']} — {m.get('note') or '—'}"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"admin_del_mod:{m['telegram_id']}")])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="manage_moderators")])
+    await send_or_edit(query, "➖ <b>Выбери модератора для удаления:</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+@dp.callback_query(F.data.startswith("admin_del_mod:"))
+async def cb_admin_del_mod(query: CallbackQuery):
+    if not is_admin(query.from_user.id):
+        return
+    mod_id = int(query.data.split(":", 1)[1])
+    await db.remove_moderator(mod_id)
+    _moderator_ids.discard(mod_id)
+    await query.answer(f"Модератор {mod_id} удалён.", show_alert=True)
+    mods = await db.get_all_moderators()
+    if not mods:
+        await send_or_edit(query, "👮 Модераторов в БД больше нет.", reply_markup=kb_admin())
+        return
+    rows = []
+    for m in mods:
+        label = f"❌ {m['telegram_id']} — {m.get('note') or '—'}"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"admin_del_mod:{m['telegram_id']}")])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="manage_moderators")])
+    await send_or_edit(query, "➖ <b>Выбери модератора для удаления:</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
 # ─── FastAPI License Validation ──────────────────────────────────────────────
 
 api_app = FastAPI(title="FMail Sender License API", docs_url=None, redoc_url=None)
@@ -1895,7 +2287,6 @@ async def download_file(filename: str, key: str = ""):
     if not _file_path.exists():
         raise HTTPException(status_code=404, detail="Файл не найден на сервере")
     return FileResponse(str(_file_path), filename=safe, media_type="application/octet-stream")
-    return FileResponse(path, filename=safe, media_type="application/octet-stream")
 
 
 @api_app.get("/health")
@@ -1915,6 +2306,103 @@ async def health():
 
 import time as _time
 _SERVER_START = _time.time()
+
+
+@api_app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+async def admin_web_panel(secret: str = ""):
+    """fmail.shop/admin — защищённая веб-панель управления."""
+    if not ADMIN_WEB_SECRET or secret != ADMIN_WEB_SECRET:
+        return HTMLResponse(
+            content="<html><body style='font-family:sans-serif;background:#0f0f1a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>"
+                    "<div style='text-align:center'><h2 style='color:#fc8181'>403 — Доступ запрещён</h2>"
+                    "<p style='color:#718096;margin-top:8px'>Передайте параметр <code>?secret=...</code></p></div></body></html>",
+            status_code=403,
+        )
+    try:
+        stats = await db.get_stats()
+        licenses = await db.get_all_licenses(limit=20)
+        mods = await db.get_all_moderators()
+        tickets = await db.get_open_tickets()
+    except Exception as _e:
+        stats = {}; licenses = []; mods = []; tickets = []
+
+    def _lic_rows() -> str:
+        rows = []
+        for lic in licenses:
+            plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", "—"))
+            exp = lic.get("expires_at", "")[:10]
+            hwid = lic.get("hwid") or "—"
+            status = "✅" if lic.get("is_active") else "❌"
+            key = lic.get("key", "—")
+            uid = lic.get("telegram_id") or "—"
+            rows.append(f"<tr><td>{status}</td><td><code>{key}</code></td><td>{plan_name}</td>"
+                        f"<td>{exp}</td><td>{uid}</td><td>{hwid}</td></tr>")
+        return "".join(rows) or "<tr><td colspan='6' style='text-align:center;color:#718096'>Нет лицензий</td></tr>"
+
+    def _mod_rows() -> str:
+        rows = []
+        for m in mods:
+            rows.append(f"<tr><td><code>{m['telegram_id']}</code></td><td>{m.get('note') or '—'}</td></tr>")
+        return "".join(rows) or "<tr><td colspan='2' style='text-align:center;color:#718096'>Нет модераторов в БД</td></tr>"
+
+    def _ticket_rows() -> str:
+        rows = []
+        for t in tickets:
+            tid = t.get("id"); fn = t.get("first_name", ""); un = t.get("username", "")
+            rows.append(f"<tr><td>#{tid}</td><td>{fn}</td><td>@{un}</td>"
+                        f"<td>{t.get('created_at', '')[:16].replace('T', ' ')}</td></tr>")
+        return "".join(rows) or "<tr><td colspan='4' style='text-align:center;color:#718096'>Нет открытых тикетов</td></tr>"
+
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    html = f"""<!DOCTYPE html>
+<html lang="ru"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FMail Admin Panel</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f1a;color:#e2e8f0;padding:32px 16px}}
+h1{{font-size:1.6rem;font-weight:700;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px}}
+.sub{{color:#718096;font-size:.85rem;margin-bottom:32px}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:32px}}
+.stat{{background:#1a1a2e;border:1px solid #2d2d44;border-radius:12px;padding:18px 20px}}
+.stat-n{{font-size:1.8rem;font-weight:700;color:#90cdf4}}.stat-l{{font-size:.78rem;color:#718096;margin-top:4px}}
+section{{background:#1a1a2e;border:1px solid #2d2d44;border-radius:12px;padding:20px;margin-bottom:20px}}
+h2{{font-size:1rem;font-weight:600;margin-bottom:14px;color:#a0aec0}}
+table{{width:100%;border-collapse:collapse;font-size:.82rem}}
+th{{text-align:left;padding:8px 10px;border-bottom:2px solid #2d2d44;color:#718096;font-weight:500}}
+td{{padding:7px 10px;border-bottom:1px solid #1e1e35;vertical-align:middle}}
+code{{background:#2d2d44;padding:2px 6px;border-radius:4px;font-size:.78rem}}
+.footer{{margin-top:20px;color:#4a5568;font-size:.75rem;text-align:center}}
+</style></head><body>
+<h1>⚙️ FMail Admin Panel</h1>
+<div class="sub">Последнее обновление: {now_utc} · fmail.shop/admin</div>
+<div class="grid">
+  <div class="stat"><div class="stat-n">{stats.get("active", 0)}</div><div class="stat-l">Активных лицензий</div></div>
+  <div class="stat"><div class="stat-n">{stats.get("total", 0)}</div><div class="stat-l">Всего лицензий</div></div>
+  <div class="stat"><div class="stat-n">{stats.get("users", 0)}</div><div class="stat-l">Пользователей</div></div>
+  <div class="stat"><div class="stat-n">{stats.get("paid", 0)}</div><div class="stat-l">Оплаченных заказов</div></div>
+  <div class="stat"><div class="stat-n">${stats.get("revenue_usdt", 0.0):.2f}</div><div class="stat-l">Выручка USDT</div></div>
+  <div class="stat"><div class="stat-n">{stats.get("open_tickets", 0)}</div><div class="stat-l">Открытых тикетов</div></div>
+</div>
+<section>
+  <h2>📋 Последние 20 лицензий</h2>
+  <table><thead><tr><th></th><th>Ключ</th><th>Тариф</th><th>До</th><th>TG ID</th><th>HWID</th></tr></thead>
+  <tbody>{_lic_rows()}</tbody></table>
+</section>
+<section>
+  <h2>🎫 Открытые тикеты</h2>
+  <table><thead><tr><th>#</th><th>Имя</th><th>Username</th><th>Дата</th></tr></thead>
+  <tbody>{_ticket_rows()}</tbody></table>
+</section>
+<section>
+  <h2>👮 Модераторы (БД)</h2>
+  <table><thead><tr><th>Telegram ID</th><th>Примечание</th></tr></thead>
+  <tbody>{_mod_rows()}</tbody></table>
+</section>
+<div class="footer">FMail Sender v{APP_VERSION} · Управление через Telegram бот</div>
+</body></html>"""
+    return HTMLResponse(content=html)
 
 
 @api_app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -2025,7 +2513,7 @@ async def _poll_pending_payments():
                                 f"🔑 <b>Ваш лицензионный ключ:</b>\n<code>{license_data['key']}</code>\n\n"
                                 f"Введите его на экране активации программы.\n"
                                 f"💻 HWID: <code>{payment.get('hwid') or 'привязывается при первой активации'}</code>",
-                                reply_markup=kb_main(is_admin(user_id)),
+                                reply_markup=kb_main(is_admin(user_id), is_mod_user=is_moderator(user_id)),
                                 parse_mode="HTML",
                             )
                         except Exception as notify_err:
@@ -2042,6 +2530,11 @@ async def main():
     global _release_cache_lock
     _release_cache_lock = asyncio.Lock()  # BUG-FIX: инициализируем Lock внутри event loop
     await db.init_db()
+    # Загружаем модераторов из БД в in-memory set
+    _db_mods = await db.get_all_moderators()
+    for _m in _db_mods:
+        _moderator_ids.add(_m["telegram_id"])
+    logger.info("Loaded moderators from DB: %d (env: %d)", len(_db_mods), len(MODERATOR_IDS))
     # FIX: загружаем капчу и условия из БД — in-memory кэш переживёт перезапуск
     _cap, _terms = await get_all_passed_users()
     _captcha_passed.update(_cap)

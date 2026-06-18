@@ -29,6 +29,11 @@ BOT_TOKEN = _require("BOT_TOKEN")
 ADMIN_IDS = [int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 if not ADMIN_IDS:
     print("[WARN] ADMIN_IDS env var is not set — admin panel will be inaccessible.", file=sys.stderr)
+
+MODERATOR_IDS: list[int] = [int(x) for x in os.environ.get("MODERATOR_IDS", "").split(",") if x.strip().isdigit()]
+
+ADMIN_WEB_SECRET: str = os.environ.get("ADMIN_WEB_SECRET", "")
+
 CRYPTO_BOT_TOKEN = _require("CRYPTO_BOT_TOKEN")
 CRYPTO_BOT_API = "https://pay.crypt.bot/api"
 

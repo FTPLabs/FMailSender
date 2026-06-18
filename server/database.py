@@ -93,6 +93,12 @@ CREATE TABLE IF NOT EXISTS ticket_messages (
     created_at TEXT NOT NULL,
     FOREIGN KEY(ticket_id) REFERENCES tickets(id)
 );
+
+CREATE TABLE IF NOT EXISTS moderators (
+    telegram_id INTEGER PRIMARY KEY,
+    added_by INTEGER NOT NULL,
+    added_at TEXT NOT NULL
+);
 """
 
 
@@ -632,3 +638,31 @@ async def get_ticket_messages(ticket_id: int) -> list:
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
+
+
+# ─── Moderators ───────────────────────────────────────────────────────────────
+
+async def add_moderator(telegram_id: int, added_by: int) -> None:
+    """Добавляет модератора в БД (идемпотентно)."""
+    async with _db() as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO moderators (telegram_id, added_by, added_at) VALUES (?, ?, ?)",
+            (telegram_id, added_by, _now()),
+        )
+        await db.commit()
+
+
+async def remove_moderator(telegram_id: int) -> bool:
+    """Удаляет модератора из БД. Возвращает True если запись существовала."""
+    async with _db() as db:
+        cur = await db.execute("DELETE FROM moderators WHERE telegram_id=?", (telegram_id,))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def get_all_moderators() -> list[int]:
+    """Возвращает список telegram_id всех модераторов из БД."""
+    async with _db() as db:
+        async with db.execute("SELECT telegram_id FROM moderators") as cur:
+            rows = await cur.fetchall()
+            return [row[0] for row in rows]
