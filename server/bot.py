@@ -37,6 +37,7 @@ class JsonFileStorage(BaseStorage):
     def __init__(self, path: str = "fsm_storage.json"):
         self._path = Path(path)
         self._data: Dict[str, Any] = self._load()
+        self._lock: asyncio.Lock = asyncio.Lock()  # FIX КРИТ-1: защита _data от race condition
 
     def _load(self) -> Dict[str, Any]:
         if self._path.exists():
@@ -54,30 +55,37 @@ class JsonFileStorage(BaseStorage):
 
     async def _dump(self) -> None:
         """Async dump — snapshot в event loop, запись в thread pool (FIX: устраняет data race)."""
-        snapshot = dict(self._data)  # snapshot до to_thread — thread-safe
+        async with self._lock:
+            snapshot = dict(self._data)
         await asyncio.to_thread(self._dump_sync, snapshot)
 
     def _key(self, key: StorageKey) -> str:
         return f"{key.chat_id}:{key.user_id}"
 
     async def set_state(self, key: StorageKey, state: Any = None) -> None:
-        k = self._key(key)
-        if k not in self._data:
-            self._data[k] = {}
-        self._data[k]["state"] = state.state if hasattr(state, "state") else state
+    async def set_state(self, key: StorageKey, state: Any = None) -> None:
+        async with self._lock:
+            k = self._key(key)
+            if k not in self._data:
+                self._data[k] = {}
+            self._data[k]["state"] = state.state if hasattr(state, "state") else state
         await self._dump()
 
     async def get_state(self, key: StorageKey) -> Any:
-        return self._data.get(self._key(key), {}).get("state")
+        async with self._lock:
+            return self._data.get(self._key(key), {}).get("state")
 
     async def set_data(self, key: StorageKey, data: Dict[str, Any]) -> None:
-        k = self._key(key)
-        if k not in self._data:
-            self._data[k] = {}
-        self._data[k]["data"] = data
+        async with self._lock:
+            k = self._key(key)
+            if k not in self._data:
+                self._data[k] = {}
+            self._data[k]["data"] = data
         await self._dump()
-
+        await self._dump()
     async def get_data(self, key: StorageKey) -> Dict[str, Any]:
+        async with self._lock:
+            return dict(self._data.get(self._key(key), {}).get("data", {}))
         return self._data.get(self._key(key), {}).get("data", {})
 
     async def close(self) -> None:
@@ -500,6 +508,21 @@ _TERMS_GATE_TEXT = (
     "Нажми кнопки ниже чтобы прочитать, затем подтверди принятие."
 )
 
+
+
+async def _require_onboarding(query: CallbackQuery) -> bool:
+    """FIX СРЕДН-1: проверяет прохождение onboarding для callback handlers."""
+    user = query.from_user
+    if user.id not in _captcha_passed:
+        await query.answer("⚠️ Сначала пройди /start для верификации", show_alert=True)
+        return False
+    if not await _check_subscription(user.id):
+        await query.answer("⚠️ Сначала вступи в канал (/start)", show_alert=True)
+        return False
+    if user.id not in _terms_accepted:
+        await query.answer("⚠️ Сначала прими условия (/start)", show_alert=True)
+        return False
+    return True
 
 async def _show_terms_gate(target, user) -> None:
     """Шаг 3 флоу: принятие политики конфиденциальности и оферты."""
@@ -1683,15 +1706,27 @@ async def msg_admin_broadcast(message: Message, state: FSMContext):
     user_ids = await db.get_distinct_user_ids()
     sent = 0
     failed = 0
-    # BUG-FIX: добавлена обработка TelegramRetryAfter — без этого бот банится
+    # FIX СРЕДН-2: рассылка в фоновом asyncio.Task — бот не блокируется во время отправки
     from aiogram.exceptions import TelegramRetryAfterError, TelegramForbiddenError
+    admin_id = message.from_user.id
+    await message.answer(
+        f"📢 <b>Рассылка запущена в фоне</b>\n👥 Получателей: {len(user_ids)}\n\nПо завершении получишь отчёт.",
+        reply_markup=kb_admin(),
+    )
+    asyncio.create_task(_broadcast_task(admin_id, user_ids, text))
+
+
+async def _broadcast_task(admin_id: int, user_ids: list, text: str) -> None:
+    """Фоновая рассылка — не блокирует event loop."""
+    from aiogram.exceptions import TelegramRetryAfterError, TelegramForbiddenError
+    sent = 0; failed = 0
     for uid in user_ids:
         try:
             await bot.send_message(uid, text)
             sent += 1
-            await asyncio.sleep(0.04)  # ~25 msg/sec — безопасный лимит Telegram
+            await asyncio.sleep(0.04)
         except TelegramRetryAfterError as e:
-            logger.warning("Rate limited in broadcast, waiting %ds", e.retry_after)
+            logger.warning("Рассылка: rate limit %ds", e.retry_after)
             await asyncio.sleep(e.retry_after + 1)
             try:
                 await bot.send_message(uid, text)
@@ -1699,13 +1734,14 @@ async def msg_admin_broadcast(message: Message, state: FSMContext):
             except Exception:
                 failed += 1
         except TelegramForbiddenError:
-            failed += 1  # Пользователь заблокировал бота
+            failed += 1
         except Exception:
             failed += 1
-    await message.answer(
-        f"📢 Рассылка завершена\n✅ Отправлено: {sent}\n❌ Ошибок: {failed}",
-        reply_markup=kb_admin(),
-    )
+    try:
+        await bot.send_message(admin_id,
+            f"📢 <b>Рассылка завершена</b>\n✅ Отправлено: {sent}\n❌ Ошибок: {failed}")
+    except Exception:
+        pass
 
 
 # ─── Admin Command ────────────────────────────────────────────────────────────
@@ -1853,9 +1889,15 @@ async def download_file(filename: str, key: str = ""):
     ext = os.path.splitext(safe)[1].lower()
     if ext not in allowed:
         raise HTTPException(status_code=403, detail="File type not allowed")
-    path = os.path.join("downloads", safe)
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="File not found")
+    # FIX КРИТ-3: path traversal — проверяем resolved path
+    from pathlib import Path as _Path
+    _dl_dir = _Path("downloads").resolve()
+    _file_path = (_dl_dir / safe).resolve()
+    if not str(_file_path).startswith(str(_dl_dir)):
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    if not _file_path.exists():
+        raise HTTPException(status_code=404, detail="Файл не найден на сервере")
+    return FileResponse(str(_file_path), filename=safe, media_type="application/octet-stream")
     return FileResponse(path, filename=safe, media_type="application/octet-stream")
 
 
