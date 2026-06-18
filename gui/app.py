@@ -286,11 +286,39 @@ class MainWindow(QMainWindow):
             self._screens[key] = screen
             self._stack.addWidget(screen)
 
-        # Wire up sending ↔ dashboard
-        sending = self._screens.get("sending")
-        dashboard = self._screens.get("dashboard")
-        if sending and dashboard and hasattr(sending, "campaign_finished"):
+        accounts   = self._screens.get("accounts")
+        recipients = self._screens.get("recipients")
+        compose    = self._screens.get("compose")
+        sending    = self._screens.get("sending")
+        inbox      = self._screens.get("inbox")
+        dashboard  = self._screens.get("dashboard")
+
+        # accounts → sending + inbox
+        if hasattr(accounts, "accounts_changed"):
+            if hasattr(sending, "set_accounts"):
+                accounts.accounts_changed.connect(sending.set_accounts)
+            if hasattr(inbox, "set_accounts"):
+                accounts.accounts_changed.connect(inbox.set_accounts)
+
+        # recipients → sending + inbox
+        if hasattr(recipients, "list_ready"):
+            if hasattr(sending, "set_recipients"):
+                recipients.list_ready.connect(sending.set_recipients)
+            if hasattr(inbox, "set_recipients"):
+                recipients.list_ready.connect(inbox.set_recipients)
+
+        # compose → sending
+        if hasattr(compose, "template_ready") and hasattr(sending, "set_template"):
+            compose.template_ready.connect(sending.set_template)
+
+        # sending → dashboard
+        if hasattr(sending, "campaign_finished") and hasattr(dashboard, "update_campaign_results"):
             sending.campaign_finished.connect(dashboard.update_campaign_results)
+
+        # Re-emit: accounts._load() ran in __init__ before signals were wired.
+        # Push current state now that all connections exist.
+        if hasattr(accounts, "_accounts") and accounts._accounts:
+            accounts.accounts_changed.emit(accounts._accounts)
 
     def _navigate(self, key: str) -> None:
         if key not in self._screens:
