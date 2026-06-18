@@ -41,11 +41,11 @@ HWID_SALT: str = os.environ.get("HWID_SALT", "")
 # URL лицензионного сервера — переопределяются через ENV, иначе используется production IP.
 LICENSE_API_URL: str = os.environ.get(
     "LICENSE_API_URL",
-    "https://31.76.100.190:8000/v1/activate",
+    "http://31.76.100.190:8000/v1/activate",  # FIX: сервер работает по HTTP (NO_SSL=1)
 )
 LICENSE_VERIFY_URL: str = os.environ.get(
     "LICENSE_VERIFY_URL",
-    "https://31.76.100.190:8000/v1/verify",
+    "http://31.76.100.190:8000/v1/verify",  # FIX: сервер работает по HTTP (NO_SSL=1)
 )
 
 OFFLINE_GRACE_HOURS = 72
