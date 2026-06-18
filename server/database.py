@@ -116,8 +116,9 @@ async def _migrate_db() -> None:
             try:
                 await conn.execute(_sql)
                 await conn.commit()
-            except Exception:
-                pass  # колонка уже существует
+            except aiosqlite.OperationalError:
+                pass  # FIX: ловим только OperationalError "duplicate column name"
+                # другие ошибки теперь не скрываются
 
 
 async def set_terms_accepted(telegram_id: int) -> None:

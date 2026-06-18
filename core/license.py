@@ -74,8 +74,10 @@ _hwid_lock = threading.Lock()
 
 def _get_ssl_verify() -> "bool | str":
     """SSL verify helper for license server.
-    Default: False — сервер использует self-signed сертификат (IP-адрес, Let's Encrypt неприменим).
-    Для production с CA-подписанным сертом: LICENSE_SSL_VERIFY=1 или путь к CA-bundle.
+    Default: True (LICENSE_SSL_VERIFY=1) — проверять SSL-сертификат сервера.
+    FIX: исправлен комментарий — реальный дефолт True, а не False.
+    Для self-signed / IP-only сертификата: LICENSE_SSL_VERIFY=0.
+    Для кастомного CA-bundle: LICENSE_SSL_VERIFY=/path/to/ca-bundle.crt
     """
     _ssl_env = os.environ.get("LICENSE_SSL_VERIFY", "1").strip()
     if _ssl_env == "1":

@@ -1,7 +1,7 @@
 """
 Анализатор контента писем на спам. Score 0-100 с разбивкой по категориям.
 База 500+ спам-триггеров. Проверка Image-to-Text ratio, HTML-валидация.
-validate_email_format импортируется из sender.py (единственный источник истины).
+validate_email_format импортируется из core.utils (единственный источник истины).
 """
 import json
 import re
