@@ -734,7 +734,7 @@ class AccountsScreen(QWidget):
       self._refresh_table()
       self.accounts_changed.emit(self._accounts)
 
-  def _test_single(self, row: int):
+    def _test_single(self, row: int):
       """Проверяет один аккаунт по индексу."""
       if row < 0 or row >= len(self._accounts):
           return
