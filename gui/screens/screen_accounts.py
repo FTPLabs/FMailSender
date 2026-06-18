@@ -543,7 +543,43 @@ class AccountDialog(QDialog):
         return acc
 
 
-class AccountsScreen(QWidget):
+
+  class _CountryWorker(QThread):
+      """Асинхронно определяет страну прокси через ip-api.com и обновляет ячейку."""
+      result_ready = pyqtSignal(int, str)   # row, flag+text
+
+      def __init__(self, row: int, proxy_url: str, parent=None):
+          super().__init__(parent)
+          self._row = row
+          self._proxy_url = proxy_url
+
+      def run(self):
+          flag = self._resolve(self._proxy_url)
+          self.result_ready.emit(self._row, flag)
+
+      @staticmethod
+      def _resolve(proxy_url: str) -> str:
+          try:
+              parsed = urllib.parse.urlparse(proxy_url)
+              host = parsed.hostname or ""
+              if not host:
+                  return "❓"
+              req = urllib.request.Request(
+                  f"http://ip-api.com/json/{host}?fields=country,countryCode",
+                  headers={"User-Agent": "FMailSender/3.1"},
+              )
+              with urllib.request.urlopen(req, timeout=4) as resp:
+                  data = json.loads(resp.read())
+                  cc = data.get("countryCode", "")
+                  country = data.get("country", "")
+                  # Конвертируем ISO код → эмодзи флаг
+                  flag = "".join(chr(0x1F1E0 + ord(c) - ord('A')) for c in cc.upper()) if len(cc) == 2 else "🌍"
+                  return f"{flag} {country}" if country else flag
+          except Exception:
+              return "🌐"
+
+
+  class AccountsScreen(QWidget):
     accounts_changed = pyqtSignal(list)
 
     def __init__(self, parent=None):
@@ -600,9 +636,9 @@ class AccountsScreen(QWidget):
         toolbar.addWidget(del_btn)
         layout.addLayout(toolbar)
 
-        self.table = QTableWidget(0, 7)
+        self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels([
-            "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Активен",
+            "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Прокси 🌍", "Активен",
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -639,11 +675,19 @@ class AccountsScreen(QWidget):
             status_item = QTableWidgetItem("⏳ Ожидание...")
             status_item.setForeground(QColor(Colors.TEXT_MUTED))
             self.table.setItem(row, 5, status_item)
+            
+            # Прокси + флаг страны (обновляется CountryWorker после SMTP OK)
+              _proxy_raw = (acc.proxy or "").strip()
+              _proxy_display = _proxy_raw if _proxy_raw else "—"
+              proxy_item = QTableWidgetItem(_proxy_display)
+              proxy_item.setForeground(QColor("#6C8EBF" if _proxy_raw else Colors.TEXT_MUTED))
+              proxy_item.setToolTip(_proxy_raw or "Прокси не назначен")
+              self.table.setItem(row, 6, proxy_item)
             active_item = QTableWidgetItem("✓" if acc.is_active else "✗")
             active_item.setForeground(
                 QColor(Colors.SUCCESS) if acc.is_active else QColor(Colors.ERROR)
             )
-            self.table.setItem(row, 6, active_item)
+            self.table.setItem(row, 7, active_item)
         active_count = sum(1 for a in self._accounts if a.is_active)
         self.status_label.setText(f"Аккаунтов: {len(self._accounts)} (активных: {active_count})")
 
@@ -710,12 +754,29 @@ class AccountsScreen(QWidget):
                 item.setToolTip(msg)
             if 0 <= r < len(self._accounts):
                 self._accounts[r].last_test_ok = ok
+              # После OK — обновляем флаг страны прокси
+              if ok and 0 <= r < len(self._accounts):
+                  _px = self._accounts[r].proxy or ""
+                  if _px.strip():
+                      self._fetch_proxy_country(r, _px.strip())
 
         w.result_ready.connect(on_result)
         self._test_workers.append(w)
         w.start()
 
-    def _test_all(self):
+        def _fetch_proxy_country(self, row: int, proxy_url: str) -> None:
+          """Запускает CountryWorker для обновления флага страны в таблице."""
+          w = _CountryWorker(row, proxy_url, parent=self)
+          def _on_country(r, flag_text, widget=self.table):
+              item = widget.item(r, 6)
+              if item:
+                  item.setText(flag_text)
+                  item.setForeground(QColor("#6C8EBF"))
+          w.result_ready.connect(_on_country)
+          w.start()
+          # Не держим ссылку — QThread удалится сам после finished
+
+      def _test_all(self):
         if not self._accounts:
             return
         self.test_all_btn.setEnabled(False)
