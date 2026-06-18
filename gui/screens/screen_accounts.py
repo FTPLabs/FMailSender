@@ -754,17 +754,17 @@ class AccountsScreen(QWidget):
               item.setToolTip(msg)
           if 0 <= r < len(self._accounts):
               self._accounts[r].last_test_ok = ok
-            # После OK — обновляем флаг страны прокси
-            if ok and 0 <= r < len(self._accounts):
-                _px = self._accounts[r].proxy or ""
-                if _px.strip():
-                    self._fetch_proxy_country(r, _px.strip())
+              # После OK — обновляем флаг страны прокси
+              if ok and 0 <= r < len(self._accounts):
+                  _px = self._accounts[r].proxy or ""
+                  if _px.strip():
+                      self._fetch_proxy_country(r, _px.strip())
 
       w.result_ready.connect(on_result)
       self._test_workers.append(w)
       w.start()
 
-      def _fetch_proxy_country(self, row: int, proxy_url: str) -> None:
+    def _fetch_proxy_country(self, row: int, proxy_url: str) -> None:
         """Запускает CountryWorker для обновления флага страны в таблице."""
         w = _CountryWorker(row, proxy_url, parent=self)
         def _on_country(r, flag_text, widget=self.table):
