@@ -211,3 +211,57 @@ jobs:
           name: FMailSender-windows-${{ github.event.inputs.tag_name || github.ref_name }}
           path: dist/FMailSender.exe
           retention-days: 30
+
+    # ══════════════════════════════════════════════════════════════════
+    # DEPLOY — VPS (fmail.shop), только если сборка успешна
+    # ══════════════════════════════════════════════════════════════════
+    deploy-vps:
+      name: Deploy to VPS (fmail.shop)
+      runs-on: ubuntu-latest
+      needs: build-release
+      steps:
+        - name: SSH Deploy to fmail.shop
+          uses: appleboy/ssh-action@v1.0.3
+          with:
+            host: fmail.shop
+            username: root
+            password: ${{ secrets.VPS_PASSWORD }}
+            port: 22
+            timeout: 120s
+            script: |
+              set -e
+              echo "=== FMailSender VPS Deploy ==="
+              cd /opt/fmailsender
+
+              git fetch origin
+              git reset --hard origin/main
+              echo "✅ Code: $(git log --oneline -1)"
+
+              VENV=""
+              if [ -f "/opt/fmailsender/venv/bin/pip" ]; then
+                VENV="/opt/fmailsender/venv"
+              elif [ -f "/opt/fmailsender/server/venv/bin/pip" ]; then
+                VENV="/opt/fmailsender/server/venv"
+              fi
+              if [ -n "$VENV" ]; then
+                $VENV/bin/pip install -q --upgrade pip
+                $VENV/bin/pip install -q -r server/requirements.txt
+                echo "✅ Deps updated"
+              else
+                echo "⚠️  venv not found — creating"
+                python3 -m venv /opt/fmailsender/venv
+                /opt/fmailsender/venv/bin/pip install -q -r server/requirements.txt
+              fi
+
+              systemctl daemon-reload
+              systemctl restart fmailsender
+              sleep 4
+              STATUS=$(systemctl is-active fmailsender)
+              if [ "$STATUS" = "active" ]; then
+                echo "✅ fmailsender ACTIVE"
+              else
+                journalctl -u fmailsender -n 30 --no-pager
+                exit 1
+              fi
+              echo "=== Deploy complete ==="
+  
