@@ -869,7 +869,7 @@ class AccountsScreen(QWidget):
 
         text_edit = QTextEdit()
         text_edit.setPlaceholderText(
-            "user:pass@46.30.189.50:10444\n"
+            "user:pass@11.22.33.44:10444\n"
             "socks5://user:pass@host:port\n"
             "192.168.1.1:8080"
         )
