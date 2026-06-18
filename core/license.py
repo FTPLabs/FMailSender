@@ -200,32 +200,31 @@ def _get_machine_guid() -> str:
 
 
 def _get_cpu_id() -> str:
-  """CPU ProcessorId — не меняется без замены процессора."""
-  if platform.system() != "Windows":
-      return platform.node() or "UNKNOWN_CPU"
-  try:
-      import wmi
-      c = wmi.WMI()
-      for proc in c.Win32_Processor():
-          pid = getattr(proc, "ProcessorId", "").strip()
-          if pid:
-              return pid
-  except Exception:
-      pass
-  try:
-      result = subprocess.run(
-          ["wmic", "cpu", "get", "ProcessorId", "/value"],
-          capture_output=True, text=True, timeout=2,
-      )
-      for line in result.stdout.splitlines():
-          if "ProcessorId=" in line:
-              val = line.split("=", 1)[1].strip()
-              if val:
-                  return val
-  except Exception:
-      pass
-  return "UNKNOWN_CPU"
-
+      """CPU ProcessorId — не меняется без замены процессора."""
+      if platform.system() != "Windows":
+          return platform.node() or "UNKNOWN_CPU"
+      try:
+          import wmi
+          c = wmi.WMI()
+          for proc in c.Win32_Processor():
+              pid = getattr(proc, "ProcessorId", "").strip()
+              if pid:
+                  return pid
+      except Exception:
+          pass
+      try:
+          result = subprocess.run(
+              ["wmic", "cpu", "get", "ProcessorId", "/value"],
+              capture_output=True, text=True, timeout=2,
+          )
+          for line in result.stdout.splitlines():
+              if "ProcessorId=" in line:
+                  val = line.split("=", 1)[1].strip()
+                  if val:
+                      return val
+      except Exception:
+          pass
+      return "UNKNOWN_CPU"
 
 def _get_board_id() -> str:
     """Серийник материнской платы — не меняется без замены платы."""
