@@ -178,22 +178,7 @@ class ReplyDialog(QDialog):
         self.setMinimumSize(600, 420)
         self._setup_ui()
 
-    def set_recipients(self, recipients):
-          """Сохраняет email-адреса получателей для фильтрации входящих.
-          Принимает list[Recipient] или list[str].
-          Во вкладке «Ответы» показываются только письма от этих адресатов.
-          """
-          emails: set = set()
-          for r in (recipients or []):
-              if isinstance(r, str):
-                  emails.add(r.lower().strip())
-              else:
-                  addr = getattr(r, "email", None) or getattr(r, "address", None) or ""
-                  if addr:
-                      emails.add(addr.lower().strip())
-          self._recipient_emails = emails
-
-      def _setup_ui(self):
+    def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
         layout.setSpacing(Spacing.SM)
@@ -312,27 +297,39 @@ class InboxScreen(QWidget):
         self._setup_ui()
 
     def set_accounts(self, accounts):
-          """Принимает list[SmtpAccount] или list[dict] — конвертирует автоматически."""
-          result = []
-          for a in accounts:
-              if isinstance(a, dict):
-                  result.append(a)
-              else:
-                  # SmtpAccount dataclass -> dict
-                  result.append({
-                      "login":        getattr(a, "email", ""),
-                      "password":     getattr(a, "password", ""),
-                      "host":         getattr(a, "host", ""),
-                      "port":         getattr(a, "port", 587),
-                      "use_ssl":      getattr(a, "use_ssl", False),
-                      "use_tls":      getattr(a, "use_tls", True),
-                      "display_name": getattr(a, "display_name", ""),
-                      "imap_host":    getattr(a, "imap_host", ""),
-                      "imap_port":    getattr(a, "imap_port", 993),
-                      "imap_ssl":     getattr(a, "imap_ssl", True),
-                      "is_active":    getattr(a, "is_active", True),
-                  })
-          self._accounts = result
+        """Принимает list[SmtpAccount] или list[dict] — конвертирует автоматически."""
+        result = []
+        for a in accounts:
+            if isinstance(a, dict):
+                result.append(a)
+            else:
+                # SmtpAccount dataclass -> dict
+                result.append({
+                    "login":        getattr(a, "email", ""),
+                    "password":     getattr(a, "password", ""),
+                    "host":         getattr(a, "host", ""),
+                    "port":         getattr(a, "port", 587),
+                    "use_ssl":      getattr(a, "use_ssl", False),
+                    "use_tls":      getattr(a, "use_tls", True),
+                    "display_name": getattr(a, "display_name", ""),
+                    "imap_host":    getattr(a, "imap_host", ""),
+                    "imap_port":    getattr(a, "imap_port", 993),
+                    "imap_ssl":     getattr(a, "imap_ssl", True),
+                    "is_active":    getattr(a, "is_active", True),
+                })
+        self._accounts = result
+
+    def set_recipients(self, recipients):
+        """Принимает list[Recipient] или list[str] — фильтрует входящие по адресатам рассылки."""
+        emails: set = set()
+        for r in (recipients or []):
+            if isinstance(r, str):
+                emails.add(r.lower().strip())
+            else:
+                addr = getattr(r, "email", None) or getattr(r, "address", None) or ""
+                if addr:
+                      emails.add(addr.lower().strip())
+        self._recipient_emails = emails
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
