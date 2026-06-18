@@ -228,7 +228,7 @@ class SmtpAccount:
 
     @property
     def can_send(self) -> bool:
-        """Thread-safe read-only проверка лимитов (без побочных эффектов)."""
+        """Thread-safe проверка лимитов; вызывает _tick_resets() для актуализации счётчиков."""
         if not self.is_active:
             return False
         with self._lock:
