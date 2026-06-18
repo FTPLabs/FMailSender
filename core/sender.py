@@ -377,9 +377,9 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
     try:
         ctx = _ssl.create_default_context()
         if account.use_ssl:
-            s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=20)
+            s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=8)
         else:
-            s = smtplib.SMTP(account.host, account.port, timeout=20)
+            s = smtplib.SMTP(account.host, account.port, timeout=8)
             s.ehlo()
             if account.use_tls:
                 s.starttls(context=ctx)
@@ -528,17 +528,35 @@ class SendingEngine:
                     success=False,
                     error="Отменено",
                 )
-            account = self._pick_account()
-            if account is None:
-                if self._log_queue:
-                    self._log_queue.put_nowait({"type": "log", "message":
-                        f"[{time.strftime('%H:%M:%S')}] ⚠ {recipient.email}: нет доступных аккаунтов (лимит исчерпан?)"})
-                return SendResult(
-                    recipient_email=recipient.email,
-                    success=False,
-                    error="Нет доступных аккаунтов",
-                )
-            return await self._send_one(sem, account, recipient, template)
+            # ── Retry: до 3 разных аккаунтов ─────────────────────────────────
+              _MAX_RETRIES = 3
+              _tried: set = set()
+              _last_result = None
+              for _attempt in range(_MAX_RETRIES):
+                  account = self._pick_account(exclude=_tried)
+                  if account is None:
+                      break
+                  _tried.add(account.email)
+                  _result = await self._send_one(sem, account, recipient, template)
+                  if _result.success:
+                      if _attempt > 0 and self._log_queue:
+                          self._log_queue.put_nowait({"type": "log", "message":
+                              f"[{time.strftime('%H:%M:%S')}] ↩ {recipient.email}: успех с {account.email} (попытка {_attempt + 1})"})
+                      return _result
+                  _last_result = _result
+                  if _attempt < _MAX_RETRIES - 1 and self._log_queue:
+                      self._log_queue.put_nowait({"type": "log", "message":
+                          f"[{time.strftime('%H:%M:%S')}] ↩ {recipient.email}: {_result.error[:60]} — пробую другой аккаунт..."})
+              if _last_result is not None:
+                  return _last_result
+              if self._log_queue:
+                  self._log_queue.put_nowait({"type": "log", "message":
+                      f"[{time.strftime('%H:%M:%S')}] ⚠ {recipient.email}: все аккаунты недоступны"})
+              return SendResult(
+                  recipient_email=recipient.email,
+                  success=False,
+                  error="Нет доступных аккаунтов",
+              )
 
         async def _process_batch(batch_recipients: List[Recipient]) -> List[SendResult]:
             tasks = [_send_with_acct_delay(r) for r in batch_recipients]
