@@ -114,24 +114,30 @@ def _generate_key() -> str:
 
 async def _migrate_db() -> None:
     """ALTER TABLE миграции для существующих БД без пересоздания таблиц."""
-    for _sql in [
+    # FIX M-3: одно соединение для всех миграций вместо нового на каждый ALTER
+    _migrations = [
         "ALTER TABLE users ADD COLUMN terms_accepted INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN captcha_passed INTEGER DEFAULT 0",
-    ]:
-        async with _db() as conn:
+    ]
+    async with _db() as conn:
+        for _sql in _migrations:
             try:
                 await conn.execute(_sql)
                 await conn.commit()
-            except aiosqlite.OperationalError:
-                pass  # FIX: ловим только OperationalError "duplicate column name"
-                # другие ошибки теперь не скрываются
+            except aiosqlite.OperationalError as _e:
+                if "duplicate column name" not in str(_e).lower():
+                    logger.warning("migrate_db: неожиданная ошибка при '%s': %s", _sql, _e)
 
 
 async def set_terms_accepted(telegram_id: int) -> None:
     """Сохраняет факт принятия условий — переживает перезапуск бота."""
     async with _db() as conn:
+        # FIX C-3: UPSERT — создаёт строку если пользователь не зарегистрирован
         await conn.execute(
-            "UPDATE users SET terms_accepted=1 WHERE telegram_id=?", (telegram_id,)
+            """INSERT INTO users (telegram_id, username, first_name, registered_at, last_seen, terms_accepted)
+               VALUES (?, '', '', datetime('now'), datetime('now'), 1)
+               ON CONFLICT(telegram_id) DO UPDATE SET terms_accepted=1""",
+            (telegram_id,)
         )
         await conn.commit()
 
@@ -150,8 +156,12 @@ async def get_terms_accepted(telegram_id: int) -> bool:
 async def set_captcha_passed(telegram_id: int) -> None:
     """Сохраняет факт прохождения капчи — переживает перезапуск бота."""
     async with _db() as conn:
+        # FIX C-3: UPSERT — создаёт строку если пользователь не зарегистрирован
         await conn.execute(
-            "UPDATE users SET captcha_passed=1 WHERE telegram_id=?", (telegram_id,)
+            """INSERT INTO users (telegram_id, username, first_name, registered_at, last_seen, captcha_passed)
+               VALUES (?, '', '', datetime('now'), datetime('now'), 1)
+               ON CONFLICT(telegram_id) DO UPDATE SET captcha_passed=1""",
+            (telegram_id,)
         )
         await conn.commit()
 
