@@ -4,7 +4,7 @@
 ; ═══════════════════════════════════════════════════════════════════════════
 
 #define MyAppName      "FMail Sender"
-#define MyAppVersion   "2.1.0"
+#define MyAppVersion   "3.4.3"
 #define MyAppPublisher "FTPLabs"
 #define MyAppURL       "https://fmailsender.app"
 #define MyAppExeName   "FMailSender.exe"
