@@ -100,7 +100,7 @@ from pydantic import BaseModel
 
 import database as db
 from database import set_terms_accepted, get_terms_accepted, set_captcha_passed, get_all_passed_users
-from config import ADMIN_IDS, MODERATOR_IDS, ADMIN_WEB_SECRET, API_HOST, API_PORT, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL, CHANNEL_ID
+from config import ADMIN_IDS, MODERATOR_IDS, ADMIN_API_KEY, ADMIN_WEB_SECRET, API_HOST, API_PORT, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL, CHANNEL_ID
 from crypto_pay import crypto_client
 
 # ─── Moderator in-memory cache ────────────────────────────────────────────────
@@ -288,13 +288,14 @@ def kb_terms_gate() -> InlineKeyboardMarkup:
     ])
 
 
-def kb_plans() -> InlineKeyboardMarkup:
+def kb_plans(prices: dict | None = None) -> InlineKeyboardMarkup:
     rows = []
     for plan_id, plan in PLANS.items():
         if plan.get("admin_only"):
             continue
+        price_val = prices.get(plan_id, plan['price_usdt']) if prices else plan['price_usdt']
         rows.append([InlineKeyboardButton(
-            text=f"{plan['name']} — ${plan['price_usdt']:.2f} USDT",
+            text=f"{plan['name']} — ${price_val:.2f} USDT",
             callback_data=f"buy_plan:{plan_id}",
         )])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="menu_main")])
@@ -325,6 +326,7 @@ def kb_admin() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📢 Рассылка",              callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="🎫 Тикеты поддержки",     callback_data="admin_tickets")],
         [InlineKeyboardButton(text="🔗 ZIP-ссылка скачивания", callback_data="admin_set_download")],
+        [InlineKeyboardButton(text="🗑 Удалить ZIP-ссылку",    callback_data="admin_del_zip")],
         [InlineKeyboardButton(text="🛡 VirusTotal ссылка",     callback_data="admin_set_vt")],
         [InlineKeyboardButton(text="📤 Загрузить файл (.exe)", callback_data="admin_upload_file")],
         [InlineKeyboardButton(text="🗑 Удалить все ключи",     callback_data="admin_clear_keys")],
@@ -1213,7 +1215,11 @@ async def cb_menu_buy(query: CallbackQuery):
             continue
         price = await db.get_plan_price(plan_id)
         lines.append(f"<b>{plan['name']}</b> — <b>${price:.2f} USDT</b>\n   {plan['description']}\n")
-    await send_or_edit(query, "\n".join(lines), reply_markup=kb_plans())
+    _prices = {}
+        for _pid in PLANS:
+            if not PLANS[_pid].get("admin_only"):
+                _prices[_pid] = await db.get_plan_price(_pid)
+        await send_or_edit(query, "\n".join(lines), reply_markup=kb_plans(prices=_prices))
 
 
 @dp.callback_query(F.data.startswith("buy_plan:"))
@@ -1532,6 +1538,15 @@ async def msg_admin_set_download_url(message: Message, state: FSMContext):
         return
     await db.set_setting("download_url", url)
     await message.answer(f"✅ Ссылка скачивания обновлена:\n<code>{url}</code>", reply_markup=kb_admin())
+
+@dp.callback_query(F.data == "admin_del_zip")
+async def cb_admin_del_zip(query: CallbackQuery):
+    if not is_admin(query.from_user.id):
+        return
+    await db.set_setting("download_url", "")
+    await db.set_setting("zip_url", "")
+    await query.answer("✅ ZIP-ссылка удалена. Бот будет использовать ссылку из GitHub релиза.", show_alert=True)
+    await send_or_edit(query, "🏠 <b>Панель администратора</b>", reply_markup=kb_admin())
 
 
 # ─── Admin Set VirusTotal URL ─────────────────────────────────────────────────
@@ -2068,7 +2083,7 @@ async def cb_manage_moderators(query: CallbackQuery, state: FSMContext):
     if mods:
         lines.append(f"\n🗃 Из БД:")
         for m in mods:
-            lines.append(f"  · <code>{m['telegram_id']}</code> — {m.get('note') or '—'}")
+            lines.append(f"  · <code>{m['telegram_id']}</code> — добавил: {m.get('added_by') or '—'}")
     else:
         lines.append("\n<i>Модераторов в БД нет.</i>")
     rows = [
@@ -2105,7 +2120,7 @@ async def msg_admin_add_mod(message: Message, state: FSMContext):
         await message.answer("❌ Telegram ID должен быть числом.")
         return
     await state.clear()
-    await db.add_moderator(mod_id, note=f"добавлен {message.from_user.id}")
+    await db.add_moderator(mod_id, added_by=message.from_user.id)
     _moderator_ids.add(mod_id)
     await message.answer(
         f"✅ Модератор <code>{mod_id}</code> добавлен.",
@@ -2123,7 +2138,7 @@ async def cb_admin_remove_mod(query: CallbackQuery, state: FSMContext):
         return
     rows = []
     for m in mods:
-        label = f"❌ {m['telegram_id']} — {m.get('note') or '—'}"
+        label = f"❌ {m['telegram_id']} — добавил: {m.get('added_by') or '—'}"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"admin_del_mod:{m['telegram_id']}")])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="manage_moderators")])
     await send_or_edit(query, "➖ <b>Выбери модератора для удаления:</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
@@ -2143,7 +2158,7 @@ async def cb_admin_del_mod(query: CallbackQuery):
         return
     rows = []
     for m in mods:
-        label = f"❌ {m['telegram_id']} — {m.get('note') or '—'}"
+        label = f"❌ {m['telegram_id']} — добавил: {m.get('added_by') or '—'}"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"admin_del_mod:{m['telegram_id']}")])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="manage_moderators")])
     await send_or_edit(query, "➖ <b>Выбери модератора для удаления:</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
@@ -2241,12 +2256,12 @@ class AdminRevokeRequest(BaseModel):
       key: str
 
 
-  @api_app.post("/v1/admin/revoke")
-  async def admin_revoke(req: AdminRevokeRequest):
-      provided = req.api_key or req.admin_secret
-      expected = ADMIN_API_KEY or os.environ.get("ADMIN_REVOKE_SECRET", "")
-      if not expected or provided != expected:
-          raise HTTPException(status_code=401, detail="Unauthorized")
+@api_app.post("/v1/admin/revoke")
+async def admin_revoke(req: AdminRevokeRequest):
+    provided = req.api_key or req.admin_secret
+    expected = ADMIN_API_KEY or os.environ.get("ADMIN_REVOKE_SECRET", "")
+    if not expected or provided != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     revoked = await db.revoke_license(req.key.strip().upper())
     if not revoked:
         raise HTTPException(status_code=404, detail="License not found")
@@ -2356,7 +2371,7 @@ async def admin_web_panel(
     def _mod_rows() -> str:
         rows = []
         for m in mods:
-            rows.append(f"<tr><td><code>{m['telegram_id']}</code></td><td>{m.get('note') or '—'}</td></tr>")
+            rows.append(f"<tr><td><code>{m['telegram_id']}</code></td><td>{m.get('added_by') or '—'}</td></tr>")
         return "".join(rows) or "<tr><td colspan='2' style='text-align:center;color:#718096'>Нет модераторов в БД</td></tr>"
 
     def _ticket_rows() -> str:
