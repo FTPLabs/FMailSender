@@ -677,12 +677,12 @@ class AccountsScreen(QWidget):
           self.table.setItem(row, 5, status_item)
           
           # Прокси + флаг страны (обновляется CountryWorker после SMTP OK)
-            _proxy_raw = (acc.proxy or "").strip()
-            _proxy_display = _proxy_raw if _proxy_raw else "—"
-            proxy_item = QTableWidgetItem(_proxy_display)
-            proxy_item.setForeground(QColor("#6C8EBF" if _proxy_raw else Colors.TEXT_MUTED))
-            proxy_item.setToolTip(_proxy_raw or "Прокси не назначен")
-            self.table.setItem(row, 6, proxy_item)
+          _proxy_raw = (acc.proxy or "").strip()
+          _proxy_display = _proxy_raw if _proxy_raw else "—"
+          proxy_item = QTableWidgetItem(_proxy_display)
+          proxy_item.setForeground(QColor("#6C8EBF" if _proxy_raw else Colors.TEXT_MUTED))
+          proxy_item.setToolTip(_proxy_raw or "Прокси не назначен")
+          self.table.setItem(row, 6, proxy_item)
           active_item = QTableWidgetItem("✓" if acc.is_active else "✗")
           active_item.setForeground(
               QColor(Colors.SUCCESS) if acc.is_active else QColor(Colors.ERROR)
