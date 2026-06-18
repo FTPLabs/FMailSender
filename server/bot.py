@@ -95,7 +95,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Form, UploadFile, File as FastAPIFile
 from pydantic import BaseModel
 
 import database as db
