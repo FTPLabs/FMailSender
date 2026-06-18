@@ -445,14 +445,21 @@ class SendingEngine:
         self.stop_event.clear()
         self._paused = False
         self._campaign_task = asyncio.current_task()
+        if self._log_queue:
+            self._log_queue.put_nowait({"type": "log", "message":
+                f"[{time.strftime('%H:%M:%S')}] 🚀 Запуск рассылки: {len(recipients)} получателей"})
 
-        # Сбрасываем часовой счётчик только если час реально истёк —
-        # иначе кампания обнуляет лимиты, отправленные за текущий час
+        # Сбрасываем суточный/часовой счётчик если период истёк
         _now = time.time()
         for _acct in self.accounts:
             if _acct.is_active:
                 with _acct._lock:
-                    if _now - _acct._hour_reset >= 3600:
+                    if _now - _acct._day_reset >= 86400:
+                        _acct.sent_today = 0
+                        _acct.sent_this_hour = 0
+                        _acct._day_reset = _now
+                        _acct._hour_reset = _now
+                    elif _now - _acct._hour_reset >= 3600:
                         _acct.sent_this_hour = 0
                         _acct._hour_reset = _now
 
@@ -477,6 +484,9 @@ class SendingEngine:
                 )
             account = self._pick_account()
             if account is None:
+                if self._log_queue:
+                    self._log_queue.put_nowait({"type": "log", "message":
+                        f"[{time.strftime('%H:%M:%S')}] ⚠ {recipient.email}: нет доступных аккаунтов (лимит исчерпан?)"})
                 return SendResult(
                     recipient_email=recipient.email,
                     success=False,
@@ -504,6 +514,9 @@ class SendingEngine:
                     if isinstance(result, BaseException):
                         with self._stats_lock:
                             self._stats["errors"] += 1
+                        if self._log_queue:
+                            self._log_queue.put_nowait({"type": "log", "message":
+                                f"[{time.strftime('%H:%M:%S')}] ✗ ошибка [{type(result).__name__}]: {result}"})
                         continue
                     results.append(result)
                     with self._stats_lock:
@@ -511,6 +524,13 @@ class SendingEngine:
                             self._stats["success"] += 1
                         else:
                             self._stats["errors"] += 1
+                    if self._log_queue:
+                        _ts = time.strftime('%H:%M:%S')
+                        if result.success:
+                            _lmsg = f"[{_ts}] ✓ {result.recipient_email}  ← {result.account_used}"
+                        else:
+                            _lmsg = f"[{_ts}] ✗ {result.recipient_email}: {result.error or 'неизвестная ошибка'}"
+                        self._log_queue.put_nowait({"type": "log", "message": _lmsg})
                     self._emit_progress(results, recipients, result)
                 if (
                     self.config.pause_after_n > 0
@@ -525,6 +545,11 @@ class SendingEngine:
         finally:
             self._campaign_task = None
 
+        if self._log_queue:
+            _ok = sum(1 for r in results if r.success)
+            _fail = len(results) - _ok
+            self._log_queue.put_nowait({"type": "log", "message":
+                f"[{time.strftime('%H:%M:%S')}] ═══ Готово: ✓ {_ok} успешно, ✗ {_fail} ошибок ═══"})
         if self.on_finished:
             self.on_finished(results)
         return results
