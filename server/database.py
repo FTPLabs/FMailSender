@@ -180,20 +180,21 @@ async def get_all_passed_users() -> tuple[set[int], set[int]]:
 
 
 async def init_db() -> None:
-  # PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL
-  # уже применяются в _db() context manager — не дублируем.
-  async with _db() as db:
-      # FIX: executescript() auto-commits — заменён на отдельные execute() для корректной транзакции
-      for _stmt in [s.strip() for s in CREATE_SQL.split(";") if s.strip()]:
-          await db.execute(_stmt)
-      for plan_id, plan in PLANS.items():
-          await db.execute(
-              "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-              (f"price_{plan_id}", str(plan["price_usdt"])),
-          )
-      await db.commit()
-  await _migrate_db()
-  logger.info("Database initialized: %s", DB_PATH)
+    # FIX БАГ-7: исправлены отступы (было 2 пробела, PEP 8 требует 4)
+    # PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL
+    # уже применяются в _db() context manager — не дублируем.
+    async with _db() as db:
+        # FIX: executescript() auto-commits — заменён на отдельные execute() для корректной транзакции
+        for _stmt in [s.strip() for s in CREATE_SQL.split(";") if s.strip()]:
+            await db.execute(_stmt)
+        for plan_id, plan in PLANS.items():
+            await db.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                (f"price_{plan_id}", str(plan["price_usdt"])),
+            )
+        await db.commit()
+    await _migrate_db()
+    logger.info("Database initialized: %s", DB_PATH)
 
 
 async def upsert_user(telegram_id: int, username: str, first_name: str) -> None:
@@ -353,8 +354,12 @@ async def create_license_for_payment(
                 (key, now_str, invoice_id),
             )
             await db.commit()
-        except Exception:
-            await db.rollback()
+        except Exception as _orig_exc:
+            # FIX БАГ-8: rollback в отдельном try — не маскирует оригинальную ошибку
+            try:
+                await db.rollback()
+            except Exception as _rb_exc:
+                logger.warning("rollback failed: %s (original: %s)", _rb_exc, _orig_exc)
             raise
 
         db.row_factory = aiosqlite.Row
@@ -463,8 +468,12 @@ async def delete_all_licenses() -> int:
             await db.execute("DELETE FROM licenses")
             await db.execute("DELETE FROM payments")
             await db.commit()
-        except Exception:
-            await db.rollback()
+        except Exception as _orig_exc:
+            # FIX БАГ-8: rollback в отдельном try — не маскирует оригинальную ошибку
+            try:
+                await db.rollback()
+            except Exception as _rb_exc:
+                logger.warning("rollback failed: %s (original: %s)", _rb_exc, _orig_exc)
             raise
     logger.warning("All licenses and payments deleted. Count: %d", count)
     return count
