@@ -21,7 +21,6 @@ name: Python Syntax Check
         - name: py_compile — проверка всех .py файлов
           run: |
             echo "=== Syntax check: py_compile ==="
-            FAILED=0
             find . -name "*.py" \
               -not -path "./.git/*" \
               -not -path "./.venv/*" \
@@ -30,19 +29,19 @@ name: Python Syntax Check
               if ! python -m py_compile "$f" 2>/tmp/err_out; then
                 echo "FAIL: $f"
                 cat /tmp/err_out
-                echo "FAILED=1" >> /tmp/syntax_result
+                touch /tmp/syntax_failed
               else
                 echo "OK: $f"
               fi
             done
-            if [ -f /tmp/syntax_result ]; then
+            if [ -f /tmp/syntax_failed ]; then
               echo ""
-              echo "=== SYNTAX ERRORS FOUND ==="
+              echo "=== SYNTAX ERRORS FOUND — build blocked ==="
               exit 1
             fi
             echo "All .py files passed syntax check."
 
-        - name: pyflakes — проверка неиспользуемых импортов и undefined names
+        - name: pyflakes — undefined names и неиспользуемые импорты
           run: |
             pip install pyflakes --quiet
             python -m pyflakes . 2>&1 | grep -v "__pycache__" | grep -v ".venv" || true
