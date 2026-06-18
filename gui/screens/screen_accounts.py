@@ -734,7 +734,7 @@ class AccountsScreen(QWidget):
       self._refresh_table()
       self.accounts_changed.emit(self._accounts)
 
-    def _test_single(self, row: int):
+  def _test_single(self, row: int):
       """Проверяет один аккаунт по индексу."""
       if row < 0 or row >= len(self._accounts):
           return
@@ -764,19 +764,19 @@ class AccountsScreen(QWidget):
       self._test_workers.append(w)
       w.start()
 
-    def _fetch_proxy_country(self, row: int, proxy_url: str) -> None:
-        """Запускает CountryWorker для обновления флага страны в таблице."""
-        w = _CountryWorker(row, proxy_url, parent=self)
-        def _on_country(r, flag_text, widget=self.table):
-            item = widget.item(r, 6)
-            if item:
-                item.setText(flag_text)
-                item.setForeground(QColor("#6C8EBF"))
-        w.result_ready.connect(_on_country)
-        w.start()
-        # Не держим ссылку — QThread удалится сам после finished
+  def _fetch_proxy_country(self, row: int, proxy_url: str) -> None:
+      """Запускает CountryWorker для обновления флага страны в таблице."""
+      w = _CountryWorker(row, proxy_url, parent=self)
+      def _on_country(r, flag_text, widget=self.table):
+          item = widget.item(r, 6)
+          if item:
+              item.setText(flag_text)
+              item.setForeground(QColor("#6C8EBF"))
+      w.result_ready.connect(_on_country)
+      w.start()
+      # Не держим ссылку — QThread удалится сам после finished
 
-    def _test_all(self):
+  def _test_all(self):
       if not self._accounts:
           return
       self.test_all_btn.setEnabled(False)
