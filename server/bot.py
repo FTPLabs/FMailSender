@@ -94,7 +94,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 import database as db
-from database import set_terms_accepted, get_terms_accepted
+from database import set_terms_accepted, get_terms_accepted, set_captcha_passed, get_all_passed_users
 from config import ADMIN_IDS, API_HOST, API_PORT, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL, CHANNEL_ID
 from crypto_pay import crypto_client
 
@@ -565,6 +565,7 @@ async def cb_captcha(query: CallbackQuery, state: FSMContext):
 
     if result == "ok":
         _captcha_passed.add(user.id)
+        await set_captcha_passed(user.id)  # FIX: persist to DB
         await state.clear()
         await query.answer("✅ Верно!")
 
@@ -643,6 +644,7 @@ async def cb_accept_terms(query: CallbackQuery, state: FSMContext):
         return
 
     _terms_accepted.add(user.id)
+    await set_terms_accepted(user.id)  # FIX: persist to DB
     await query.answer("✅ Условия приняты! Добро пожаловать.")
     await state.clear()
     await _show_main_menu(query, user)
@@ -1919,6 +1921,11 @@ async def main():
     global _release_cache_lock
     _release_cache_lock = asyncio.Lock()  # BUG-FIX: инициализируем Lock внутри event loop
     await db.init_db()
+    # FIX: загружаем капчу и условия из БД — in-memory кэш переживёт перезапуск
+    _cap, _terms = await get_all_passed_users()
+    _captcha_passed.update(_cap)
+    _terms_accepted.update(_terms)
+    logger.info("Loaded from DB: captcha_passed=%d, terms_accepted=%d", len(_cap), len(_terms))
     logger.info("Starting FMail Sender Bot + API v%s...", APP_VERSION)
 
     # NO_SSL=1 → nginx/Cloudflare обрабатывает TLS (рекомендуется в production)
