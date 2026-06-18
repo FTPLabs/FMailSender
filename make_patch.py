@@ -48,7 +48,7 @@ def make_patch(old_tag: str, new_tag: str, dist_dir: Path) -> None:
     changed = _get_changed_files(old_tag)
 
     if not changed:
-        print(f"[patch] Нет изменённых .py файлов с {old_tag} → пустой манифест")
+        print(f"[patch] Нет изменённых .py файлов с {old_tag} -> пустой манифест")
         manifest = {
             "version": new_ver,
             "base_version": old_ver,
@@ -100,7 +100,7 @@ def main() -> None:
         print(__doc__)
         sys.exit(1)
 
-    print(f"[patch] {old_tag} → {new_tag}")
+    print(f"[patch] {old_tag} -> {new_tag}")
     make_patch(old_tag, new_tag, Path("dist"))
 
 
