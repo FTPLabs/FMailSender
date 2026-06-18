@@ -544,512 +544,512 @@ class AccountDialog(QDialog):
 
 
 
-  class _CountryWorker(QThread):
-      """Асинхронно определяет страну прокси через ip-api.com и обновляет ячейку."""
-      result_ready = pyqtSignal(int, str)   # row, flag+text
+class _CountryWorker(QThread):
+    """Асинхронно определяет страну прокси через ip-api.com и обновляет ячейку."""
+    result_ready = pyqtSignal(int, str)   # row, flag+text
 
-      def __init__(self, row: int, proxy_url: str, parent=None):
-          super().__init__(parent)
-          self._row = row
-          self._proxy_url = proxy_url
-
-      def run(self):
-          flag = self._resolve(self._proxy_url)
-          self.result_ready.emit(self._row, flag)
-
-      @staticmethod
-      def _resolve(proxy_url: str) -> str:
-          try:
-              parsed = urllib.parse.urlparse(proxy_url)
-              host = parsed.hostname or ""
-              if not host:
-                  return "❓"
-              req = urllib.request.Request(
-                  f"http://ip-api.com/json/{host}?fields=country,countryCode",
-                  headers={"User-Agent": "FMailSender/3.1"},
-              )
-              with urllib.request.urlopen(req, timeout=4) as resp:
-                  data = json.loads(resp.read())
-                  cc = data.get("countryCode", "")
-                  country = data.get("country", "")
-                  # Конвертируем ISO код → эмодзи флаг
-                  flag = "".join(chr(0x1F1E0 + ord(c) - ord('A')) for c in cc.upper()) if len(cc) == 2 else "🌍"
-                  return f"{flag} {country}" if country else flag
-          except Exception:
-              return "🌐"
-
-
-  class AccountsScreen(QWidget):
-    accounts_changed = pyqtSignal(list)
-
-    def __init__(self, parent=None):
+    def __init__(self, row: int, proxy_url: str, parent=None):
         super().__init__(parent)
-        self._accounts: list[SmtpAccount] = []
-        self._test_workers: list[TestWorker] = []
-        self._import_worker = None
-        self._proxy_check_worker = None
-        self._setup_ui()
-        self._load()
+        self._row = row
+        self._proxy_url = proxy_url
 
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
-        layout.setSpacing(Spacing.LG)
+    def run(self):
+        flag = self._resolve(self._proxy_url)
+        self.result_ready.emit(self._row, flag)
 
-        title = QLabel("SMTP-аккаунты")
-        title.setObjectName("section_header")
-        layout.addWidget(title)
-
-        toolbar = QHBoxLayout()
-
-        add_btn = QPushButton("+ Добавить аккаунт")
-        add_btn.setObjectName("btn_primary")
-        add_btn.clicked.connect(self._add_account)
-        toolbar.addWidget(add_btn)
-
-        import_btn = QPushButton("Импорт (.txt)")
-        import_btn.setObjectName("btn_icon")
-        import_btn.clicked.connect(self._import_accounts)
-        toolbar.addWidget(import_btn)
-
-        proxy_import_btn = QPushButton("Импорт прокси")
-        proxy_import_btn.setObjectName("btn_icon")
-        proxy_import_btn.setToolTip("Массовый импорт и проверка прокси (с определением страны)")
-        proxy_import_btn.clicked.connect(self._import_proxies)
-        toolbar.addWidget(proxy_import_btn)
-
-        toolbar.addStretch()
-
-        self.test_all_btn = QPushButton("Проверить все")
-        self.test_all_btn.setObjectName("btn_icon")
-        self.test_all_btn.clicked.connect(self._test_all)
-        toolbar.addWidget(self.test_all_btn)
-
-        select_all_btn = QPushButton("Выделить всё")
-        select_all_btn.setObjectName("btn_icon")
-        select_all_btn.clicked.connect(lambda: self.table.selectAll())
-        toolbar.addWidget(select_all_btn)
-
-        del_btn = QPushButton("Удалить выбранный")
-        del_btn.setObjectName("btn_danger")
-        del_btn.clicked.connect(self._delete_selected)
-        toolbar.addWidget(del_btn)
-        layout.addLayout(toolbar)
-
-        self.table = QTableWidget(0, 8)
-        self.table.setHorizontalHeaderLabels([
-            "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Прокси 🌍", "Активен",
-        ])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.table.verticalHeader().setVisible(False)
-        self.table.doubleClicked.connect(self._edit_account)
-        layout.addWidget(self.table)
-
-        self.status_label = QLabel("Аккаунтов: 0")
-        self.status_label.setObjectName("label_muted")
-        layout.addWidget(self.status_label)
-
-    def get_accounts(self) -> list:
-        return self._accounts
-
-    def _load(self):
-        self._accounts = load_accounts()
-        self._refresh_table()
-        self.accounts_changed.emit(self._accounts)
-        # Автопроверка всех аккаунтов при загрузке
-        if self._accounts:
-            QTimer.singleShot(400, self._test_all)
-
-    def _refresh_table(self):
-        self.table.setRowCount(0)
-        for acc in self._accounts:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(acc.email))
-            self.table.setItem(row, 1, QTableWidgetItem(acc.host))
-            self.table.setItem(row, 2, QTableWidgetItem(str(acc.port)))
-            self.table.setItem(row, 3, QTableWidgetItem(str(acc.daily_limit)))
-            self.table.setItem(row, 4, QTableWidgetItem(str(acc.hourly_limit)))
-            status_item = QTableWidgetItem("⏳ Ожидание...")
-            status_item.setForeground(QColor(Colors.TEXT_MUTED))
-            self.table.setItem(row, 5, status_item)
-            
-            # Прокси + флаг страны (обновляется CountryWorker после SMTP OK)
-              _proxy_raw = (acc.proxy or "").strip()
-              _proxy_display = _proxy_raw if _proxy_raw else "—"
-              proxy_item = QTableWidgetItem(_proxy_display)
-              proxy_item.setForeground(QColor("#6C8EBF" if _proxy_raw else Colors.TEXT_MUTED))
-              proxy_item.setToolTip(_proxy_raw or "Прокси не назначен")
-              self.table.setItem(row, 6, proxy_item)
-            active_item = QTableWidgetItem("✓" if acc.is_active else "✗")
-            active_item.setForeground(
-                QColor(Colors.SUCCESS) if acc.is_active else QColor(Colors.ERROR)
+    @staticmethod
+    def _resolve(proxy_url: str) -> str:
+        try:
+            parsed = urllib.parse.urlparse(proxy_url)
+            host = parsed.hostname or ""
+            if not host:
+                return "❓"
+            req = urllib.request.Request(
+                f"http://ip-api.com/json/{host}?fields=country,countryCode",
+                headers={"User-Agent": "FMailSender/3.1"},
             )
-            self.table.setItem(row, 7, active_item)
-        active_count = sum(1 for a in self._accounts if a.is_active)
-        self.status_label.setText(f"Аккаунтов: {len(self._accounts)} (активных: {active_count})")
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                data = json.loads(resp.read())
+                cc = data.get("countryCode", "")
+                country = data.get("country", "")
+                # Конвертируем ISO код → эмодзи флаг
+                flag = "".join(chr(0x1F1E0 + ord(c) - ord('A')) for c in cc.upper()) if len(cc) == 2 else "🌍"
+                return f"{flag} {country}" if country else flag
+        except Exception:
+            return "🌐"
 
-    def _add_account(self):
-        dlg = AccountDialog(parent=self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            acc = dlg.get_account()
-            self._accounts.append(acc)
-            save_accounts(self._accounts)
-            self._refresh_table()
-            self.accounts_changed.emit(self._accounts)
-            # Проверяем новый аккаунт сразу
-            self._test_single(len(self._accounts) - 1)
 
-    def _edit_account(self, index):
-        row = index.row()
-        if row < 0 or row >= len(self._accounts):
-            return
-        acc = self._accounts[row]
-        dlg = AccountDialog(account=acc, parent=self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._accounts[row] = dlg.get_account()
-            save_accounts(self._accounts)
-            self._refresh_table()
-            self.accounts_changed.emit(self._accounts)
+class AccountsScreen(QWidget):
+  accounts_changed = pyqtSignal(list)
 
-    def _delete_selected(self):
-        rows = sorted(
-            {idx.row() for idx in self.table.selectedIndexes()},
-            reverse=True,
-        )
-        if not rows:
-            return
-        if QMessageBox.question(
-            self, "Удалить?",
-            f"Удалить {len(rows)} аккаунт(ов)?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        ) != QMessageBox.StandardButton.Yes:
-            return
-        for row in rows:
-            if 0 <= row < len(self._accounts):
-                self._accounts.pop(row)
-        save_accounts(self._accounts)
-        self._refresh_table()
-        self.accounts_changed.emit(self._accounts)
+  def __init__(self, parent=None):
+      super().__init__(parent)
+      self._accounts: list[SmtpAccount] = []
+      self._test_workers: list[TestWorker] = []
+      self._import_worker = None
+      self._proxy_check_worker = None
+      self._setup_ui()
+      self._load()
 
-    def _test_single(self, row: int):
-        """Проверяет один аккаунт по индексу."""
-        if row < 0 or row >= len(self._accounts):
-            return
-        item = self.table.item(row, 5)
-        if item:
-            item.setText("⏳ Проверка...")
-            item.setForeground(QColor(Colors.TEXT_MUTED))
-        acc = self._accounts[row]
-        w = TestWorker(acc, parent=self)
+  def _setup_ui(self):
+      layout = QVBoxLayout(self)
+      layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+      layout.setSpacing(Spacing.LG)
 
-        @pyqtSlot(bool, str)
-        def on_result(ok, msg, r=row):
-            item = self.table.item(r, 5)
+      title = QLabel("SMTP-аккаунты")
+      title.setObjectName("section_header")
+      layout.addWidget(title)
+
+      toolbar = QHBoxLayout()
+
+      add_btn = QPushButton("+ Добавить аккаунт")
+      add_btn.setObjectName("btn_primary")
+      add_btn.clicked.connect(self._add_account)
+      toolbar.addWidget(add_btn)
+
+      import_btn = QPushButton("Импорт (.txt)")
+      import_btn.setObjectName("btn_icon")
+      import_btn.clicked.connect(self._import_accounts)
+      toolbar.addWidget(import_btn)
+
+      proxy_import_btn = QPushButton("Импорт прокси")
+      proxy_import_btn.setObjectName("btn_icon")
+      proxy_import_btn.setToolTip("Массовый импорт и проверка прокси (с определением страны)")
+      proxy_import_btn.clicked.connect(self._import_proxies)
+      toolbar.addWidget(proxy_import_btn)
+
+      toolbar.addStretch()
+
+      self.test_all_btn = QPushButton("Проверить все")
+      self.test_all_btn.setObjectName("btn_icon")
+      self.test_all_btn.clicked.connect(self._test_all)
+      toolbar.addWidget(self.test_all_btn)
+
+      select_all_btn = QPushButton("Выделить всё")
+      select_all_btn.setObjectName("btn_icon")
+      select_all_btn.clicked.connect(lambda: self.table.selectAll())
+      toolbar.addWidget(select_all_btn)
+
+      del_btn = QPushButton("Удалить выбранный")
+      del_btn.setObjectName("btn_danger")
+      del_btn.clicked.connect(self._delete_selected)
+      toolbar.addWidget(del_btn)
+      layout.addLayout(toolbar)
+
+      self.table = QTableWidget(0, 8)
+      self.table.setHorizontalHeaderLabels([
+          "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Прокси 🌍", "Активен",
+      ])
+      self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+      self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+      self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+      self.table.verticalHeader().setVisible(False)
+      self.table.doubleClicked.connect(self._edit_account)
+      layout.addWidget(self.table)
+
+      self.status_label = QLabel("Аккаунтов: 0")
+      self.status_label.setObjectName("label_muted")
+      layout.addWidget(self.status_label)
+
+  def get_accounts(self) -> list:
+      return self._accounts
+
+  def _load(self):
+      self._accounts = load_accounts()
+      self._refresh_table()
+      self.accounts_changed.emit(self._accounts)
+      # Автопроверка всех аккаунтов при загрузке
+      if self._accounts:
+          QTimer.singleShot(400, self._test_all)
+
+  def _refresh_table(self):
+      self.table.setRowCount(0)
+      for acc in self._accounts:
+          row = self.table.rowCount()
+          self.table.insertRow(row)
+          self.table.setItem(row, 0, QTableWidgetItem(acc.email))
+          self.table.setItem(row, 1, QTableWidgetItem(acc.host))
+          self.table.setItem(row, 2, QTableWidgetItem(str(acc.port)))
+          self.table.setItem(row, 3, QTableWidgetItem(str(acc.daily_limit)))
+          self.table.setItem(row, 4, QTableWidgetItem(str(acc.hourly_limit)))
+          status_item = QTableWidgetItem("⏳ Ожидание...")
+          status_item.setForeground(QColor(Colors.TEXT_MUTED))
+          self.table.setItem(row, 5, status_item)
+          
+          # Прокси + флаг страны (обновляется CountryWorker после SMTP OK)
+            _proxy_raw = (acc.proxy or "").strip()
+            _proxy_display = _proxy_raw if _proxy_raw else "—"
+            proxy_item = QTableWidgetItem(_proxy_display)
+            proxy_item.setForeground(QColor("#6C8EBF" if _proxy_raw else Colors.TEXT_MUTED))
+            proxy_item.setToolTip(_proxy_raw or "Прокси не назначен")
+            self.table.setItem(row, 6, proxy_item)
+          active_item = QTableWidgetItem("✓" if acc.is_active else "✗")
+          active_item.setForeground(
+              QColor(Colors.SUCCESS) if acc.is_active else QColor(Colors.ERROR)
+          )
+          self.table.setItem(row, 7, active_item)
+      active_count = sum(1 for a in self._accounts if a.is_active)
+      self.status_label.setText(f"Аккаунтов: {len(self._accounts)} (активных: {active_count})")
+
+  def _add_account(self):
+      dlg = AccountDialog(parent=self)
+      if dlg.exec() == QDialog.DialogCode.Accepted:
+          acc = dlg.get_account()
+          self._accounts.append(acc)
+          save_accounts(self._accounts)
+          self._refresh_table()
+          self.accounts_changed.emit(self._accounts)
+          # Проверяем новый аккаунт сразу
+          self._test_single(len(self._accounts) - 1)
+
+  def _edit_account(self, index):
+      row = index.row()
+      if row < 0 or row >= len(self._accounts):
+          return
+      acc = self._accounts[row]
+      dlg = AccountDialog(account=acc, parent=self)
+      if dlg.exec() == QDialog.DialogCode.Accepted:
+          self._accounts[row] = dlg.get_account()
+          save_accounts(self._accounts)
+          self._refresh_table()
+          self.accounts_changed.emit(self._accounts)
+
+  def _delete_selected(self):
+      rows = sorted(
+          {idx.row() for idx in self.table.selectedIndexes()},
+          reverse=True,
+      )
+      if not rows:
+          return
+      if QMessageBox.question(
+          self, "Удалить?",
+          f"Удалить {len(rows)} аккаунт(ов)?",
+          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+      ) != QMessageBox.StandardButton.Yes:
+          return
+      for row in rows:
+          if 0 <= row < len(self._accounts):
+              self._accounts.pop(row)
+      save_accounts(self._accounts)
+      self._refresh_table()
+      self.accounts_changed.emit(self._accounts)
+
+  def _test_single(self, row: int):
+      """Проверяет один аккаунт по индексу."""
+      if row < 0 or row >= len(self._accounts):
+          return
+      item = self.table.item(row, 5)
+      if item:
+          item.setText("⏳ Проверка...")
+          item.setForeground(QColor(Colors.TEXT_MUTED))
+      acc = self._accounts[row]
+      w = TestWorker(acc, parent=self)
+
+      @pyqtSlot(bool, str)
+      def on_result(ok, msg, r=row):
+          item = self.table.item(r, 5)
+          if item:
+              item.setText("✓ OK" if ok else "✗ Ошибка")
+              item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
+              item.setToolTip(msg)
+          if 0 <= r < len(self._accounts):
+              self._accounts[r].last_test_ok = ok
+            # После OK — обновляем флаг страны прокси
+            if ok and 0 <= r < len(self._accounts):
+                _px = self._accounts[r].proxy or ""
+                if _px.strip():
+                    self._fetch_proxy_country(r, _px.strip())
+
+      w.result_ready.connect(on_result)
+      self._test_workers.append(w)
+      w.start()
+
+      def _fetch_proxy_country(self, row: int, proxy_url: str) -> None:
+        """Запускает CountryWorker для обновления флага страны в таблице."""
+        w = _CountryWorker(row, proxy_url, parent=self)
+        def _on_country(r, flag_text, widget=self.table):
+            item = widget.item(r, 6)
             if item:
-                item.setText("✓ OK" if ok else "✗ Ошибка")
-                item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
-                item.setToolTip(msg)
-            if 0 <= r < len(self._accounts):
-                self._accounts[r].last_test_ok = ok
-              # После OK — обновляем флаг страны прокси
-              if ok and 0 <= r < len(self._accounts):
-                  _px = self._accounts[r].proxy or ""
-                  if _px.strip():
-                      self._fetch_proxy_country(r, _px.strip())
-
-        w.result_ready.connect(on_result)
-        self._test_workers.append(w)
+                item.setText(flag_text)
+                item.setForeground(QColor("#6C8EBF"))
+        w.result_ready.connect(_on_country)
         w.start()
+        # Не держим ссылку — QThread удалится сам после finished
 
-        def _fetch_proxy_country(self, row: int, proxy_url: str) -> None:
-          """Запускает CountryWorker для обновления флага страны в таблице."""
-          w = _CountryWorker(row, proxy_url, parent=self)
-          def _on_country(r, flag_text, widget=self.table):
-              item = widget.item(r, 6)
+    def _test_all(self):
+      if not self._accounts:
+          return
+      self.test_all_btn.setEnabled(False)
+      self.test_all_btn.setText("⏳ Проверяю...")
+      for row in range(self.table.rowCount()):
+          item = self.table.item(row, 5)
+          if item:
+              item.setText("⏳ Проверка...")
+              item.setForeground(QColor(Colors.TEXT_MUTED))
+
+      total = len(self._accounts)
+      completed = [0]
+
+      for row, acc in enumerate(self._accounts):
+          w = TestWorker(acc, parent=self)
+          final_row = row
+
+          @pyqtSlot(bool, str)
+          def on_result(ok, msg, r=final_row):
+              item = self.table.item(r, 5)
               if item:
-                  item.setText(flag_text)
-                  item.setForeground(QColor("#6C8EBF"))
-          w.result_ready.connect(_on_country)
+                  item.setText("✓ OK" if ok else "✗ Ошибка")
+                  item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
+                  item.setToolTip(msg)
+              if 0 <= r < len(self._accounts):
+                  self._accounts[r].last_test_ok = ok
+              completed[0] += 1
+              if completed[0] >= total:
+                  self.test_all_btn.setEnabled(True)
+                  self.test_all_btn.setText("Проверить все")
+                  ok_cnt = sum(
+                      1 for i in range(self.table.rowCount())
+                      if self.table.item(i, 5) and "✓" in (self.table.item(i, 5).text() or "")
+                  )
+                  self.status_label.setText(
+                      f"Аккаунтов: {len(self._accounts)} | "
+                      f"✓ {ok_cnt} рабочих | "
+                      f"✗ {total - ok_cnt} с ошибками"
+                  )
+
+          w.result_ready.connect(on_result)
+          self._test_workers.append(w)
           w.start()
-          # Не держим ссылку — QThread удалится сам после finished
 
-      def _test_all(self):
-        if not self._accounts:
-            return
-        self.test_all_btn.setEnabled(False)
-        self.test_all_btn.setText("⏳ Проверяю...")
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 5)
-            if item:
-                item.setText("⏳ Проверка...")
-                item.setForeground(QColor(Colors.TEXT_MUTED))
+  def _run_proxy_check_dialog(self, proxies: list[str]):
+      """Диалог проверки прокси с отображением страны и статуса."""
+      dlg = QDialog(self)
+      dlg.setWindowTitle(f"Проверка прокси ({len(proxies)} шт.)")
+      dlg.setMinimumWidth(620)
+      dlg.setMinimumHeight(480)
+      lay = QVBoxLayout(dlg)
+      lay.setContentsMargins(16, 16, 16, 16)
+      lay.setSpacing(10)
 
-        total = len(self._accounts)
-        completed = [0]
+      progress = QProgressBar()
+      progress.setRange(0, len(proxies))
+      progress.setValue(0)
+      lay.addWidget(progress)
 
-        for row, acc in enumerate(self._accounts):
-            w = TestWorker(acc, parent=self)
-            final_row = row
+      stat_lbl = QLabel("Проверяю прокси...")
+      stat_lbl.setObjectName("label_muted")
+      lay.addWidget(stat_lbl)
 
-            @pyqtSlot(bool, str)
-            def on_result(ok, msg, r=final_row):
-                item = self.table.item(r, 5)
-                if item:
-                    item.setText("✓ OK" if ok else "✗ Ошибка")
-                    item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
-                    item.setToolTip(msg)
-                if 0 <= r < len(self._accounts):
-                    self._accounts[r].last_test_ok = ok
-                completed[0] += 1
-                if completed[0] >= total:
-                    self.test_all_btn.setEnabled(True)
-                    self.test_all_btn.setText("Проверить все")
-                    ok_cnt = sum(
-                        1 for i in range(self.table.rowCount())
-                        if self.table.item(i, 5) and "✓" in (self.table.item(i, 5).text() or "")
-                    )
-                    self.status_label.setText(
-                        f"Аккаунтов: {len(self._accounts)} | "
-                        f"✓ {ok_cnt} рабочих | "
-                        f"✗ {total - ok_cnt} с ошибками"
-                    )
+      table = QTableWidget(len(proxies), 4)
+      table.setHorizontalHeaderLabels(["Прокси", "Статус", "Страна", "Ошибка"])
+      table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+      table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+      for i, p in enumerate(proxies):
+          table.setItem(i, 0, QTableWidgetItem(p))
+          item = QTableWidgetItem("⏳ Проверка...")
+          item.setForeground(QColor(Colors.TEXT_MUTED))
+          table.setItem(i, 1, item)
+          table.setItem(i, 2, QTableWidgetItem(""))
+          table.setItem(i, 3, QTableWidgetItem(""))
+      lay.addWidget(table)
 
-            w.result_ready.connect(on_result)
-            self._test_workers.append(w)
-            w.start()
+      btn_row = QHBoxLayout()
+      use_btn = QPushButton("✓ Использовать валидные")
+      use_btn.setObjectName("btn_primary")
+      use_btn.setEnabled(False)
+      cancel_btn = QPushButton("Отмена")
+      cancel_btn.setObjectName("btn_secondary")
+      btn_row.addWidget(use_btn)
+      btn_row.addStretch()
+      btn_row.addWidget(cancel_btn)
+      lay.addLayout(btn_row)
 
-    def _run_proxy_check_dialog(self, proxies: list[str]):
-        """Диалог проверки прокси с отображением страны и статуса."""
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Проверка прокси ({len(proxies)} шт.)")
-        dlg.setMinimumWidth(620)
-        dlg.setMinimumHeight(480)
-        lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(10)
+      valid_proxies = []
+      worker = ProxyCheckWorker(proxies, dlg)
 
-        progress = QProgressBar()
-        progress.setRange(0, len(proxies))
-        progress.setValue(0)
-        lay.addWidget(progress)
+      def on_result(idx, valid, country, error):
+          progress.setValue(idx + 1)
+          s_item = table.item(idx, 1)
+          c_item = table.item(idx, 2)
+          e_item = table.item(idx, 3)
+          if valid:
+              s_item.setText("✓ OK")
+              s_item.setForeground(QColor(Colors.SUCCESS))
+              c_item.setText(country or "—")
+              valid_proxies.append(proxies[idx])
+          else:
+              s_item.setText("✗ Ошибка")
+              s_item.setForeground(QColor(Colors.ERROR))
+              e_item.setText(error)
 
-        stat_lbl = QLabel("Проверяю прокси...")
-        stat_lbl.setObjectName("label_muted")
-        lay.addWidget(stat_lbl)
+      def on_finished(valid_cnt, total):
+          stat_lbl.setText(f"Готово: {valid_cnt}/{total} валидных")
+          use_btn.setEnabled(valid_cnt > 0)
 
-        table = QTableWidget(len(proxies), 4)
-        table.setHorizontalHeaderLabels(["Прокси", "Статус", "Страна", "Ошибка"])
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        for i, p in enumerate(proxies):
-            table.setItem(i, 0, QTableWidgetItem(p))
-            item = QTableWidgetItem("⏳ Проверка...")
-            item.setForeground(QColor(Colors.TEXT_MUTED))
-            table.setItem(i, 1, item)
-            table.setItem(i, 2, QTableWidgetItem(""))
-            table.setItem(i, 3, QTableWidgetItem(""))
-        lay.addWidget(table)
+      def on_use():
+          # Назначаем валидные прокси аккаунтам round-robin
+          for i, acc in enumerate(self._accounts):
+              acc.proxy = valid_proxies[i % len(valid_proxies)]
+          save_accounts(self._accounts)
+          self._refresh_table()
+          self.accounts_changed.emit(self._accounts)
+          dlg.accept()
+          QMessageBox.information(
+              self, "Прокси назначены",
+              f"✓ {len(valid_proxies)} валидных прокси назначено {len(self._accounts)} аккаунтам."
+          )
 
-        btn_row = QHBoxLayout()
-        use_btn = QPushButton("✓ Использовать валидные")
-        use_btn.setObjectName("btn_primary")
-        use_btn.setEnabled(False)
-        cancel_btn = QPushButton("Отмена")
-        cancel_btn.setObjectName("btn_secondary")
-        btn_row.addWidget(use_btn)
-        btn_row.addStretch()
-        btn_row.addWidget(cancel_btn)
-        lay.addLayout(btn_row)
+      worker.result.connect(on_result)
+      worker.finished.connect(on_finished)
+      use_btn.clicked.connect(on_use)
+      cancel_btn.clicked.connect(lambda: (worker.cancel(), dlg.reject()))
+      self._proxy_check_worker = worker
+      worker.start()
+      dlg.exec()
 
-        valid_proxies = []
-        worker = ProxyCheckWorker(proxies, dlg)
+  def _import_proxies(self):
+      dlg = QDialog(self)
+      dlg.setWindowTitle("Импорт прокси")
+      dlg.setMinimumWidth(540)
+      dlg.setMinimumHeight(440)
+      lay = QVBoxLayout(dlg)
+      lay.setSpacing(12)
+      lay.setContentsMargins(20, 20, 20, 20)
 
-        def on_result(idx, valid, country, error):
-            progress.setValue(idx + 1)
-            s_item = table.item(idx, 1)
-            c_item = table.item(idx, 2)
-            e_item = table.item(idx, 3)
-            if valid:
-                s_item.setText("✓ OK")
-                s_item.setForeground(QColor(Colors.SUCCESS))
-                c_item.setText(country or "—")
-                valid_proxies.append(proxies[idx])
-            else:
-                s_item.setText("✗ Ошибка")
-                s_item.setForeground(QColor(Colors.ERROR))
-                e_item.setText(error)
+      hint = QLabel(
+          "Введите прокси — по одному на строку. Поддерживаемые форматы:\n"
+          "  user:pass@host:port\n"
+          "  socks5://user:pass@host:port\n"
+          "  http://user:pass@host:port\n"
+          "  host:port\n"
+          "  host:port:user:pass"
+      )
+      hint.setObjectName("label_muted")
+      hint.setWordWrap(True)
+      lay.addWidget(hint)
 
-        def on_finished(valid_cnt, total):
-            stat_lbl.setText(f"Готово: {valid_cnt}/{total} валидных")
-            use_btn.setEnabled(valid_cnt > 0)
+      text_edit = QTextEdit()
+      text_edit.setPlaceholderText(
+          "user:pass@proxy.example.com:10444\n"
+          "socks5://user:pass@host:port\n"
+          "192.168.1.1:8080"
+      )
+      text_edit.setMinimumHeight(180)
+      lay.addWidget(text_edit)
 
-        def on_use():
-            # Назначаем валидные прокси аккаунтам round-robin
-            for i, acc in enumerate(self._accounts):
-                acc.proxy = valid_proxies[i % len(valid_proxies)]
-            save_accounts(self._accounts)
-            self._refresh_table()
-            self.accounts_changed.emit(self._accounts)
-            dlg.accept()
-            QMessageBox.information(
-                self, "Прокси назначены",
-                f"✓ {len(valid_proxies)} валидных прокси назначено {len(self._accounts)} аккаунтам."
-            )
+      file_row = QHBoxLayout()
+      load_file_btn = QPushButton("📂 Загрузить из файла")
+      load_file_btn.setObjectName("btn_secondary")
 
-        worker.result.connect(on_result)
-        worker.finished.connect(on_finished)
-        use_btn.clicked.connect(on_use)
-        cancel_btn.clicked.connect(lambda: (worker.cancel(), dlg.reject()))
-        self._proxy_check_worker = worker
-        worker.start()
-        dlg.exec()
+      def _load_file():
+          path, _ = QFileDialog.getOpenFileName(
+              dlg, "Выбрать файл с прокси", "",
+              "Текстовые файлы (*.txt *.dat);;Все файлы (*)"
+          )
+          if path:
+              try:
+                  text = Path(path).read_text(encoding="utf-8", errors="ignore")
+                  text_edit.setPlainText(text)
+              except Exception as e:
+                  QMessageBox.warning(dlg, "Ошибка", str(e))
 
-    def _import_proxies(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Импорт прокси")
-        dlg.setMinimumWidth(540)
-        dlg.setMinimumHeight(440)
-        lay = QVBoxLayout(dlg)
-        lay.setSpacing(12)
-        lay.setContentsMargins(20, 20, 20, 20)
+      load_file_btn.clicked.connect(_load_file)
+      file_row.addWidget(load_file_btn)
+      file_row.addStretch()
+      lay.addLayout(file_row)
 
-        hint = QLabel(
-            "Введите прокси — по одному на строку. Поддерживаемые форматы:\n"
-            "  user:pass@host:port\n"
-            "  socks5://user:pass@host:port\n"
-            "  http://user:pass@host:port\n"
-            "  host:port\n"
-            "  host:port:user:pass"
-        )
-        hint.setObjectName("label_muted")
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
+      btns = QDialogButtonBox(
+          QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+      )
+      btns.accepted.connect(dlg.accept)
+      btns.rejected.connect(dlg.reject)
+      lay.addWidget(btns)
 
-        text_edit = QTextEdit()
-        text_edit.setPlaceholderText(
-            "user:pass@proxy.example.com:10444\n"
-            "socks5://user:pass@host:port\n"
-            "192.168.1.1:8080"
-        )
-        text_edit.setMinimumHeight(180)
-        lay.addWidget(text_edit)
+      if dlg.exec() != QDialog.DialogCode.Accepted:
+          return
 
-        file_row = QHBoxLayout()
-        load_file_btn = QPushButton("📂 Загрузить из файла")
-        load_file_btn.setObjectName("btn_secondary")
+      raw = text_edit.toPlainText().strip()
+      if not raw:
+          return
 
-        def _load_file():
-            path, _ = QFileDialog.getOpenFileName(
-                dlg, "Выбрать файл с прокси", "",
-                "Текстовые файлы (*.txt *.dat);;Все файлы (*)"
-            )
-            if path:
-                try:
-                    text = Path(path).read_text(encoding="utf-8", errors="ignore")
-                    text_edit.setPlainText(text)
-                except Exception as e:
-                    QMessageBox.warning(dlg, "Ошибка", str(e))
+      lines = [l.strip() for l in raw.splitlines() if l.strip()]
+      valid_proxies = [p for p in (ProxyManager.parse(l) for l in lines) if p]
+      invalid_count = len(lines) - len(valid_proxies)
 
-        load_file_btn.clicked.connect(_load_file)
-        file_row.addWidget(load_file_btn)
-        file_row.addStretch()
-        lay.addLayout(file_row)
+      if not valid_proxies:
+          QMessageBox.warning(
+              self, "Нет валидных прокси",
+              "Ни один прокси не прошёл проверку формата.\n\n"
+              "Поддерживаемые форматы:\n"
+              "  user:pass@host:port\n"
+              "  socks5://user:pass@host:port\n"
+              "  host:port\n"
+              "  host:port:user:pass"
+          )
+          return
 
-        btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        lay.addWidget(btns)
+      msg = f"Распознано: {len(valid_proxies)} прокси"
+      if invalid_count:
+          msg += f" ({invalid_count} пропущено)"
+      msg += "\n\nПроверить прокси и определить страны?"
 
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
+      reply = QMessageBox.question(
+          self, "Прокси загружены", msg,
+          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+      )
+      if reply == QMessageBox.StandardButton.Yes:
+          self._run_proxy_check_dialog(valid_proxies)
+      else:
+          # Назначаем без проверки round-robin
+          for i, acc in enumerate(self._accounts):
+              acc.proxy = valid_proxies[i % len(valid_proxies)]
+          save_accounts(self._accounts)
+          self._refresh_table()
+          QMessageBox.information(
+              self, "Прокси назначены",
+              f"Назначено {len(valid_proxies)} прокси {len(self._accounts)} аккаунтам."
+          )
 
-        raw = text_edit.toPlainText().strip()
-        if not raw:
-            return
+  def _import_accounts(self):
+      path, _ = QFileDialog.getOpenFileName(
+          self, "Импорт аккаунтов", "", "Text files (*.txt);;All files (*)"
+      )
+      if not path:
+          return
 
-        lines = [l.strip() for l in raw.splitlines() if l.strip()]
-        valid_proxies = [p for p in (ProxyManager.parse(l) for l in lines) if p]
-        invalid_count = len(lines) - len(valid_proxies)
+      existing = {a.email.lower() for a in self._accounts}
+      worker = BulkImportWorker(path, existing, self)
 
-        if not valid_proxies:
-            QMessageBox.warning(
-                self, "Нет валидных прокси",
-                "Ни один прокси не прошёл проверку формата.\n\n"
-                "Поддерживаемые форматы:\n"
-                "  user:pass@host:port\n"
-                "  socks5://user:pass@host:port\n"
-                "  host:port\n"
-                "  host:port:user:pass"
-            )
-            return
+      progress_dlg = QProgressDialog("Импорт аккаунтов...", "Отмена", 0, 100, self)
+      progress_dlg.setWindowTitle("Импорт")
+      progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
+      progress_dlg.setMinimumDuration(0)
+      progress_dlg.setValue(0)
 
-        msg = f"Распознано: {len(valid_proxies)} прокси"
-        if invalid_count:
-            msg += f" ({invalid_count} пропущено)"
-        msg += "\n\nПроверить прокси и определить страны?"
+      def on_progress(cur, total):
+          if total > 0:
+              progress_dlg.setValue(int(cur * 100 / total))
 
-        reply = QMessageBox.question(
-            self, "Прокси загружены", msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self._run_proxy_check_dialog(valid_proxies)
-        else:
-            # Назначаем без проверки round-robin
-            for i, acc in enumerate(self._accounts):
-                acc.proxy = valid_proxies[i % len(valid_proxies)]
-            save_accounts(self._accounts)
-            self._refresh_table()
-            QMessageBox.information(
-                self, "Прокси назначены",
-                f"Назначено {len(valid_proxies)} прокси {len(self._accounts)} аккаунтам."
-            )
+      def on_finished(imported, errors):
+          progress_dlg.close()
+          self._accounts.extend(worker.new_accounts)
+          save_accounts(self._accounts)
+          self._refresh_table()
+          self.accounts_changed.emit(self._accounts)
+          QMessageBox.information(
+              self, "Импорт завершён",
+              f"Импортировано: {imported}\nПропущено: {errors}",
+          )
+          self._import_worker = None
 
-    def _import_accounts(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Импорт аккаунтов", "", "Text files (*.txt);;All files (*)"
-        )
-        if not path:
-            return
+      def on_error(msg):
+          progress_dlg.close()
+          QMessageBox.critical(self, "Ошибка импорта", msg)
+          self._import_worker = None
 
-        existing = {a.email.lower() for a in self._accounts}
-        worker = BulkImportWorker(path, existing, self)
-
-        progress_dlg = QProgressDialog("Импорт аккаунтов...", "Отмена", 0, 100, self)
-        progress_dlg.setWindowTitle("Импорт")
-        progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
-        progress_dlg.setMinimumDuration(0)
-        progress_dlg.setValue(0)
-
-        def on_progress(cur, total):
-            if total > 0:
-                progress_dlg.setValue(int(cur * 100 / total))
-
-        def on_finished(imported, errors):
-            progress_dlg.close()
-            self._accounts.extend(worker.new_accounts)
-            save_accounts(self._accounts)
-            self._refresh_table()
-            self.accounts_changed.emit(self._accounts)
-            QMessageBox.information(
-                self, "Импорт завершён",
-                f"Импортировано: {imported}\nПропущено: {errors}",
-            )
-            self._import_worker = None
-
-        def on_error(msg):
-            progress_dlg.close()
-            QMessageBox.critical(self, "Ошибка импорта", msg)
-            self._import_worker = None
-
-        worker.progress.connect(on_progress)
-        worker.finished.connect(on_finished)
-        worker.error.connect(on_error)
-        progress_dlg.canceled.connect(worker.quit)
-        self._import_worker = worker
-        worker.start()
+      worker.progress.connect(on_progress)
+      worker.finished.connect(on_finished)
+      worker.error.connect(on_error)
+      progress_dlg.canceled.connect(worker.quit)
+      self._import_worker = worker
+      worker.start()
