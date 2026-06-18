@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
 # FMailSender VPS Setup Script
-# Сервер: 31.76.100.190
+# Сервер: YOUR_SERVER_IP
 # Домен: fmail.shop
 # SSL: Let's Encrypt
 # ============================================================
@@ -19,7 +19,7 @@ echo "=== [2/8] Настройка файрвола ==="
 ufw allow 22
 ufw allow 80
 ufw allow 443
-ufw allow 8000  # FastAPI прямой доступ (для внутреннего использования)
+# ufw allow 8000  # FastAPI НЕ открываем наружу — только через nginx
 ufw --force enable
 
 echo "=== [3/8] Копирование файлов приложения ==="
@@ -84,6 +84,6 @@ echo "============================================="
 echo ""
 echo "Инструкция по Cloudflare:"
 echo "1. Добавь домен $DOMAIN в Cloudflare"
-echo "2. DNS → A запись: $DOMAIN → $(curl -s ifconfig.me) (Proxied ✅)"
+echo "2. DNS → A запись: $DOMAIN → $(curl -s ifconfig.me 2>/dev/null || echo 'YOUR_SERVER_IP') (Proxied ✅)"
 echo "3. SSL/TLS → Full (strict)"
 echo "4. SSL/TLS → Edge Certificates → Always Use HTTPS → ON"
