@@ -18,9 +18,8 @@ def _get_openai_key() -> str | None:
 
 def _re_strip_html(html: str, max_len: int = 3000) -> str:
     """Strip HTML tags and truncate to max_len characters."""
-    text = _re_module.sub(r"<[^>]+>", "", html)
-    text = _re_module.sub(r"\s+", " ", text).strip()
-    return text[:max_len]
+    from core.utils import strip_html as _su
+    return _su(html, max_len=max_len)
 
 
 class AiFixResult:
