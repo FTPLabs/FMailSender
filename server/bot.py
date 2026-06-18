@@ -206,7 +206,7 @@ class AdminFlow(StatesGroup):
     broadcast_text    = State()
     confirm_clear     = State()
     set_download_url  = State()
-    set_vt_url        = State()
+
     upload_file       = State()
     ticket_reply      = State()   # admin replies to ticket
     add_moderator_id  = State()   # admin adds moderator by telegram ID
@@ -326,10 +326,10 @@ def kb_admin() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🚫 Отозвать ключ",         callback_data="admin_revoke")],
         [InlineKeyboardButton(text="📢 Рассылка",              callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="🎫 Тикеты поддержки",     callback_data="admin_tickets")],
-        [InlineKeyboardButton(text="🔗 ZIP-ссылка скачивания", callback_data="admin_set_download")],
-        [InlineKeyboardButton(text="🗑 Удалить ZIP-ссылку",    callback_data="admin_del_zip")],
-        [InlineKeyboardButton(text="🛡 VirusTotal ссылка",     callback_data="admin_set_vt")],
-        [InlineKeyboardButton(text="📤 Загрузить файл (.exe)", callback_data="admin_upload_file")],
+
+
+
+        [InlineKeyboardButton(text="📤 Загрузить .exe на сервер", callback_data="admin_upload_file")],
         [InlineKeyboardButton(text="🗑 Удалить все ключи",     callback_data="admin_clear_keys")],
         [InlineKeyboardButton(text="👥 Управление модераторами", callback_data="manage_moderators")],
         [InlineKeyboardButton(text="◀️ Главное меню",          callback_data="menu_main")],
@@ -795,14 +795,14 @@ async def cb_menu_download(query: CallbackQuery):
     # Auto-fetch latest release info from GitHub (cached 5 min); manual override takes priority
     try:
         release = await fetch_latest_release()
-        zip_url    = await db.get_setting("zip_url")      or ""
+
         manual_dl  = await db.get_setting("download_url") or ""
-        manual_vt  = await db.get_setting("vt_url")       or ""
+
         dl_url = manual_dl or release.get("download_url") or DOWNLOAD_URL
-        vt_url = manual_vt or release.get("vt_url")       or ""
+
     except Exception as _fetch_err:
         logger.warning("Download info fetch error: %s", _fetch_err)
-        zip_url = vt_url = ""
+        dl_url = DOWNLOAD_URL
         dl_url = DOWNLOAD_URL
 
     _lic_key = active_lic.get("key", "")
@@ -813,11 +813,11 @@ async def cb_menu_download(query: CallbackQuery):
         sep = "&" if "?" in url else "?"
         return f"{url}{sep}key={key}"
 
-    final_url = _url_with_key(zip_url or dl_url, _lic_key)
-    buttons = [[InlineKeyboardButton(text="📦 Скачать .zip архив", url=final_url)]]
-    if vt_url:
-        buttons.append([InlineKeyboardButton(text="🛡️ VirusTotal проверка", url=vt_url)])
-    buttons.append([InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")])
+    final_url = _url_with_key(dl_url, _lic_key)
+    buttons = [
+        [InlineKeyboardButton(text="📥 Скачать .exe", url=final_url)],
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
+    ]
 
     plan = PLANS.get(active_lic.get("plan", ""), {})
     exp = active_lic.get("expires_at", "")[:10]
@@ -825,7 +825,7 @@ async def cb_menu_download(query: CallbackQuery):
         query,
         f"📥 <b>Скачать FMail Sender</b>\n\n"
         f"✅ {plan.get('name', active_lic.get('plan', ''))} | до {exp}\n\n"
-        f"Скачай .zip архив, распакуй и запусти FMailSender.exe",
+        f"Нажми кнопку ниже — файл <b>FMailSender.exe</b> скачается напрямую.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
 
@@ -1545,46 +1545,46 @@ async def msg_admin_set_download_url(message: Message, state: FSMContext):
     await db.set_setting("download_url", url)
     await message.answer(f"✅ Ссылка скачивания обновлена:\n<code>{url}</code>", reply_markup=kb_admin())
 
-@dp.callback_query(F.data == "admin_del_zip")
-async def cb_admin_del_zip(query: CallbackQuery):
-    if not is_admin(query.from_user.id):
-        return
-    await db.set_setting("download_url", "")
-    await db.set_setting("zip_url", "")
-    await query.answer("✅ ZIP-ссылка удалена. Бот будет использовать ссылку из GitHub релиза.", show_alert=True)
-    await send_or_edit(query, "🏠 <b>Панель администратора</b>", reply_markup=kb_admin())
 
 
-# ─── Admin Set VirusTotal URL ─────────────────────────────────────────────────
-
-@dp.callback_query(F.data == "admin_set_vt")
-async def cb_admin_set_vt(query: CallbackQuery, state: FSMContext):
-    if not is_admin(query.from_user.id):
-        return
-    try:
-        current = await db.get_setting("vt_url") or "не задана"
-    except Exception:
-        current = "не задана"
-    await state.set_state(AdminFlow.set_vt_url)
-    await send_or_edit(
-        query,
-        f"🛡️ <b>VirusTotal ссылка</b>\n\nТекущая:\n<code>{current}</code>\n\n"
-        f"Отправь новую ссылку VirusTotal:\n(https://www.virustotal.com/gui/file/SHA256)",
-        reply_markup=kb_back_admin(),
-    )
 
 
-@dp.message(AdminFlow.set_vt_url)
-async def msg_admin_set_vt_url(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    url = (message.text or "").strip()
-    await state.clear()
-    if not url.startswith("http"):
-        await message.answer("❌ Некорректная ссылка.", reply_markup=kb_admin())
-        return
-    await db.set_setting("vt_url", url)
-    await message.answer(f"✅ VirusTotal ссылка сохранена:\n<code>{url}</code>", reply_markup=kb_admin())
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # ─── Admin Upload File ────────────────────────────────────────────────────────
@@ -1596,8 +1596,8 @@ async def cb_admin_upload_file(query: CallbackQuery, state: FSMContext):
     await state.set_state(AdminFlow.upload_file)
     await send_or_edit(
         query,
-        "📤 <b>Загрузка файла</b>\n\n"
-        "Отправь файл (.exe или .zip) прямо в этот чат.\n"
+        "📤 <b>Загрузка .exe файла</b>\n\n"
+        "Отправь файл <b>FMailSender.exe</b> прямо в этот чат.\n"
         "Файл сохранится на сервере и ссылка скачивания обновится автоматически.",
         reply_markup=kb_back_admin(),
     )
@@ -1617,7 +1617,11 @@ async def msg_upload_file(message: Message, state: FSMContext):
     fname = "".join(c for c in fname if c.isalnum() or c in "._-")
     if not fname:
         fname = "FMailSender.exe"
-
+    if not fname.lower().endswith(".exe"):
+          await message.answer("❌ Только .exe файлы разрешены.", reply_markup=kb_back_admin())
+          await state.clear()
+          return
+  
     await message.answer(f"⏳ Загружаю <b>{fname}</b>… Подождите.")
 
     try:
@@ -2332,7 +2336,7 @@ async def download_file(filename: str, key: str = ""):
     safe = "".join(c for c in filename if c.isalnum() or c in "._-")
     if not safe or ".." in safe:
         raise HTTPException(status_code=400, detail="Invalid filename")
-    allowed = {".exe", ".zip", ".msi"}
+    allowed = {".exe"}
     ext = os.path.splitext(safe)[1].lower()
     if ext not in allowed:
         raise HTTPException(status_code=403, detail="File type not allowed")
@@ -2572,23 +2576,23 @@ progress{{width:100%;height:5px;border-radius:3px;margin-top:5px;accent-color:#6
 <section>
   <h2>🔗 Управление ссылками</h2>
   <div class="form-row">
-    <div class="field"><label>Ссылка скачивания (.exe / .zip)</label>
+    <div class="field"><label>Ссылка скачивания .exe</label>
       <input id="s-dl" value="{dl_url_e}" placeholder="https://…"></div>
     <button class="btn bp" onclick="saveSetting('download_url','s-dl','dl-a')">Сохранить</button>
   </div>
   <div id="dl-a" class="alert"></div>
-  <div class="form-row" style="margin-top:10px">
-    <div class="field"><label>ZIP-архив (кнопка «Скачать .zip»)</label>
-      <input id="s-zip" value="{zip_url_e}" placeholder="https://…"></div>
-    <button class="btn bp" onclick="saveSetting('zip_url','s-zip','zip-a')">Сохранить</button>
-  </div>
-  <div id="zip-a" class="alert"></div>
-  <div class="form-row" style="margin-top:10px">
-    <div class="field"><label>VirusTotal URL</label>
-      <input id="s-vt" value="{vt_url_e}" placeholder="https://www.virustotal.com/…"></div>
-    <button class="btn bp" onclick="saveSetting('vt_url','s-vt','vt-a')">Сохранить</button>
-  </div>
-  <div id="vt-a" class="alert"></div>
+
+
+
+
+
+
+
+
+
+
+
+
 </section>
 </div>
 
@@ -2601,8 +2605,8 @@ progress{{width:100%;height:5px;border-radius:3px;margin-top:5px;accent-color:#6
     <code>/v1/download/filename.exe?key=KEY</code>
   </p>
   <div class="form-row">
-    <div class="field"><label>Файл (.exe, .zip, .msi)</label>
-      <input id="ul-f" type="file" accept=".exe,.zip,.msi"></div>
+    <div class="field"><label>Файл (.exe)</label>
+      <input id="ul-f" type="file" accept=".exe"></div>
     <button class="btn bp" onclick="ulFile()">📤 Загрузить</button>
   </div>
   <div id="ul-alert" class="alert"></div>
@@ -2752,16 +2756,23 @@ async def web_upload_file(api_key: str = Form(""), file: UploadFile = FastAPIFil
     import os as _os
     from pathlib import Path as _Path
     ext = _os.path.splitext(file.filename or "")[1].lower()
-    if ext not in {".exe", ".zip", ".msi"}:
-        raise HTTPException(status_code=400, detail="Allowed types: .exe, .zip, .msi")
+    if ext not in {".exe"}:
+        raise HTTPException(status_code=400, detail="Allowed type: .exe only")
     safe = "".join(c for c in (file.filename or "upload") if c.isalnum() or c in "._-")
     dl_dir = _Path("downloads"); dl_dir.mkdir(exist_ok=True)
     dest = dl_dir / safe
-    with dest.open("wb") as fout:
-        _shutil.copyfileobj(file.file, fout)
-    from fastapi.responses import JSONResponse
-    return JSONResponse({"ok": True, "filename": safe, "size": dest.stat().st_size})
-
+    import asyncio as _asyncio
+    def _write_sync():
+        with dest.open("wb") as fout:
+            while True:
+    def _write_sync():
+          with dest.open("wb") as fout:
+              while True:
+                  chunk = file.file.read(1024 * 1024)
+                  if not chunk:
+                      break
+                  fout.write(chunk)
+      await _asyncio.to_thread(_write_sync)
 
 @api_app.get("/v1/admin/web/licenses", include_in_schema=False)
 async def web_get_licenses(api_key: str = "", limit: int = 200, search: str = ""):
