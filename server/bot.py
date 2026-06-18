@@ -9,6 +9,9 @@ import logging
 import os
 import sys
 
+# FIX H-3: sys.path настраивается ДО любых относительных импортов
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from dotenv import load_dotenv
 load_dotenv()
 from datetime import datetime, timezone
@@ -16,7 +19,6 @@ from typing import Any, Dict, Optional
 
 import jwt
 import uvicorn
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core._version import APP_VERSION
 import aiohttp
 from aiogram import Bot, Dispatcher, F
@@ -114,8 +116,8 @@ _release_cache: dict = {}
 _release_cache_ts: float = 0.0
 _RELEASE_CACHE_TTL = 300  # 5 minutes
 
-# asyncio.Lock инициализируется в main() во избежание привязки к неверному event loop
-_release_cache_lock: asyncio.Lock = asyncio.Lock()  # FIX: module-level init, not None
+# FIX L-1: Lock инициализируется на уровне модуля — правильно и безопасно
+_release_cache_lock: asyncio.Lock = asyncio.Lock()
 
 # ─── Канал + CAPTCHA ─────────────────────────────────────────────────────────
 # CHANNEL_ID теперь берётся из config.py (env var CHANNEL_ID)
@@ -132,8 +134,7 @@ async def fetch_latest_release() -> dict:
     """Auto-fetch latest GitHub release info. Cached for 5 min."""
     global _release_cache, _release_cache_ts
     import time
-    lock = _release_cache_lock  # FIX: always module-level lock
-    async with lock:  # Lock инициализируется в main()
+    async with _release_cache_lock:
         if _release_cache and (time.time() - _release_cache_ts) < _RELEASE_CACHE_TTL:
             return _release_cache
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -2021,7 +2022,7 @@ async def cb_mod_ticket_view(query: CallbackQuery, state: FSMContext):
     lines = [f"🎫 <b>Тикет #{ticket_id}</b> · {ticket.get('first_name', '')} @{ticket.get('username', '')}"]
     lines.append(f"📅 {ticket['created_at'][:16].replace('T', ' ')}\n")
     for m in msgs[-10:]:
-        who = "👤" if m["sender"] == "user" else "🛡"
+        who = "👤" if m["role"] == "user" else "🛡"  # FIX C-2
         lines.append(f"{who} {m['text']}")
     close_row = (
         [[InlineKeyboardButton(text="✅ Закрыть тикет", callback_data=f"ticket_close:{ticket_id}")]]
@@ -2398,7 +2399,9 @@ async def admin_web_panel(
     AK = provided_key
 
     def _lic_rows() -> str:
-        rows = []
+        # FIX C-1: защищаем от 500 при неожиданных данных
+        try:
+         rows = []
         for lic in licenses:
             plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", "—"))
             exp = lic.get("expires_at", "")[:10]
@@ -2418,18 +2421,26 @@ async def admin_web_panel(
                 f"<td>{note_v[:25]}</td>"
                 f"<td><button class='bd' onclick=\"rv('{key}',this)\">Отозвать</button></td></tr>"
             )
-        return "".join(rows) or "<tr><td colspan='8' class='em'>Нет лицензий</td></tr>"
+         return "".join(rows) or "<tr><td colspan='8' class='em'>Нет лицензий</td></tr>"
+        except Exception as _e:
+            logger.warning("_lic_rows error: %s", _e)
+            return "<tr><td colspan='8' class='em'>⚠️ Ошибка загрузки</td></tr>"
 
     def _ticket_rows() -> str:
-        rows = []
-        for t in tickets:
+        # FIX C-1: защищаем от 500 при неожиданных данных
+        try:
+         rows = []
+         for t in tickets:
             fn = html.escape(str(t.get("first_name", "")))
             un = html.escape(str(t.get("username", "")))
             rows.append(
                 f"<tr><td>#{t.get('id')}</td><td>{fn}</td><td>@{un}</td>"
                 f"<td>{str(t.get('created_at', ''))[:16].replace('T', ' ')}</td></tr>"
             )
-        return "".join(rows) or "<tr><td colspan='4' class='em'>Нет тикетов</td></tr>"
+         return "".join(rows) or "<tr><td colspan='4' class='em'>Нет тикетов</td></tr>"
+        except Exception as _e:
+            logger.warning("_ticket_rows error: %s", _e)
+            return "<tr><td colspan='4' class='em'>⚠️ Ошибка загрузки</td></tr>"
 
     from datetime import datetime, timezone
     now_utc = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
@@ -2610,7 +2621,7 @@ progress{{width:100%;height:5px;border-radius:3px;margin-top:5px;accent-color:#6
 </section>
 </div>
 
-<footer>FMail Sender v{{APP_VERSION}} · powered by fmailsender.com</footer>
+<footer>FMail Sender v{APP_VERSION} · powered by fmailsender.com</footer>
 
 <script>
 const AK="{AK}",BASE=window.location.origin;
