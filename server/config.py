@@ -33,14 +33,13 @@ if not ADMIN_IDS:
 MODERATOR_IDS: list[int] = [int(x) for x in os.environ.get("MODERATOR_IDS", "").split(",") if x.strip().isdigit()]
 
 ADMIN_API_KEY: str = os.environ.get("ADMIN_API_KEY", "").strip()
-  if not ADMIN_API_KEY:
-      print("[WARN] ADMIN_API_KEY is not set — admin web panel will be inaccessible.", file=sys.stderr)
-  elif len(ADMIN_API_KEY) < 16:
-      print("[WARN] ADMIN_API_KEY is too short (< 16 chars) — use a strong key.", file=sys.stderr)
+if not ADMIN_API_KEY:
+    print("[WARN] ADMIN_API_KEY is not set — admin web panel will be inaccessible.", file=sys.stderr)
+elif len(ADMIN_API_KEY) < 16:
+    print("[WARN] ADMIN_API_KEY is too short (< 16 chars) — use a strong key.", file=sys.stderr)
 
-  # Backward-compat alias (ADMIN_WEB_SECRET renamed to ADMIN_API_KEY)
-  ADMIN_WEB_SECRET: str = ADMIN_API_KEY
-
+# Backward-compat alias
+ADMIN_WEB_SECRET: str = ADMIN_API_KEY
 CRYPTO_BOT_TOKEN = _require("CRYPTO_BOT_TOKEN")
 CRYPTO_BOT_API = "https://pay.crypt.bot/api"
 
