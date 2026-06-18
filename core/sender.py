@@ -477,8 +477,6 @@ class SendingEngine:
                 )
             account = self._pick_account()
             if account is None:
-                with self._stats_lock:
-                    self._stats["errors"] += 1
                 return SendResult(
                     recipient_email=recipient.email,
                     success=False,
