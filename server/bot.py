@@ -1826,7 +1826,7 @@ async def admin_revoke(req: AdminRevokeRequest):
     return {"revoked": True, "key": req.key.upper()}
 
 
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 
 @api_app.get("/v1/download/{filename}")
