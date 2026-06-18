@@ -98,7 +98,7 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "list.ru":           {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
     "bk.ru":             {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
     "internet.ru":       {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
-    "mail.ua":           {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
+    "mail.ua":           {"host": "smtp.mail.ua",          "port": 465, "use_ssl": True,  "use_tls": False},  # FIX БАГ-3: mail.ua != mail.ru
     "ro.ru":             {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
     "yandex.ru":         {"host": "smtp.yandex.ru",        "port": 465, "use_ssl": True,  "use_tls": False},
     "yandex.com":        {"host": "smtp.yandex.com",       "port": 465, "use_ssl": True,  "use_tls": False},
@@ -580,6 +580,7 @@ class SendingEngine:
                     self._emit_progress(results, recipients, result)
                 if (
                     self.config.pause_after_n > 0
+                    and len(results) > 0  # FIX БАГ-1: 0 % N == 0 вызывал ложную паузу при пустых results
                     and len(results) % self.config.pause_after_n == 0
                     and len(results) < len(recipients)
                 ):
