@@ -675,7 +675,7 @@ class AccountsScreen(QWidget):
           status_item = QTableWidgetItem("⏳ Ожидание...")
           status_item.setForeground(QColor(Colors.TEXT_MUTED))
           self.table.setItem(row, 5, status_item)
-          
+
           # Прокси + флаг страны (обновляется CountryWorker после SMTP OK)
           _proxy_raw = (acc.proxy or "").strip()
           _proxy_display = _proxy_raw if _proxy_raw else "—"
