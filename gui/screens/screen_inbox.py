@@ -36,7 +36,7 @@ def _decode_str(s: str | bytes | None) -> str:
     if s is None:
         return ""
     if isinstance(s, bytes):
-        parts = decode_header(s.decode("utf-8", errors="replace"))
+        parts = decode_header(s.decode("raw_unicode_escape", errors="replace"))
     else:
         parts = decode_header(s)
     result = []
