@@ -166,6 +166,7 @@ class DnsAuthStatus:
     dmarc: str = ""
     dmarc_valid: bool = False
     mx_valid: bool = False
+    suggestions: List[str] = field(default_factory=list)
 
 
 def check_dns_auth(domain: str) -> DnsAuthStatus:
@@ -337,9 +338,8 @@ class SpamChecker:
             result.score += 3
 
     def _strip_html(self, html_str: str) -> str:
-        text = re.sub(r"<[^>]+>", "", html_str)
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
+        from core.utils import strip_html as _su
+        return _su(html_str)
 
     def get_recommendations(self, result: SpamCheckResult) -> List[str]:
         recs = []
