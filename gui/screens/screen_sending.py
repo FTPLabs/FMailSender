@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
   QFormLayout, QMessageBox, QSplitter
 )
 from PyQt6.QtCore import QSettings, Qt, QTimer, QDateTime, pyqtSignal
+from PyQt6.QtGui import QColor
 from core.sender import SendingEngine, SmtpAccount, Recipient, EmailTemplate, CampaignConfig, SendResult
 from gui.theme import Colors, Spacing
 
@@ -322,7 +323,15 @@ class SendingScreen(QWidget):
               continue
           t = item.get("type")
           if t == "log":
-              self.log_list.addItem(QListWidgetItem(item["message"]))
+              _msg = item["message"]
+              _wi = QListWidgetItem(_msg)
+              if " ✓ " in _msg or _msg.startswith("[") and "✓" in _msg:
+                  _wi.setForeground(QColor("#22c55e"))
+              elif " ✗ " in _msg or "⚠" in _msg or _msg.startswith("[") and "✗" in _msg:
+                  _wi.setForeground(QColor("#ef4444"))
+              elif "🚀" in _msg or "═══" in _msg:
+                  _wi.setForeground(QColor("#a78bfa"))
+              self.log_list.addItem(_wi)
               self.log_list.scrollToBottom()
           elif t == "progress":
               sent, total = item["sent"], item["total"]
