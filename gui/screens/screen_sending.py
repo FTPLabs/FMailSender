@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
   QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
   QSlider, QSpinBox, QAbstractSpinBox, QFrame, QProgressBar, QListWidget,
   QListWidgetItem, QDateTimeEdit, QCheckBox, QGroupBox,
-  QFormLayout, QMessageBox, QSplitter
+  QFormLayout, QMessageBox, QSplitter, QFileDialog
 )
 from PyQt6.QtCore import QSettings, Qt, QTimer, QDateTime, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -30,6 +30,56 @@ def _play_completion_chime() -> None:
         except Exception:
             pass  # non-Windows или нет звука — тихо игнорируем
     threading.Thread(target=_chime, daemon=True).start()
+
+
+# ── Перевод SMTP ошибок на русский ────────────────────────────────────────
+def _translate_smtp_error(msg: str) -> str:
+    """Переводит технические SMTP-ошибки в понятные пользователю русские сообщения."""
+    m = msg
+    # Коды ошибок SMTP
+    _map = [
+        ("SMTPRecipientRefused", "Адрес отклонён получателем"),
+        ("SMTPRecipientsRefused", "Адреса отклонены получателем"),
+        ("SMTPAuthenticationError", "Ошибка авторизации SMTP"),
+        ("SMTPConnectError", "Ошибка подключения к серверу"),
+        ("SMTPServerDisconnected", "Сервер разорвал соединение"),
+        ("SMTPSenderRefused", "Отправитель отклонён сервером"),
+        ("SMTPDataError", "Ошибка передачи данных"),
+        ("SMTPHeloError", "Ошибка приветствия SMTP (HELO)"),
+        ("SMTPNotSupportedError", "Команда не поддерживается сервером"),
+        ("ConnectionRefusedError", "Соединение отклонено — проверь хост/порт"),
+        ("TimeoutError", "Превышено время ожидания"),
+        ("asyncio.TimeoutError", "Превышено время ожидания"),
+        ("OSError", "Сетевая ошибка — нет соединения"),
+        ("mailbox unavailable", "почтовый ящик недоступен"),
+        ("Requested mail action not taken", "действие отклонено сервером"),
+        ("Try again later", "попробуйте позже"),
+        ("Failure sending mail", "ошибка отправки"),
+        ("relay access denied", "ретрансляция запрещена"),
+        ("Authentication Required", "требуется авторизация"),
+        ("authentication failed", "ошибка авторизации"),
+        ("invalid credentials", "неверные учётные данные"),
+        ("User unknown", "пользователь не найден"),
+        ("No such user", "пользователь не существует"),
+        ("over quota", "превышена квота ящика"),
+        ("message size exceeds", "превышен допустимый размер письма"),
+        ("too many recipients", "слишком много получателей"),
+        ("Connection refused", "соединение отклонено"),
+        ("Name or service not known", "хост недоступен или не найден"),
+        ("timed out", "превышено время ожидания"),
+        ("530", "530 — требуется авторизация"),
+        ("535", "535 — ошибка авторизации"),
+        ("550", "550 — ящик не существует или заблокирован"),
+        ("551", "551 — пользователь не на этом сервере"),
+        ("552", "552 — превышен размер/квота ящика"),
+        ("553", "553 — недопустимое имя ящика"),
+        ("450", "450 — почтовый ящик временно недоступен"),
+        ("421", "421 — сервер временно недоступен"),
+        ("452", "452 — недостаточно ресурсов на сервере"),
+    ]
+    for eng, rus in _map:
+        m = m.replace(eng, rus)
+    return m
 
 
 def _status_chip(text):
@@ -226,6 +276,10 @@ class SendingScreen(QWidget):
       splitter.setSizes([380, 620])
       layout.addWidget(splitter, 1)
       self._restore_settings()
+      save_btn = QPushButton("💾 Сохранить лог")
+      save_btn.setObjectName("btn_icon")
+      save_btn.clicked.connect(self._export_log)
+      rl.addWidget(save_btn, 0, Qt.AlignmentFlag.AlignRight)
 
   def set_accounts(self, accounts):
       self._accounts = accounts
@@ -324,6 +378,7 @@ class SendingScreen(QWidget):
           t = item.get("type")
           if t == "log":
               _msg = item["message"]
+              _msg = _translate_smtp_error(_msg)  # Переводим ошибки на русский
               _wi = QListWidgetItem(_msg)
               if " ✓ " in _msg or _msg.startswith("[") and "✓" in _msg:
                   _wi.setForeground(QColor("#22c55e"))
@@ -395,3 +450,29 @@ class SendingScreen(QWidget):
       self.pause_btn.setEnabled(False)
       self.stop_btn.setEnabled(False)
       self._speed_timer.stop()
+
+
+  def _export_log(self):
+      """Экспортирует лог событий в .txt файл для отправки администратору."""
+      from datetime import datetime
+      if self.log_list.count() == 0:
+          QMessageBox.information(self, "Лог пуст", "Нет записей для экспорта.")
+          return
+      default_name = f"fmail_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+      path, _ = QFileDialog.getSaveFileName(
+          self, "Сохранить лог", default_name, "Текстовые файлы (*.txt);;Все файлы (*)"
+      )
+      if not path:
+          return
+      try:
+          lines_out = []
+          for i in range(self.log_list.count()):
+              lines_out.append(self.log_list.item(i).text())
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(f"FMailSender — Лог рассылки\n")
+              f.write(f"Экспортировано: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n")
+              f.write("=" * 80 + "\n\n")
+              f.write("\n".join(lines_out))
+          QMessageBox.information(self, "Лог сохранён", f"Файл сохранён:\n{path}")
+      except Exception as e:
+          QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить лог:\n{e}")
