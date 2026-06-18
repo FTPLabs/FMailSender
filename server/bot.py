@@ -1872,87 +1872,87 @@ async def health():
 
 
 
-  # ─── Публичная статус-страница ───────────────────────────────────────────────
+# ─── Публичная статус-страница ───────────────────────────────────────────────
 
-  import time as _time
-  _SERVER_START = _time.time()
+import time as _time
+_SERVER_START = _time.time()
 
 
-  @api_app.get("/", response_class=HTMLResponse, include_in_schema=False)
-  async def status_page():
-      """fmail.shop — статус сервисов FMail Sender."""
-      try:
-          stats = await db.get_stats()
-          active_count = stats.get("active", 0)
-          total_count  = stats.get("total", 0)
-          db_ok = True
-      except Exception:
-          active_count = total_count = 0
-          db_ok = False
-      try:
-          _me = await bot.get_me()
-          bot_username = _me.username
-          bot_ok = True
-      except Exception:
-          bot_username = "FMaill_bot"
-          bot_ok = False
-      uptime_s = int(_time.time() - _SERVER_START)
-      h, r = divmod(uptime_s, 3600)
-      uptime_str = f"{h}ч {r // 60}м"
-      api_badge  = '<span class="badge g"><span class="dot dg"></span>Работает</span>'
-      bot_badge  = f'<span class="badge {"g" if bot_ok else "r"}"><span class="dot {"dg" if bot_ok else "dr"}"></span>{"Online" if bot_ok else "Offline"}</span>'
-      db_badge   = f'<span class="badge {"g" if db_ok else "r"}"><span class="dot {"dg" if db_ok else "dr"}"></span>{"Online" if db_ok else "Error"}</span>'
-      from datetime import datetime, timezone
-      now_utc = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M")
-      html = f"""<!DOCTYPE html>
-  <html lang="ru"><head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>FMail Sender — Status</title>
-  <style>
-  *{{box-sizing:border-box;margin:0;padding:0}}
-  body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f1a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 16px}}
-  .logo{{font-size:2rem;font-weight:700;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px}}
-  .sub{{color:#718096;font-size:.9rem;margin-bottom:40px}}
-  .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;width:100%;max-width:860px}}
-  .card{{background:#1a1a2e;border:1px solid #2d2d44;border-radius:16px;padding:24px}}
-  .ct{{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:#718096;margin-bottom:14px}}
-  .row{{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #2d2d44}}
-  .row:last-child{{border-bottom:none}}
-  .val{{color:#90cdf4}}.ok{{color:#48bb78}}.err{{color:#fc8181}}
-  .badge{{display:inline-flex;align-items:center;padding:3px 10px;border-radius:99px;font-size:.75rem;font-weight:600}}
-  .g{{background:#1c4532;color:#48bb78}}.r{{background:#4a1942;color:#fc8181}}
-  .dot{{width:8px;height:8px;border-radius:50%;margin-right:5px}}
-  .dg{{background:#48bb78;box-shadow:0 0 6px #48bb78aa}}.dr{{background:#fc8181}}
-  .footer{{margin-top:36px;color:#4a5568;font-size:.78rem;text-align:center}}
-  </style></head><body>
-  <div class="logo">✉ FMail Sender</div>
-  <div class="sub">Мониторинг сервисов · fmail.shop</div>
-  <div class="grid">
-    <div class="card">
-      <div class="ct">Статус сервисов</div>
-      <div class="row"><span>Лицензионный API</span>{api_badge}</div>
-      <div class="row"><span>Telegram Bot</span>{bot_badge}</div>
-      <div class="row"><span>База данных</span>{db_badge}</div>
-    </div>
-    <div class="card">
-      <div class="ct">Статистика</div>
-      <div class="row"><span>Всего лицензий</span><span class="val">{total_count}</span></div>
-      <div class="row"><span>Активных лицензий</span><span class="ok">{active_count}</span></div>
-      <div class="row"><span>Uptime</span><span class="val">{uptime_str}</span></div>
-      <div class="row"><span>Версия</span><span class="val">v{APP_VERSION}</span></div>
-    </div>
-    <div class="card">
-      <div class="ct">Подключение</div>
-      <div class="row"><span>Bot</span><span class="val">@{bot_username}</span></div>
-      <div class="row"><span>API</span><span class="val">fmail.shop/v1/</span></div>
-      <div class="row"><span>Протокол</span><span class="badge g">HTTPS</span></div>
-    </div>
+@api_app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def status_page():
+    """fmail.shop — статус сервисов FMail Sender."""
+    try:
+        stats = await db.get_stats()
+        active_count = stats.get("active", 0)
+        total_count  = stats.get("total", 0)
+        db_ok = True
+    except Exception:
+        active_count = total_count = 0
+        db_ok = False
+    try:
+        _me = await bot.get_me()
+        bot_username = _me.username
+        bot_ok = True
+    except Exception:
+        bot_username = "FMaill_bot"
+        bot_ok = False
+    uptime_s = int(_time.time() - _SERVER_START)
+    h, r = divmod(uptime_s, 3600)
+    uptime_str = f"{h}ч {r // 60}м"
+    api_badge  = '<span class="badge g"><span class="dot dg"></span>Работает</span>'
+    bot_badge  = f'<span class="badge {"g" if bot_ok else "r"}"><span class="dot {"dg" if bot_ok else "dr"}"></span>{"Online" if bot_ok else "Offline"}</span>'
+    db_badge   = f'<span class="badge {"g" if db_ok else "r"}"><span class="dot {"dg" if db_ok else "dr"}"></span>{"Online" if db_ok else "Error"}</span>'
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M")
+    html = f"""<!DOCTYPE html>
+<html lang="ru"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FMail Sender — Status</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f1a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 16px}}
+.logo{{font-size:2rem;font-weight:700;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px}}
+.sub{{color:#718096;font-size:.9rem;margin-bottom:40px}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;width:100%;max-width:860px}}
+.card{{background:#1a1a2e;border:1px solid #2d2d44;border-radius:16px;padding:24px}}
+.ct{{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:#718096;margin-bottom:14px}}
+.row{{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #2d2d44}}
+.row:last-child{{border-bottom:none}}
+.val{{color:#90cdf4}}.ok{{color:#48bb78}}.err{{color:#fc8181}}
+.badge{{display:inline-flex;align-items:center;padding:3px 10px;border-radius:99px;font-size:.75rem;font-weight:600}}
+.g{{background:#1c4532;color:#48bb78}}.r{{background:#4a1942;color:#fc8181}}
+.dot{{width:8px;height:8px;border-radius:50%;margin-right:5px}}
+.dg{{background:#48bb78;box-shadow:0 0 6px #48bb78aa}}.dr{{background:#fc8181}}
+.footer{{margin-top:36px;color:#4a5568;font-size:.78rem;text-align:center}}
+</style></head><body>
+<div class="logo">✉ FMail Sender</div>
+<div class="sub">Мониторинг сервисов · fmail.shop</div>
+<div class="grid">
+  <div class="card">
+    <div class="ct">Статус сервисов</div>
+    <div class="row"><span>Лицензионный API</span>{api_badge}</div>
+    <div class="row"><span>Telegram Bot</span>{bot_badge}</div>
+    <div class="row"><span>База данных</span>{db_badge}</div>
   </div>
-  <div class="footer">Обновлено: {now_utc} UTC &nbsp;·&nbsp; <a href="/health" style="color:#667eea">JSON API</a></div>
-  </body></html>"""
-      return HTMLResponse(content=html)
+  <div class="card">
+    <div class="ct">Статистика</div>
+    <div class="row"><span>Всего лицензий</span><span class="val">{total_count}</span></div>
+    <div class="row"><span>Активных лицензий</span><span class="ok">{active_count}</span></div>
+    <div class="row"><span>Uptime</span><span class="val">{uptime_str}</span></div>
+    <div class="row"><span>Версия</span><span class="val">v{APP_VERSION}</span></div>
+  </div>
+  <div class="card">
+    <div class="ct">Подключение</div>
+    <div class="row"><span>Bot</span><span class="val">@{bot_username}</span></div>
+    <div class="row"><span>API</span><span class="val">fmail.shop/v1/</span></div>
+    <div class="row"><span>Протокол</span><span class="badge g">HTTPS</span></div>
+  </div>
+</div>
+<div class="footer">Обновлено: {now_utc} UTC &nbsp;·&nbsp; <a href="/health" style="color:#667eea">JSON API</a></div>
+</body></html>"""
+    return HTMLResponse(content=html)
 
-  
+
 # ─── Entry Point ─────────────────────────────────────────────────────────────
 
 async def _poll_pending_payments():
