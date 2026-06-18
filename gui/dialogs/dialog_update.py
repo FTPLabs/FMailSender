@@ -11,13 +11,13 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QTextEdit, QFrame
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import QUrl
 
 from core.updater import (
-    UpdateInfo, Downloader, apply_update_windows, open_download_folder,
-    fetch_patch_manifest, apply_patch, PATCH_DIR,
+    UpdateInfo, Downloader, apply_update_windows,
+    fetch_patch_manifest, apply_patch,
 )
 from gui.theme import Colors, Spacing
 
