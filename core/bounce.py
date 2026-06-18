@@ -2,6 +2,7 @@
 IMAP bounce-парсер. Мониторит входящие, определяет hard/soft bounces,
 добавляет hard bounce в blacklist.
 """
+import asyncio
 import email
 import os
 import imaplib
@@ -331,7 +332,13 @@ class BounceMonitor:
                 except Exception:
                     pass
         return new_bounces
-    def filter_recipients(self, emails: List[str]) -> tuple:
+    async def check_bounces_async(self) -> List[BounceRecord]:
+          """FIX БАГ-7: Оборачивает sync check_bounces() в asyncio.to_thread.
+          Используйте из async-контекста — event loop не блокируется.
+          """
+          return await asyncio.to_thread(self.check_bounces)
+
+      def filter_recipients(self, emails: List[str]) -> tuple:
         allowed = []
         blocked = []
         for e in emails:
