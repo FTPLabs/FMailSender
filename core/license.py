@@ -41,11 +41,11 @@ HWID_SALT: str = os.environ.get("HWID_SALT", "")
 # URL лицензионного сервера — переопределяются через ENV, иначе используется production IP.
 LICENSE_API_URL: str = os.environ.get(
     "LICENSE_API_URL",
-    "http://31.76.100.190:8000/v1/activate",  # FIX: сервер работает по HTTP (NO_SSL=1)
+    "https://fmail.shop/v1/activate",  # FIX: HTTPS через fmail.shop (nginx → uvicorn)
 )
 LICENSE_VERIFY_URL: str = os.environ.get(
     "LICENSE_VERIFY_URL",
-    "http://31.76.100.190:8000/v1/verify",  # FIX: сервер работает по HTTP (NO_SSL=1)
+    "https://fmail.shop/v1/verify",  # FIX: HTTPS через fmail.shop (nginx → uvicorn)
 )
 
 OFFLINE_GRACE_HOURS = 72
