@@ -173,7 +173,7 @@ jobs:
             echo '{"version":"'$(echo $NEW_TAG | sed s/v//)'" ,"base_version":"","files":[]}' > dist/patch_manifest_${NEW_TAG}.json
           else
             echo "Generating patch: $PREV_TAG → $NEW_TAG"
-            python make_patch.py "$PREV_TAG" "$NEW_TAG"
+            PYTHONIOENCODING=utf-8 python make_patch.py "$PREV_TAG" "$NEW_TAG"
           fi
           echo "Patch manifest:"
           cat dist/patch_manifest_${NEW_TAG}.json || true
