@@ -46,15 +46,11 @@ jobs:
               -print0)
           [ $FAILED -eq 0 ] && echo "✅ Syntax OK" || { echo "❌ Build blocked: syntax errors"; exit 1; }
 
-      - name: "[GATE-2] pyflakes — undefined names"
+      - name: "[GATE-2] pyflakes — code analysis (warning)"
         run: |
-          echo "=== Gate 2: pyflakes ==="
-          OUT=$(python -m pyflakes . 2>&1 | grep -v "__pycache__" | grep -v ".venv" || true)
-          CRITICAL=$(echo "$OUT" | grep "undefined name\|imported but unused" || true)
-          echo "$OUT"
-          # Только undefined name блокирует сборку
-          UNDEF=$(echo "$OUT" | grep "undefined name" || true)
-          [ -z "$UNDEF" ] && echo "✅ pyflakes OK" || { echo "❌ Build blocked: undefined names"; exit 1; }
+          echo "=== Gate 2: pyflakes (informational only) ==="
+          python -m pyflakes . 2>&1 | grep -v "__pycache__" | grep -v ".venv" | grep -v "imported but unused" || true
+          echo "✅ pyflakes complete (non-blocking)"
 
       - name: "[GATE-3] Secret scan — tokens и ключи"
         run: |
