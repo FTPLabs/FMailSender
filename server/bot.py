@@ -95,7 +95,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
 
 import database as db
@@ -2236,15 +2236,17 @@ async def verify_license(req: VerifyRequest):
 
 
 class AdminRevokeRequest(BaseModel):
-    admin_secret: str
-    key: str
+      admin_secret: str = ""
+      api_key: str = ""
+      key: str
 
 
-@api_app.post("/v1/admin/revoke")
-async def admin_revoke(req: AdminRevokeRequest):
-    expected = os.environ.get("ADMIN_REVOKE_SECRET", "")
-    if not expected or req.admin_secret != expected:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+  @api_app.post("/v1/admin/revoke")
+  async def admin_revoke(req: AdminRevokeRequest):
+      provided = req.api_key or req.admin_secret
+      expected = ADMIN_API_KEY or os.environ.get("ADMIN_REVOKE_SECRET", "")
+      if not expected or provided != expected:
+          raise HTTPException(status_code=401, detail="Unauthorized")
     revoked = await db.revoke_license(req.key.strip().upper())
     if not revoked:
         raise HTTPException(status_code=404, detail="License not found")
@@ -2309,15 +2311,27 @@ _SERVER_START = _time.time()
 
 
 @api_app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
-async def admin_web_panel(secret: str = ""):
-    """fmail.shop/admin — защищённая веб-панель управления."""
-    if not ADMIN_WEB_SECRET or secret != ADMIN_WEB_SECRET:
-        return HTMLResponse(
-            content="<html><body style='font-family:sans-serif;background:#0f0f1a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>"
-                    "<div style='text-align:center'><h2 style='color:#fc8181'>403 — Доступ запрещён</h2>"
-                    "<p style='color:#718096;margin-top:8px'>Передайте параметр <code>?secret=...</code></p></div></body></html>",
-            status_code=403,
-        )
+  async def admin_web_panel(
+      api_key: str = "",
+      secret: str = "",
+      x_admin_api_key: str = Header(default="", alias="X-Admin-Api-Key"),
+  ):
+      """fmail.shop/admin — защищённая веб-панель. Auth: ?api_key=... или X-Admin-Api-Key header."""
+      provided_key = api_key or x_admin_api_key or secret
+      expected_key = ADMIN_API_KEY or ADMIN_WEB_SECRET
+      if not expected_key or provided_key != expected_key:
+          return HTMLResponse(
+              content=(
+                  "<html><body style='font-family:sans-serif;background:#0f0f1a;color:#e2e8f0;"
+                  "display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>"
+                  "<div style='text-align:center'>"
+                  "<h2 style='color:#fc8181'>403 — Доступ запрещён</h2>"
+                  "<p style='color:#718096;margin-top:8px'>Передайте API-ключ: "
+                  "<code>?api_key=YOUR_KEY</code> или заголовок <code>X-Admin-Api-Key</code></p>"
+                  "</div></body></html>"
+              ),
+              status_code=403,
+          )
     try:
         stats = await db.get_stats()
         licenses = await db.get_all_licenses(limit=20)
