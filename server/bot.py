@@ -1216,10 +1216,10 @@ async def cb_menu_buy(query: CallbackQuery):
         price = await db.get_plan_price(plan_id)
         lines.append(f"<b>{plan['name']}</b> — <b>${price:.2f} USDT</b>\n   {plan['description']}\n")
     _prices = {}
-        for _pid in PLANS:
-            if not PLANS[_pid].get("admin_only"):
-                _prices[_pid] = await db.get_plan_price(_pid)
-        await send_or_edit(query, "\n".join(lines), reply_markup=kb_plans(prices=_prices))
+    for _pid in PLANS:
+        if not PLANS[_pid].get("admin_only"):
+            _prices[_pid] = await db.get_plan_price(_pid)
+    await send_or_edit(query, "\n".join(lines), reply_markup=kb_plans(prices=_prices))
 
 
 @dp.callback_query(F.data.startswith("buy_plan:"))
