@@ -642,6 +642,10 @@ class SendingEngine:
         recipient: Recipient,
         template: EmailTemplate,
     ) -> SendResult:
+        try:
+            import aiosmtplib as _aiosmtplib  # noqa: F401
+        except ImportError:
+            return SendResult(ok=False, error="aiosmtplib not installed; using smtplib fallback")
         msg = _build_message(account, recipient, template)
         try:
             if account.use_ssl:
