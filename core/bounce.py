@@ -142,9 +142,9 @@ def _parse_dsn_message(raw_message: bytes) -> Optional[BounceRecord]:
     else:
         emails = EMAIL_PATTERN.findall(dsn_message + status_text)
         for e in emails:
-        if "mailer-daemon" not in e.lower() and "postmaster" not in e.lower():
-            original_recipient = e
-            break
+            if "mailer-daemon" not in e.lower() and "postmaster" not in e.lower():
+                original_recipient = e
+                break
 
     if not original_recipient:
         return None
