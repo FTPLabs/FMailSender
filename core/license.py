@@ -77,7 +77,7 @@ def _get_ssl_verify() -> "bool | str":
     Default: False — сервер использует self-signed сертификат (IP-адрес, Let's Encrypt неприменим).
     Для production с CA-подписанным сертом: LICENSE_SSL_VERIFY=1 или путь к CA-bundle.
     """
-    _ssl_env = os.environ.get("LICENSE_SSL_VERIFY", "0").strip()
+    _ssl_env = os.environ.get("LICENSE_SSL_VERIFY", "1").strip()
     if _ssl_env == "1":
         return True
     if _ssl_env == "0":
