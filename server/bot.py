@@ -1457,7 +1457,7 @@ async def msg_admin_telegram_id(message: Message, state: FSMContext):
             return
     await state.update_data(telegram_id=telegram_id)
     await state.set_state(AdminFlow.issue_hwid)
-    await message.answer("💻 Отправь HWID получателя или <code>-</code> пропустить:")
+    await message.answer("💻 Отправь HWID получателя или <code>-</code> пропустить:", reply_markup=kb_back_admin())
 
 
 @dp.message(AdminFlow.issue_hwid)
@@ -1468,7 +1468,7 @@ async def msg_admin_hwid(message: Message, state: FSMContext):
     hwid = "" if raw == "-" else raw.upper()
     await state.update_data(hwid=hwid)
     await state.set_state(AdminFlow.issue_note)
-    await message.answer("📝 Добавь примечание или <code>-</code> пропустить:")
+    await message.answer("📝 Добавь примечание или <code>-</code> пропустить:", reply_markup=kb_back_admin())
 
 
 @dp.message(AdminFlow.issue_note)
@@ -1913,7 +1913,7 @@ async def msg_mod_telegram_id(message: Message, state: FSMContext):
             return
     await state.update_data(telegram_id=telegram_id)
     await state.set_state(ModeratorFlow.issue_hwid)
-    await message.answer("💻 Отправь HWID получателя или <code>-</code> пропустить:")
+    await message.answer("💻 Отправь HWID получателя или <code>-</code> пропустить:", reply_markup=kb_back_mod())
 
 
 @dp.message(ModeratorFlow.issue_hwid)
@@ -1924,7 +1924,7 @@ async def msg_mod_hwid(message: Message, state: FSMContext):
     hwid = "" if raw == "-" else raw.upper()
     await state.update_data(hwid=hwid)
     await state.set_state(ModeratorFlow.issue_note)
-    await message.answer("📝 Добавь примечание или <code>-</code> пропустить:")
+    await message.answer("📝 Добавь примечание или <code>-</code> пропустить:", reply_markup=kb_back_mod())
 
 
 @dp.message(ModeratorFlow.issue_note)
@@ -2331,107 +2331,398 @@ async def admin_web_panel(
     secret: str = "",
     x_admin_api_key: str = Header(default="", alias="X-Admin-Api-Key"),
 ):
-    """fmail.shop/admin — защищённая веб-панель. Auth: ?api_key=... или X-Admin-Api-Key header."""
+    """fmail.shop/admin — защищённая веб-панель управления."""
     provided_key = api_key or x_admin_api_key or secret
-    expected_key = ADMIN_API_KEY or ADMIN_WEB_SECRET
-    if not expected_key or provided_key != expected_key:
+    if not _verify_admin_key(provided_key):
         return HTMLResponse(
             content=(
-                "<html><body style='font-family:sans-serif;background:#0f0f1a;color:#e2e8f0;"
-                "display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>"
-                "<div style='text-align:center'>"
-                "<h2 style='color:#fc8181'>403 — Доступ запрещён</h2>"
+                "<!DOCTYPE html><html><body style='font-family:sans-serif;background:#0f0f1a;"
+                "color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>"
+                "<div style='text-align:center'><h2 style='color:#fc8181'>403 — Доступ запрещён</h2>"
                 "<p style='color:#718096;margin-top:8px'>Передайте API-ключ: "
-                "<code>?api_key=YOUR_KEY</code> или заголовок <code>X-Admin-Api-Key</code></p>"
-                "</div></body></html>"
+                "<code>?api_key=YOUR_KEY</code></p></div></body></html>"
             ),
             status_code=403,
         )
     try:
         stats = await db.get_stats()
-        licenses = await db.get_all_licenses(limit=20)
+        licenses = await db.get_all_licenses(limit=200)
         mods = await db.get_all_moderators()
         tickets = await db.get_open_tickets()
-    except Exception as _e:
+        dl_url  = await db.get_setting("download_url") or DOWNLOAD_URL
+        zip_url = await db.get_setting("zip_url") or ""
+        vt_url  = await db.get_setting("vt_url") or ""
+    except Exception:
         stats = {}; licenses = []; mods = []; tickets = []
+        dl_url = zip_url = vt_url = ""
+    AK = provided_key
 
     def _lic_rows() -> str:
         rows = []
         for lic in licenses:
             plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", "—"))
             exp = lic.get("expires_at", "")[:10]
-            hwid = lic.get("hwid") or "—"
-            status = "✅" if lic.get("is_active") else "❌"
+            sc = "ok" if lic.get("is_active") else "rev"
+            st = "✅ Активна" if lic.get("is_active") else "❌ Отозвана"
             key = lic.get("key", "—")
             uid = lic.get("telegram_id") or "—"
-            rows.append(f"<tr><td>{status}</td><td><code>{key}</code></td><td>{plan_name}</td>"
-                        f"<td>{exp}</td><td>{uid}</td><td>{hwid}</td></tr>")
-        return "".join(rows) or "<tr><td colspan='6' style='text-align:center;color:#718096'>Нет лицензий</td></tr>"
-
-    def _mod_rows() -> str:
-        rows = []
-        for m in mods:
-            rows.append(f"<tr><td><code>{m['telegram_id']}</code></td><td>{m.get('added_by') or '—'}</td></tr>")
-        return "".join(rows) or "<tr><td colspan='2' style='text-align:center;color:#718096'>Нет модераторов в БД</td></tr>"
+            hwid_v = lic.get("hwid") or "—"
+            note_v = html.escape(lic.get("note") or "")
+            hwid_disp = hwid_v[:16] + ("…" if len(str(hwid_v)) > 16 else "")
+            rows.append(
+                f"<tr class='lr'>"
+                f"<td><span class='b {sc}'>{st}</span></td>"
+                f"<td><code onclick=\"navigator.clipboard.writeText('{key}')\" title='Скопировать'>{key}</code></td>"
+                f"<td>{plan_name}</td><td>{exp}</td><td>{uid}</td>"
+                f"<td title='{hwid_v}'>{hwid_disp}</td>"
+                f"<td>{note_v[:25]}</td>"
+                f"<td><button class='bd' onclick=\"rv('{key}',this)\">Отозвать</button></td></tr>"
+            )
+        return "".join(rows) or "<tr><td colspan='8' class='em'>Нет лицензий</td></tr>"
 
     def _ticket_rows() -> str:
         rows = []
         for t in tickets:
-            tid = t.get("id"); fn = t.get("first_name", ""); un = t.get("username", "")
-            rows.append(f"<tr><td>#{tid}</td><td>{fn}</td><td>@{un}</td>"
-                        f"<td>{t.get('created_at', '')[:16].replace('T', ' ')}</td></tr>")
-        return "".join(rows) or "<tr><td colspan='4' style='text-align:center;color:#718096'>Нет открытых тикетов</td></tr>"
+            fn = html.escape(str(t.get("first_name", "")))
+            un = html.escape(str(t.get("username", "")))
+            rows.append(
+                f"<tr><td>#{t.get('id')}</td><td>{fn}</td><td>@{un}</td>"
+                f"<td>{str(t.get('created_at', ''))[:16].replace('T', ' ')}</td></tr>"
+            )
+        return "".join(rows) or "<tr><td colspan='4' class='em'>Нет тикетов</td></tr>"
 
     from datetime import datetime, timezone
     now_utc = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
-    html = f"""<!DOCTYPE html>
+    plan_opts = "".join(
+        f'<option value="{pid}">{p["name"]}</option>' for pid, p in PLANS.items()
+    )
+    n_lic = len(licenses)
+    s_active = stats.get("active", 0)
+    s_total  = stats.get("total", 0)
+    s_users  = stats.get("users", 0)
+    s_paid   = stats.get("paid", 0)
+    s_rev    = stats.get("revenue_usdt", 0.0)
+    s_tick   = stats.get("open_tickets", 0)
+    dl_url_e = html.escape(dl_url)
+    zip_url_e = html.escape(zip_url)
+    vt_url_e  = html.escape(vt_url)
+
+    admin_html = f"""<!DOCTYPE html>
 <html lang="ru"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FMail Admin Panel</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f1a;color:#e2e8f0;padding:32px 16px}}
-h1{{font-size:1.6rem;font-weight:700;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px}}
-.sub{{color:#718096;font-size:.85rem;margin-bottom:32px}}
-.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:32px}}
-.stat{{background:#1a1a2e;border:1px solid #2d2d44;border-radius:12px;padding:18px 20px}}
-.stat-n{{font-size:1.8rem;font-weight:700;color:#90cdf4}}.stat-l{{font-size:.78rem;color:#718096;margin-top:4px}}
-section{{background:#1a1a2e;border:1px solid #2d2d44;border-radius:12px;padding:20px;margin-bottom:20px}}
-h2{{font-size:1rem;font-weight:600;margin-bottom:14px;color:#a0aec0}}
-table{{width:100%;border-collapse:collapse;font-size:.82rem}}
-th{{text-align:left;padding:8px 10px;border-bottom:2px solid #2d2d44;color:#718096;font-weight:500}}
-td{{padding:7px 10px;border-bottom:1px solid #1e1e35;vertical-align:middle}}
-code{{background:#2d2d44;padding:2px 6px;border-radius:4px;font-size:.78rem}}
-.footer{{margin-top:20px;color:#4a5568;font-size:.75rem;text-align:center}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f1a;color:#e2e8f0;padding:20px 14px}}
+h1{{font-size:1.4rem;font-weight:700;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:3px}}
+.sub{{color:#718096;font-size:.8rem;margin-bottom:22px}}
+.sub a{{color:#667eea;text-decoration:none}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:22px}}
+.stat{{background:#1a1a2e;border:1px solid #2d2d44;border-radius:10px;padding:14px}}
+.stat-n{{font-size:1.6rem;font-weight:700;color:#90cdf4}}
+.stat-l{{font-size:.72rem;color:#718096;margin-top:2px}}
+section{{background:#1a1a2e;border:1px solid #2d2d44;border-radius:10px;padding:16px;margin-bottom:14px}}
+h2{{font-size:.88rem;font-weight:600;margin-bottom:12px;color:#a0aec0;text-transform:uppercase;letter-spacing:.04em}}
+table{{width:100%;border-collapse:collapse;font-size:.78rem}}
+th{{text-align:left;padding:6px 8px;border-bottom:2px solid #2d2d44;color:#718096;font-weight:500}}
+td{{padding:5px 8px;border-bottom:1px solid #1e1e35;vertical-align:middle}}
+.lr:hover td{{background:rgba(102,126,234,.04)}}
+code{{background:#2d2d44;padding:2px 4px;border-radius:3px;font-size:.72rem;cursor:pointer;white-space:nowrap}}
+code:hover{{background:#3d3d5c;color:#90cdf4}}
+.b{{padding:2px 7px;border-radius:20px;font-size:.7rem;font-weight:600;white-space:nowrap}}
+.b.ok{{background:rgba(72,187,120,.15);color:#68d391}}
+.b.rev{{background:rgba(252,129,129,.15);color:#fc8181}}
+.em{{text-align:center;color:#718096;padding:18px}}
+.form-row{{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px}}
+.field{{display:flex;flex-direction:column;gap:4px;flex:1;min-width:130px}}
+.field label{{font-size:.73rem;color:#718096}}
+input,select{{background:#0f0f1a;border:1px solid #3d3d5c;border-radius:6px;color:#e2e8f0;padding:6px 9px;font-size:.82rem;width:100%;outline:none}}
+input[type=file]{{border-style:dashed;padding:10px}}
+input:focus,select:focus{{border-color:#667eea}}
+.btn{{padding:7px 14px;border:none;border-radius:6px;font-size:.82rem;font-weight:600;cursor:pointer;transition:opacity .15s;white-space:nowrap}}
+.btn:hover{{opacity:.85}}
+.bp{{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}}
+.bd{{background:rgba(252,129,129,.15);color:#fc8181;border:1px solid rgba(252,129,129,.3);padding:3px 9px;border-radius:4px;font-size:.72rem;font-weight:500;cursor:pointer}}
+.bd:hover{{background:rgba(252,129,129,.3)}}
+.alert{{padding:9px 12px;border-radius:6px;font-size:.8rem;margin-top:8px;display:none}}
+.alert.s{{background:rgba(72,187,120,.15);border:1px solid rgba(72,187,120,.3);color:#68d391}}
+.alert.e{{background:rgba(252,129,129,.15);border:1px solid rgba(252,129,129,.3);color:#fc8181}}
+.sb{{margin-bottom:10px;max-width:380px}}
+.tabs{{display:flex;gap:5px;margin-bottom:14px;flex-wrap:wrap}}
+.tab{{padding:5px 12px;border-radius:6px;font-size:.8rem;cursor:pointer;color:#718096;border:1px solid #2d2d44}}
+.tab.on,.tab:hover{{background:#2d2d44;color:#e2e8f0}}
+.tp{{display:none}}.tp.on{{display:block}}
+footer{{margin-top:18px;color:#4a5568;font-size:.7rem;text-align:center}}
+progress{{width:100%;height:5px;border-radius:3px;margin-top:5px;accent-color:#667eea}}
+.result-box{{background:#0f0f1a;border:1px solid #2d2d44;border-radius:6px;padding:10px;font-size:.83rem;margin-top:10px;display:none}}
 </style></head><body>
 <h1>⚙️ FMail Admin Panel</h1>
-<div class="sub">Последнее обновление: {now_utc} · fmail.shop/admin</div>
-<div class="grid">
-  <div class="stat"><div class="stat-n">{stats.get("active", 0)}</div><div class="stat-l">Активных лицензий</div></div>
-  <div class="stat"><div class="stat-n">{stats.get("total", 0)}</div><div class="stat-l">Всего лицензий</div></div>
-  <div class="stat"><div class="stat-n">{stats.get("users", 0)}</div><div class="stat-l">Пользователей</div></div>
-  <div class="stat"><div class="stat-n">{stats.get("paid", 0)}</div><div class="stat-l">Оплаченных заказов</div></div>
-  <div class="stat"><div class="stat-n">${stats.get("revenue_usdt", 0.0):.2f}</div><div class="stat-l">Выручка USDT</div></div>
-  <div class="stat"><div class="stat-n">{stats.get("open_tickets", 0)}</div><div class="stat-l">Открытых тикетов</div></div>
+<div class="sub">
+  Обновлено: {now_utc} &nbsp;·&nbsp;
+  <a href="?api_key={AK}">Обновить</a> &nbsp;·&nbsp;
+  <a href="/">Статус</a>
 </div>
+
+<div class="grid">
+  <div class="stat"><div class="stat-n">{s_active}</div><div class="stat-l">Активных лицензий</div></div>
+  <div class="stat"><div class="stat-n">{s_total}</div><div class="stat-l">Всего лицензий</div></div>
+  <div class="stat"><div class="stat-n">{s_users}</div><div class="stat-l">Пользователей</div></div>
+  <div class="stat"><div class="stat-n">{s_paid}</div><div class="stat-l">Оплачено</div></div>
+  <div class="stat"><div class="stat-n">${s_rev:.2f}</div><div class="stat-l">Выручка USDT</div></div>
+  <div class="stat"><div class="stat-n">{s_tick}</div><div class="stat-l">Тикетов</div></div>
+</div>
+
+<div class="tabs">
+  <div class="tab on" onclick="tab('licenses')">📋 Лицензии ({n_lic})</div>
+  <div class="tab" onclick="tab('create')">➕ Создать ключ</div>
+  <div class="tab" onclick="tab('settings')">🔗 Ссылки</div>
+  <div class="tab" onclick="tab('upload')">📤 Загрузить файл</div>
+  <div class="tab" onclick="tab('tickets')">🎫 Тикеты ({s_tick})</div>
+</div>
+
+<!-- Лицензии -->
+<div class="tp on" id="tp-licenses">
 <section>
-  <h2>📋 Последние 20 лицензий</h2>
-  <table><thead><tr><th></th><th>Ключ</th><th>Тариф</th><th>До</th><th>TG ID</th><th>HWID</th></tr></thead>
-  <tbody>{_lic_rows()}</tbody></table>
+  <h2>📋 Лицензии</h2>
+  <div id="rv-alert" class="alert"></div>
+  <input class="sb" id="srch" placeholder="🔍 Поиск по ключу, HWID, TG ID, примечанию…" oninput="flt(this.value)">
+  <div style="overflow-x:auto">
+  <table id="lt">
+    <thead><tr><th>Статус</th><th>Ключ</th><th>Тариф</th><th>Истекает</th><th>TG ID</th><th>HWID</th><th>Примечание</th><th></th></tr></thead>
+    <tbody id="lb">{_lic_rows()}</tbody>
+  </table></div>
 </section>
+</div>
+
+<!-- Создать ключ -->
+<div class="tp" id="tp-create">
+<section>
+  <h2>➕ Создать лицензионный ключ</h2>
+  <div class="form-row">
+    <div class="field"><label>Тариф</label><select id="c-plan">{plan_opts}</select></div>
+    <div class="field"><label>Telegram ID (опц.)</label><input id="c-tg" placeholder="123456789" type="number"></div>
+    <div class="field"><label>HWID (опц.)</label><input id="c-hwid" placeholder="A1B2C3D4…" style="text-transform:uppercase"></div>
+    <div class="field"><label>Примечание</label><input id="c-note" placeholder="Для кого…"></div>
+    <button class="btn bp" onclick="crLic()">✅ Создать</button>
+  </div>
+  <div id="cr-alert" class="alert"></div>
+  <div class="result-box" id="cr-res">
+    <b>Создан ключ:</b><br>
+    <code id="cr-key" style="font-size:1rem;display:block;margin:7px 0;letter-spacing:.05em"></code>
+    <span id="cr-exp" style="color:#718096;font-size:.76rem"></span><br>
+    <button class="btn bp" style="margin-top:7px;padding:5px 10px;font-size:.78rem"
+      onclick="navigator.clipboard.writeText(document.getElementById('cr-key').innerText)">📋 Скопировать</button>
+  </div>
+</section>
+</div>
+
+<!-- Ссылки -->
+<div class="tp" id="tp-settings">
+<section>
+  <h2>🔗 Управление ссылками</h2>
+  <div class="form-row">
+    <div class="field"><label>Ссылка скачивания (.exe / .zip)</label>
+      <input id="s-dl" value="{dl_url_e}" placeholder="https://…"></div>
+    <button class="btn bp" onclick="saveSetting('download_url','s-dl','dl-a')">Сохранить</button>
+  </div>
+  <div id="dl-a" class="alert"></div>
+  <div class="form-row" style="margin-top:10px">
+    <div class="field"><label>ZIP-архив (кнопка «Скачать .zip»)</label>
+      <input id="s-zip" value="{zip_url_e}" placeholder="https://…"></div>
+    <button class="btn bp" onclick="saveSetting('zip_url','s-zip','zip-a')">Сохранить</button>
+  </div>
+  <div id="zip-a" class="alert"></div>
+  <div class="form-row" style="margin-top:10px">
+    <div class="field"><label>VirusTotal URL</label>
+      <input id="s-vt" value="{vt_url_e}" placeholder="https://www.virustotal.com/…"></div>
+    <button class="btn bp" onclick="saveSetting('vt_url','s-vt','vt-a')">Сохранить</button>
+  </div>
+  <div id="vt-a" class="alert"></div>
+</section>
+</div>
+
+<!-- Загрузить файл -->
+<div class="tp" id="tp-upload">
+<section>
+  <h2>📤 Загрузить .exe / .zip на сервер</h2>
+  <p style="color:#718096;font-size:.8rem;margin-bottom:12px">
+    Файл сохраняется в <code>downloads/</code> и доступен через
+    <code>/v1/download/filename.exe?key=KEY</code>
+  </p>
+  <div class="form-row">
+    <div class="field"><label>Файл (.exe, .zip, .msi)</label>
+      <input id="ul-f" type="file" accept=".exe,.zip,.msi"></div>
+    <button class="btn bp" onclick="ulFile()">📤 Загрузить</button>
+  </div>
+  <div id="ul-alert" class="alert"></div>
+  <progress id="ul-prog" value="0" max="100" style="display:none"></progress>
+</section>
+</div>
+
+<!-- Тикеты -->
+<div class="tp" id="tp-tickets">
 <section>
   <h2>🎫 Открытые тикеты</h2>
-  <table><thead><tr><th>#</th><th>Имя</th><th>Username</th><th>Дата</th></tr></thead>
-  <tbody>{_ticket_rows()}</tbody></table>
+  <table>
+    <thead><tr><th>#</th><th>Имя</th><th>Username</th><th>Дата</th></tr></thead>
+    <tbody>{_ticket_rows()}</tbody>
+  </table>
 </section>
-<section>
-  <h2>👮 Модераторы (БД)</h2>
-  <table><thead><tr><th>Telegram ID</th><th>Примечание</th></tr></thead>
-  <tbody>{_mod_rows()}</tbody></table>
-</section>
-<div class="footer">FMail Sender v{APP_VERSION} · Управление через Telegram бот</div>
+</div>
+
+<footer>FMail Sender v{{APP_VERSION}} · powered by fmailsender.com</footer>
+
+<script>
+const AK="{AK}",BASE=window.location.origin;
+function tab(n){{
+  document.querySelectorAll('.tab,.tp').forEach(e=>e.classList.remove('on'));
+  const t=[...document.querySelectorAll('.tab')].find(t=>t.getAttribute('onclick').includes(n));
+  if(t)t.classList.add('on');
+  const p=document.getElementById('tp-'+n);
+  if(p)p.classList.add('on');
+}}
+function showAlert(id,msg,ok){{
+  const el=document.getElementById(id);if(!el)return;
+  el.className='alert '+(ok?'s':'e');el.textContent=msg;el.style.display='block';
+  setTimeout(()=>el.style.display='none',5000);
+}}
+function flt(q){{
+  const r=document.querySelectorAll('#lb .lr'),ql=q.toLowerCase();
+  r.forEach(row=>row.style.display=(!ql||row.textContent.toLowerCase().includes(ql))?'':'none');
+}}
+async function rv(key,btn){{
+  if(!confirm('Отозвать ключ '+key+'?'))return;
+  btn.disabled=true;
+  try{{
+    const fd=new FormData();fd.append('api_key',AK);fd.append('key',key);
+    const r=await fetch(BASE+'/v1/admin/web/revoke-license',{{method:'POST',body:fd}});
+    const d=await r.json();
+    if(d.ok){{
+      const sp=btn.closest('tr').querySelector('.b');
+      sp.className='b rev';sp.textContent='❌ Отозвана';btn.remove();
+      showAlert('rv-alert','✅ Ключ '+key+' отозван',true);
+    }}else showAlert('rv-alert','❌ Не найден: '+key,false);
+  }}catch(e){{showAlert('rv-alert','❌ '+e,false);}}
+  btn.disabled=false;
+}}
+async function crLic(){{
+  const fd=new FormData();
+  fd.append('api_key',AK);
+  fd.append('plan',document.getElementById('c-plan').value);
+  fd.append('telegram_id',document.getElementById('c-tg').value||'');
+  fd.append('hwid',document.getElementById('c-hwid').value||'');
+  fd.append('note',document.getElementById('c-note').value||'');
+  try{{
+    const r=await fetch(BASE+'/v1/admin/web/create-license',{{method:'POST',body:fd}});
+    const d=await r.json();
+    if(d.ok){{
+      document.getElementById('cr-key').textContent=d.key;
+      document.getElementById('cr-exp').textContent='Истекает: '+(d.expires_at||'').slice(0,10);
+      document.getElementById('cr-res').style.display='block';
+      showAlert('cr-alert','✅ Ключ создан!',true);
+    }}else showAlert('cr-alert','❌ '+(d.detail||JSON.stringify(d)),false);
+  }}catch(e){{showAlert('cr-alert','❌ '+e,false);}}
+}}
+async function saveSetting(key,inputId,alertId){{
+  const val=document.getElementById(inputId).value;
+  const fd=new FormData();
+  fd.append('api_key',AK);fd.append('setting_key',key);fd.append('setting_value',val);
+  try{{
+    const r=await fetch(BASE+'/v1/admin/web/set-setting',{{method:'POST',body:fd}});
+    const d=await r.json();showAlert(alertId,d.ok?'✅ Сохранено':'❌ Ошибка',d.ok);
+  }}catch(e){{showAlert(alertId,'❌ '+e,false);}}
+}}
+async function ulFile(){{
+  const file=document.getElementById('ul-f').files[0];
+  if(!file){{showAlert('ul-alert','❌ Выберите файл',false);return;}}
+  const fd=new FormData();fd.append('api_key',AK);fd.append('file',file);
+  const prog=document.getElementById('ul-prog');prog.style.display='block';prog.value=25;
+  try{{
+    const r=await fetch(BASE+'/v1/admin/web/upload',{{method:'POST',body:fd}});
+    prog.value=100;const d=await r.json();
+    if(d.ok)showAlert('ul-alert','✅ Загружен: '+d.filename+' ('+Math.round(d.size/1024)+' KB)',true);
+    else showAlert('ul-alert','❌ '+(d.detail||JSON.stringify(d)),false);
+  }}catch(e){{showAlert('ul-alert','❌ '+e,false);}}
+  setTimeout(()=>{{prog.style.display='none';prog.value=0;}},2000);
+}}
+</script>
 </body></html>"""
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=admin_html)
+
+
+@api_app.post("/v1/admin/web/create-license", include_in_schema=False)
+async def web_create_license(
+    api_key: str = Form(""),
+    plan: str = Form(...),
+    telegram_id: str = Form(""),
+    hwid: str = Form(""),
+    note: str = Form(""),
+):
+    if not _verify_admin_key(api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        tg_id = int(telegram_id) if telegram_id.strip().isdigit() else 0
+        lic = await db.create_license(plan=plan, hwid=hwid.strip().upper(), telegram_id=tg_id, note=note.strip())
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"ok": True, "key": lic["key"], "expires_at": lic["expires_at"]})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@api_app.post("/v1/admin/web/revoke-license", include_in_schema=False)
+async def web_revoke_license(api_key: str = Form(""), key: str = Form(...)):
+    if not _verify_admin_key(api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    revoked = await db.revoke_license(key.strip().upper())
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"ok": revoked, "key": key.upper()})
+
+
+@api_app.post("/v1/admin/web/set-setting", include_in_schema=False)
+async def web_set_setting(
+    api_key: str = Form(""),
+    setting_key: str = Form(...),
+    setting_value: str = Form(""),
+):
+    if not _verify_admin_key(api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    allowed_settings = {"download_url", "zip_url", "vt_url"}
+    if setting_key not in allowed_settings:
+        raise HTTPException(status_code=400, detail=f"Unknown setting. Allowed: {allowed_settings}")
+    await db.set_setting(setting_key, setting_value.strip())
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"ok": True, "key": setting_key})
+
+
+@api_app.post("/v1/admin/web/upload", include_in_schema=False)
+async def web_upload_file(api_key: str = Form(""), file: UploadFile = FastAPIFile(...)):
+    if not _verify_admin_key(api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    import os as _os
+    from pathlib import Path as _Path
+    ext = _os.path.splitext(file.filename or "")[1].lower()
+    if ext not in {".exe", ".zip", ".msi"}:
+        raise HTTPException(status_code=400, detail="Allowed types: .exe, .zip, .msi")
+    safe = "".join(c for c in (file.filename or "upload") if c.isalnum() or c in "._-")
+    dl_dir = _Path("downloads"); dl_dir.mkdir(exist_ok=True)
+    dest = dl_dir / safe
+    with dest.open("wb") as fout:
+        _shutil.copyfileobj(file.file, fout)
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"ok": True, "filename": safe, "size": dest.stat().st_size})
+
+
+@api_app.get("/v1/admin/web/licenses", include_in_schema=False)
+async def web_get_licenses(api_key: str = "", limit: int = 200, search: str = ""):
+    if not _verify_admin_key(api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    from fastapi.responses import JSONResponse
+    lics = await db.get_all_licenses(limit=limit)
+    if search:
+        sl = search.lower()
+        lics = [l for l in lics if sl in (str(l.get("key","")) + str(l.get("hwid",""))
+                + str(l.get("telegram_id","")) + str(l.get("note",""))).lower()]
+    return JSONResponse({"licenses": [dict(l) for l in lics], "total": len(lics)})
 
 
 @api_app.get("/", response_class=HTMLResponse, include_in_schema=False)
