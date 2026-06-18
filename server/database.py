@@ -660,9 +660,9 @@ async def remove_moderator(telegram_id: int) -> bool:
         return cur.rowcount > 0
 
 
-async def get_all_moderators() -> list[int]:
-    """Возвращает список telegram_id всех модераторов из БД."""
+async def get_all_moderators() -> list[dict]:
+    """Возвращает модераторов из БД как list[dict] с ключами telegram_id, added_by, added_at."""
     async with _db() as db:
-        async with db.execute("SELECT telegram_id FROM moderators") as cur:
+        async with db.execute("SELECT telegram_id, added_by, added_at FROM moderators") as cur:
             rows = await cur.fetchall()
-            return [row[0] for row in rows]
+            return [{"telegram_id": row[0], "added_by": row[1], "added_at": row[2]} for row in rows]
