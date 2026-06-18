@@ -469,6 +469,11 @@ def is_admin_or_mod(user_id: int) -> bool:
     return user_id in ADMIN_IDS or user_id in _moderator_ids
 
 
+def _verify_admin_key(key: str) -> bool:
+    """Проверяет API-ключ для веб-панели администратора."""
+    return bool(ADMIN_WEB_SECRET) and key == ADMIN_WEB_SECRET
+
+
 def _get_active_license(licenses: list) -> Optional[dict]:
     now = datetime.now(timezone.utc)
     for lic in licenses:
@@ -1130,7 +1135,7 @@ async def msg_ticket_reply_admin(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("ticket_close:"))
 async def cb_ticket_close(query: CallbackQuery):
-    if not is_admin(query.from_user.id):
+    if not is_admin_or_mod(query.from_user.id):
         await query.answer("Нет доступа.", show_alert=True)
         return
     ticket_id = int(query.data.split(":", 1)[1])
@@ -2018,8 +2023,14 @@ async def cb_mod_ticket_view(query: CallbackQuery, state: FSMContext):
     for m in msgs[-10:]:
         who = "👤" if m["sender"] == "user" else "🛡"
         lines.append(f"{who} {m['text']}")
+    close_row = (
+        [[InlineKeyboardButton(text="✅ Закрыть тикет", callback_data=f"ticket_close:{ticket_id}")]]
+        if ticket.get("status") == "open"
+        else []
+    )
     rows = [
         [InlineKeyboardButton(text="✍️ Ответить", callback_data=f"mod_ticket_reply:{ticket_id}")],
+        *close_row,
         [InlineKeyboardButton(text="◀️ Назад к тикетам", callback_data="mod_tickets")],
     ]
     await send_or_edit(query, "\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
@@ -2055,14 +2066,43 @@ async def msg_mod_ticket_reply(message: Message, state: FSMContext):
     if not ticket:
         await message.answer("❌ Тикет не найден.", reply_markup=kb_moderator())
         return
-    reply_text = message.text or ""
-    await db.add_ticket_message(ticket_id, "staff", reply_text)
+    reply_text = message.text or message.caption or ""
+    file_id = ""
+    file_type = ""
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        file_type = "photo"
+    elif message.document:
+        file_id = message.document.file_id
+        file_type = "document"
+    elif message.voice:
+        file_id = message.voice.file_id
+        file_type = "voice"
+    elif message.video:
+        file_id = message.video.file_id
+        file_type = "video"
+    elif message.audio:
+        file_id = message.audio.file_id
+        file_type = "audio"
+    await db.add_ticket_message(ticket_id, message.from_user.id, "staff", reply_text, file_id, file_type)
     try:
         mod_info = f"@{message.from_user.username}" if message.from_user.username else str(message.from_user.id)
-        await bot.send_message(
-            ticket["user_id"],
-            f"📩 <b>Ответ по тикету #{ticket_id}</b>\n\n{reply_text}\n\n<i>— Поддержка ({mod_info})</i>",
-        )
+        header = f"📩 <b>Ответ по тикету #{ticket_id}</b>\n\n<i>— Поддержка ({mod_info})</i>"
+        if file_id and file_type == "photo":
+            await bot.send_photo(ticket["user_id"], file_id, caption=(f"{reply_text}\n\n{header}" if reply_text else header))
+        elif file_id and file_type == "document":
+            await bot.send_document(ticket["user_id"], file_id, caption=(f"{reply_text}\n\n{header}" if reply_text else header))
+        elif file_id and file_type == "voice":
+            await bot.send_voice(ticket["user_id"], file_id, caption=header)
+        elif file_id and file_type == "video":
+            await bot.send_video(ticket["user_id"], file_id, caption=(f"{reply_text}\n\n{header}" if reply_text else header))
+        elif file_id and file_type == "audio":
+            await bot.send_audio(ticket["user_id"], file_id, caption=(f"{reply_text}\n\n{header}" if reply_text else header))
+        else:
+            await bot.send_message(
+                ticket["user_id"],
+                f"📩 <b>Ответ по тикету #{ticket_id}</b>\n\n{reply_text}\n\n{header}",
+            )
     except Exception as _e:
         logger.warning("mod_ticket_reply: failed to notify user: %s", _e)
     await message.answer(f"✅ Ответ отправлен по тикету #{ticket_id}.", reply_markup=kb_moderator())
