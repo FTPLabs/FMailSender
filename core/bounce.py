@@ -207,7 +207,11 @@ class BounceMonitor:
         if self.blacklist_path.exists():
             try:
                 with open(self.blacklist_path, "r", encoding="utf-8") as f:
-                    return set(json.load(f))
+                    data = json.load(f)
+                if not isinstance(data, list):  # FIX БАГ-6: JSON-объект вместо массива → TypeError
+                    logger.warning("blacklist.json содержит не массив — сброс блэклиста")
+                    return set()
+                return set(data)
             except Exception:
                 pass
         return set()
@@ -285,7 +289,7 @@ class BounceMonitor:
                         _, msg_data = conn.uid("fetch", uid, "(RFC822)")
                     except Exception as reconnect_err:
                         logger.error("IMAP reconnect failed: %s", reconnect_err)
-                        break
+                        continue  # FIX БАГ-2: break прерывал обработку всех оставшихся UID
 
                 try:
                     if not msg_data or not msg_data[0]:
