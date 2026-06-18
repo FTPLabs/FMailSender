@@ -35,6 +35,9 @@ class WarmupRecord:
     is_active: bool = True
     paused_until: Optional[str] = None
 
+    def __post_init__(self):
+        self._needs_save: bool = False  # FIX: инициализация до первого вызова can_send_today
+
     @property
     def today_limit(self) -> int:
         return get_warmup_limit(self.current_day)
@@ -88,6 +91,7 @@ class WarmupRecord:
             paused_until=data.get("paused_until"),
         )
         r.daily_log = data.get("daily_log", {})
+        r._needs_save = False  # FIX: явная инициализация при загрузке из кэша
         return r
 
 
