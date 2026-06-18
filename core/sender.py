@@ -51,8 +51,48 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "bellsouth.net":     {"host": "smtp.att.yahoo.com",    "port": 465, "use_ssl": True,  "use_tls": False},
     "ameritech.net":     {"host": "smtp.att.yahoo.com",    "port": 465, "use_ssl": True,  "use_tls": False},
     "cs.com":            {"host": "smtp.cs.com",           "port": 587, "use_ssl": False, "use_tls": True},
-    "gmx.com":           {"host": "mail.gmx.com",          "port": 587, "use_ssl": False, "use_tls": True},
-    "gmx.co.uk":         {"host": "mail.gmx.com",          "port": 587, "use_ssl": False, "use_tls": True},
+    "gmx.com":           {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
+    "gmx.net":           {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
+    "gmx.de":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
+    "gmx.at":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
+    "gmx.ch":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
+    "gmx.co.uk":         {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
+    "gmx.fr":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
+    "gmx.es":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
+    "gmx.us":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
+    # Outlook / Hotmail / Live family — explicit popular TLDs as safety net
+    "outlook.com":       {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "outlook.de":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "outlook.fr":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "outlook.es":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "outlook.it":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "outlook.co.uk":     {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "outlook.jp":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "hotmail.com":       {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "hotmail.co.uk":     {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "hotmail.de":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "hotmail.fr":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "hotmail.es":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "hotmail.it":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "hotmail.ru":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "live.com":          {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "live.co.uk":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "live.de":           {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "live.fr":           {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    "live.ru":           {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
+    # Yahoo family — explicit popular TLDs as safety net
+    "yahoo.com":         {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    "yahoo.co.uk":       {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    "yahoo.de":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    "yahoo.fr":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    "yahoo.es":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    "yahoo.it":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    "yahoo.co.jp":       {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    "yahoo.ru":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    "yahoo.com.br":      {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    "yahoo.com.ar":      {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    "yahoo.com.mx":      {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    "yahoo.com.au":      {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
     "mail.ru":           {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
     "inbox.ru":          {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
     "list.ru":           {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
@@ -108,11 +148,11 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "zoho.eu":           {"host": "smtp.zoho.eu",          "port": 465, "use_ssl": True,  "use_tls": False},
     "zohomail.eu":       {"host": "smtp.zoho.eu",          "port": 465, "use_ssl": True,  "use_tls": False},
     "zoho.in":           {"host": "smtp.zoho.com",         "port": 465, "use_ssl": True,  "use_tls": False},
-    # firstmail.ltd family
-    "blackfirsta.com":   {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False},
-    "firsthidden.com":   {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False},
-    "ishowfirstmail.com":{"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False},
-    "analismail.com":    {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False},
+    # firstmail.ltd family (SMTP + IMAP via imap.firstmail.ltd:993)
+    "blackfirsta.com":   {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    "firsthidden.com":   {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    "ishowfirstmail.com":{"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    "analismail.com":    {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
 }
 
 # Pattern-based fallback: outline/hotmail/live/* → office365; yahoo.* → yahoo; gmx.* → gmx.net
@@ -184,12 +224,13 @@ class EmailTemplate:
 
 
 def get_smtp_config_for_domain(domain: str) -> Optional[dict]:
-    """BUG FIX #6: exact lookup + pattern fallback (outlook/hotmail/live/yahoo/gmx families)."""
+    """Exact lookup first, then prefix-pattern fallback for outlook/hotmail/live/yahoo/gmx families."""
     d = domain.lower().strip()
     if d in _SMTP_CONFIGS:
         return _SMTP_CONFIGS[d]
+    # Pattern fallback: prefix match (e.g. "outlook." matches "outlook.com", "outlook.de", …)
     for prefix, cfg in _SMTP_DOMAIN_PATTERNS:
-        if d == prefix.rstrip(".") or d.endswith("." + prefix.rstrip(".")):
+        if d.startswith(prefix):
             return cfg
     return None
 
