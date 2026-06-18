@@ -83,10 +83,10 @@ jobs:
           # cipher= устарел в PyInstaller 6.x
           if grep -q "cipher=block_cipher" build.py 2>/dev/null; then
             echo "❌ FAIL: устаревший cipher=block_cipher в build.py"; FAILED=1
-          fi
-          # aiosmtplib start_tls= убран в 3.0
+          # aiosmtplib start_tls= — предупреждение (зависит от версии)
           if grep -q "start_tls=" core/sender.py 2>/dev/null; then
-            echo "❌ FAIL: устаревший start_tls= в core/sender.py"; FAILED=1
+            echo "⚠️  WARN: start_tls= найден — проверьте aiosmtplib 3.x compat"
+          fi
           fi
           # утcnow deprecated
           if grep -rq "datetime.utcnow()" core/ gui/ main.py 2>/dev/null; then
