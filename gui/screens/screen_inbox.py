@@ -157,6 +157,8 @@ class _FetchWorker(QThread):
                 "date_raw":     msg.get("Date", ""),
                 "reply_to":     _decode_str(msg.get("Reply-To", msg.get("From", ""))),
                 "message_id":   msg.get("Message-ID", ""),
+                  "in_reply_to":  msg.get("In-Reply-To", ""),
+                  "references":   msg.get("References", ""),
                 "body":         _get_body(msg),
                 "_raw":         raw,
             })
