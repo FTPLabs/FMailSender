@@ -2765,14 +2765,13 @@ async def web_upload_file(api_key: str = Form(""), file: UploadFile = FastAPIFil
     def _write_sync():
         with dest.open("wb") as fout:
             while True:
-    def _write_sync():
-          with dest.open("wb") as fout:
-              while True:
-                  chunk = file.file.read(1024 * 1024)
-                  if not chunk:
-                      break
-                  fout.write(chunk)
-      await _asyncio.to_thread(_write_sync)
+                chunk = file.file.read(1024 * 1024)  # 1MB чанки — быстрая запись
+                if not chunk:
+                    break
+                fout.write(chunk)
+    await _asyncio.to_thread(_write_sync)
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"ok": True, "filename": safe, "size": dest.stat().st_size})
 
 @api_app.get("/v1/admin/web/licenses", include_in_schema=False)
 async def web_get_licenses(api_key: str = "", limit: int = 200, search: str = ""):
