@@ -42,9 +42,19 @@ class JsonFileStorage(BaseStorage):
         self._lock: asyncio.Lock = asyncio.Lock()  # FIX КРИТ-1: защита _data от race condition
 
     def _load(self) -> Dict[str, Any]:
+        """M-2 FIX: пробуем .tmp при краше во время _dump_sync."""
         if self._path.exists():
             try:
                 return json.loads(self._path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        # Восстановление из .tmp (остаётся при краше в _dump_sync)
+        _tmp = self._path.with_suffix(".tmp")
+        if _tmp.exists():
+            try:
+                _data = json.loads(_tmp.read_text(encoding="utf-8"))
+                _tmp.replace(self._path)  # восстанавливаем основной файл
+                return _data
             except Exception:
                 pass
         return {}
