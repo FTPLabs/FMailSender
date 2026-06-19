@@ -2856,6 +2856,12 @@ async def web_upload_file(api_key: str = Form(""), file: UploadFile = FastAPIFil
                 fout.write(chunk)
     await _asyncio.to_thread(_write_sync)
     from fastapi.responses import JSONResponse
+    # FIX: авто-обновляем download_url → fmail.shop после web-загрузки
+    _auto_url = f"https://fmail.shop/v1/download/{safe}"
+    try:
+        await db.set_setting("download_url", _auto_url)
+    except Exception as _ue:
+        logger.warning("Не удалось сохранить download_url: %s", _ue)
     return JSONResponse({"ok": True, "filename": safe, "size": dest.stat().st_size})
 
 @api_app.get("/v1/admin/web/licenses", include_in_schema=False)
