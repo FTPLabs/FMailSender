@@ -824,11 +824,10 @@ class AccountsScreen(QWidget):
                   save_accounts(self._accounts)
                   active_item = self.table.item(r, 7)
                   if active_item:
-                  from PyQt6.QtGui import QColor
-                  active_item.setText("✓" if ok else "✗")
-                  active_item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
-                  completed[0] += 1
-                  if completed[0] >= total:
+                      active_item.setText("✓" if ok else "✗")
+                      active_item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
+              completed[0] += 1
+              if completed[0] >= total:
                   self.test_all_btn.setEnabled(True)
                   self.test_all_btn.setText("Проверить все")
                   ok_cnt = sum(
@@ -840,6 +839,7 @@ class AccountsScreen(QWidget):
                       f"✓ {ok_cnt} рабочих | "
                       f"✗ {total - ok_cnt} с ошибками"
                   )
+
 
           w.result_ready.connect(on_result)
           self._test_workers.append(w)
