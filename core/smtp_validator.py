@@ -1,5 +1,5 @@
 """
-FMailSender SMTP Validator v2.0.0
+FMailSender SMTP Validator v2.1.0
 - FIX: Falsese typo -> False (критический баг)
 - ADD: parallel validate_all via ThreadPoolExecutor (10x быстрее)
 - ADD: validate_with_port_fallback — пробует 465/587/25/2525 автоматически
@@ -30,10 +30,7 @@ PORT_FALLBACK_CONFIGS = [
     (587,  False, True,  "STARTTLS/587"),
     (25,   False, False, "Plain/25"),
     (2525, False, True,  "STARTTLS/2525"),
-    (994,  True,  False, "SSL/994"),
-    (465,  False, True,  "STARTTLS/465"),
-    (993,  True,  False, "SSL/993"),
-    (143,  False, True,  "STARTTLS/143"),
+(465,  False, True,  "STARTTLS/465"),
 ]
 
 
