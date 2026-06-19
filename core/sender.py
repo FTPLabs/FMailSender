@@ -14,6 +14,7 @@ import re
 import smtplib
 import threading
 import time
+import socket
 import uuid
 from dataclasses import dataclass, field
 from email.mime.application import MIMEApplication
@@ -706,7 +707,9 @@ class SendingEngine:
         try:
             import aiosmtplib as _aiosmtplib  # noqa: F401
         except ImportError:
-            return SendResult(ok=False, error="aiosmtplib not installed; using smtplib fallback")
+            return await asyncio.get_running_loop().run_in_executor(
+                None, self._send_sync, account, recipient, template
+            )  # FIX C1: fallback на sync при отсутствии aiosmtplib
         msg = _build_message(account, recipient, template)
         try:
             if account.use_ssl:
