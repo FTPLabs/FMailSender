@@ -16,7 +16,6 @@ from gui.screens.screen_accounts import AccountsScreen
 from gui.screens.screen_recipients import RecipientsScreen
 from gui.screens.screen_compose import ComposeScreen
 from gui.screens.screen_sending import SendingScreen
-from gui.screens.screen_analytics import AnalyticsScreen
 from gui.screens.screen_inbox import InboxScreen
 
 
@@ -49,7 +48,6 @@ NAV_ITEMS = [
     ("recipients",  "Получатели",  "󰅹"),
     ("compose",     "Письмо",      "󰏑"),
     ("sending",     "Рассылка",    "󰑩"),
-    ("analytics",   "Аналитика",   "󰄬"),
     ("inbox",       "Входящие",    "󰇮"),
 ]
 
@@ -274,7 +272,6 @@ class MainWindow(QMainWindow):
             "recipients": RecipientsScreen,
             "compose":    ComposeScreen,
             "sending":    SendingScreen,
-            "analytics":  AnalyticsScreen,
             "inbox":      InboxScreen,
         }
         for key, cls in screens.items():
