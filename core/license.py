@@ -119,12 +119,12 @@ def _get_fernet_key() -> bytes:
             "Задайте HWID_SALT для изоляции license.dat между машинами."
         )
         # FIX КРИТ-4: используем HWID как соль вместо общего хардкода.
-      # Это изолирует license.dat между машинами даже без HWID_SALT.
-      try:
-          _hwid_for_salt = _hwid_cache or "fmail_hwid_fallback_2024"
-      except Exception:
-          _hwid_for_salt = "fmail_hwid_fallback_2024"
-      salt = _hwid_for_salt.encode("utf-8")[:32]
+        # Это изолирует license.dat между машинами даже без HWID_SALT.
+    try:
+        _hwid_for_salt = _hwid_cache or "fmail_hwid_fallback_2024"
+    except Exception:
+        _hwid_for_salt = "fmail_hwid_fallback_2024"
+    salt = _hwid_for_salt.encode("utf-8")[:32]
     key = hashlib.sha256(salt).digest()
     return base64.urlsafe_b64encode(key)
 
