@@ -96,6 +96,14 @@ def load_extra_configs() -> dict[str, dict]:
           "znajomi.pl":     {"host": "smtp.znajomi.pl",        "port": 465, "use_ssl": True,  "use_tls": False},
           "konto.pl":       {"host": "smtp.konto.pl",          "port": 465, "use_ssl": True,  "use_tls": False},
 
+
+        # ── Interia group aliases (2gb.pl shares poczta.interia.pl infrastructure)
+        "2gb.pl":         {"host": "poczta.interia.pl",      "port": 465, "use_ssl": True,  "use_tls": False},
+        "intmail.pl":     {"host": "poczta.interia.pl",      "port": 465, "use_ssl": True,  "use_tls": False},
+        "adresik.net":    {"host": "poczta.interia.pl",      "port": 465, "use_ssl": True,  "use_tls": False},
+        "vip.interia.pl": {"host": "poczta.interia.pl",      "port": 465, "use_ssl": True,  "use_tls": False},
+        "interia.com":    {"host": "poczta.interia.pl",      "port": 465, "use_ssl": True,  "use_tls": False},
+        "ogarnij.se":     {"host": "poczta.interia.pl",      "port": 465, "use_ssl": True,  "use_tls": False},
           # ── Czech / Slovak (official smtp.centrum.sk, volny.cz docs) ─────────
           "volny.cz":       {"host": "smtp.volny.cz",          "port": 465, "use_ssl": True,  "use_tls": False},
           "centrum.sk":     {"host": "smtp.centrum.sk",         "port": 465, "use_ssl": True,  "use_tls": False},
@@ -108,9 +116,9 @@ def load_extra_configs() -> dict[str, dict]:
           "portugalmail.pt":{"host": "smtp.portugalmailserver.com","port": 465,"use_ssl": True, "use_tls": False},
 
           # ── UK / Ireland (official BT, TalkTalk, Tiscali docs) ───────────────
-          "btinternet.com": {"host": "smtp.btinternet.com",     "port": 465, "use_ssl": True,  "use_tls": False},
-          "bt.com":         {"host": "smtp.btinternet.com",     "port": 465, "use_ssl": True,  "use_tls": False},
-          "btopenworld.com":{"host": "smtp.btinternet.com",     "port": 465, "use_ssl": True,  "use_tls": False},
+          "btinternet.com": {"host": "mail.btinternet.com",     "port": 465, "use_ssl": True,  "use_tls": False},
+          "bt.com":         {"host": "mail.btinternet.com",     "port": 465, "use_ssl": True,  "use_tls": False},
+          "btopenworld.com":{"host": "mail.btinternet.com",     "port": 465, "use_ssl": True,  "use_tls": False},
           "talktalk.net":   {"host": "smtp.talktalk.net",       "port": 587, "use_ssl": False, "use_tls": True},
           "tiscali.co.uk":  {"host": "smtp.tiscali.co.uk",      "port": 587, "use_ssl": False, "use_tls": True},
           "blueyonder.co.uk":{"host": "smtp.talktalk.net",      "port": 587, "use_ssl": False, "use_tls": True},
