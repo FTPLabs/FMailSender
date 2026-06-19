@@ -325,11 +325,14 @@ class BulkImportWorker(QThread):
             skipped = 0
             for i, line in enumerate(lines):
                 self.progress.emit(i + 1, total)
-                parts = line.split(":")
+                # Умное определение разделителя: поддерживаем форматы email:pass и email;pass[;alias]
+                  _sep = ";" if ";" in line and ":" not in line.split(";")[0] else ":"
+                  parts = line.split(_sep)
                 if len(parts) < 2:
                     skipped += 1
                     continue
                 email = parts[0].strip()
+                  alias = parts[2].strip() if len(parts) >= 3 and _sep == ";" else ""
                 password = ":".join(parts[1:]).strip()
                 if not email or "@" not in email:
                     skipped += 1
@@ -351,6 +354,8 @@ class BulkImportWorker(QThread):
                 acc.imap_host = cfg.get("imap_host", "")
                 acc.imap_port = cfg.get("imap_port", 993)
                 acc.imap_ssl = cfg.get("imap_ssl", True)
+                  if alias and "@" in alias:
+                      acc.reply_to = alias  # Google Workspace alias (iejesusmirey.com → buzzmaster.market)
                 self.new_accounts.append(acc)
                 self._existing.add(email.lower())
                 imported += 1
@@ -638,7 +643,7 @@ class AccountsScreen(QWidget):
 
       self.table = QTableWidget(0, 8)
       self.table.setHorizontalHeaderLabels([
-          "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Прокси 🌍", "Активен",
+          "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Прокси", "Активен",
       ])
       self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
       self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -683,6 +688,9 @@ class AccountsScreen(QWidget):
           proxy_item.setForeground(QColor("#6C8EBF" if _proxy_raw else Colors.TEXT_MUTED))
           proxy_item.setToolTip(_proxy_raw or "Прокси не назначен")
           self.table.setItem(row, 6, proxy_item)
+            # FIX: запускаем CountryWorker сразу — показываем флаг при загрузке без ожидания теста
+            if _proxy_raw:
+                QTimer.singleShot(100 + row * 50, lambda r=row, p=_proxy_raw: self._fetch_proxy_country(r, p))
           active_item = QTableWidgetItem("✓" if acc.is_active else "✗")
           active_item.setForeground(
               QColor(Colors.SUCCESS) if acc.is_active else QColor(Colors.ERROR)
@@ -754,6 +762,14 @@ class AccountsScreen(QWidget):
               item.setToolTip(msg)
           if 0 <= r < len(self._accounts):
               self._accounts[r].last_test_ok = ok
+                # FIX: автоматически деактивируем аккаунт при ошибке, активируем при успехе
+                self._accounts[r].is_active = ok
+                save_accounts(self._accounts)
+                active_item = self.table.item(r, 7)
+                if active_item:
+                    from PyQt6.QtGui import QColor
+                    active_item.setText("✓" if ok else "✗")
+                    active_item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
               # После OK — обновляем флаг страны прокси
               if ok and 0 <= r < len(self._accounts):
                   _px = self._accounts[r].proxy or ""
@@ -802,7 +818,15 @@ class AccountsScreen(QWidget):
                   item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
                   item.setToolTip(msg)
               if 0 <= r < len(self._accounts):
-                  self._accounts[r].last_test_ok = ok
+              self._accounts[r].last_test_ok = ok
+                # FIX: автоматически деактивируем аккаунт при ошибке, активируем при успехе
+                self._accounts[r].is_active = ok
+                save_accounts(self._accounts)
+                active_item = self.table.item(r, 7)
+                if active_item:
+                    from PyQt6.QtGui import QColor
+                    active_item.setText("✓" if ok else "✗")
+                    active_item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
               completed[0] += 1
               if completed[0] >= total:
                   self.test_all_btn.setEnabled(True)
