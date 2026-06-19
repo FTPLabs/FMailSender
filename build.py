@@ -1,184 +1,210 @@
 """
-Build script — генерирует PyInstaller spec и собирает EXE.
-Перед сборкой автоматически конвертирует fmail_logo.png → fmail_logo.ico через Pillow.
-Run: python build.py
-"""
-import os
-import shutil
-import subprocess
-import sys
-from pathlib import Path
+  FMailSender — Build Script v2.0
+  Генерирует PyInstaller EXE с корректным сбором PyQt6 и всех зависимостей.
+  Run: python build.py [--onedir]
+  """
+  import os
+  import shutil
+  import subprocess
+  import sys
+  from pathlib import Path
 
-if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+  if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+      try:
+          sys.stdout.reconfigure(encoding="utf-8")
+      except Exception:
+          pass
 
-ROOT = Path(__file__).parent.resolve()
-DIST = ROOT / "dist"
-BUILD = ROOT / "build"
-SPEC_FILE = ROOT / "FMailSender.spec"
-ICON_ICO = ROOT / "assets" / "images" / "fmail_logo.ico"
-ICON_PNG = ROOT / "assets" / "images" / "fmail_logo.png"
-
-
-def ensure_icon() -> None:
-    """Конвертирует PNG-логотип в ICO для EXE. Требует Pillow."""
-    if ICON_ICO.exists():
-        print(f"[icon] Используем существующий: {ICON_ICO.name}")
-        return
-    if not ICON_PNG.exists():
-        print("[icon] fmail_logo.png не найден — иконка не будет установлена")
-        return
-    try:
-        from PIL import Image
-        img = Image.open(ICON_PNG).convert("RGBA")
-        sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-        ICON_ICO.parent.mkdir(parents=True, exist_ok=True)
-        img.save(str(ICON_ICO), format="ICO", sizes=sizes)
-        print(f"[icon] Создан {ICON_ICO.name} из {ICON_PNG.name}")
-    except ImportError:
-        print("[icon] Pillow не установлен — запустите: pip install Pillow")
-    except Exception as e:
-        print(f"[icon] Ошибка конвертации: {e}")
+  ROOT = Path(__file__).parent.resolve()
+  DIST = ROOT / "dist"
+  BUILD = ROOT / "build"
+  SPEC_FILE = ROOT / "FMailSender.spec"
+  ICON_ICO = ROOT / "assets" / "images" / "fmail_logo.ico"
+  ICON_PNG = ROOT / "assets" / "images" / "fmail_logo.png"
+  ONE_DIR = "--onedir" in sys.argv  # python build.py --onedir для отладки
 
 
-def build_spec() -> str:
-    icon_line = f"icon=r'{ICON_ICO}'," if ICON_ICO.exists() else "icon=None,"
-
-    datas_parts = [
-        f"(r'{ROOT / 'core'}', 'core')",
-        f"(r'{ROOT / 'gui'}', 'gui')",
-    ]
-    for extra in ("assets", "data", "templates", "i18n"):
-        p = ROOT / extra
-        if p.exists():
-            datas_parts.append(f"(r'{p}', '{extra}')")
-
-    datas_str = ",\n        ".join(datas_parts)
-
-    lines = [
-        "# -*- mode: python ; coding: utf-8 -*-",
-        "from PyInstaller.utils.hooks import collect_submodules",
-        "",
-        "block_cipher = None",
-        "",
-        "extra_hidden = collect_submodules('PyQt6') + collect_submodules('cryptography')",
-        "",
-        "a = Analysis(",
-        f"    [r'{ROOT / 'main.py'}'],",
-        f"    pathex=[r'{ROOT}'],",
-        "    binaries=[],",
-        "    datas=[",
-        f"        {datas_str},",
-        "    ],",
-        "    hiddenimports=[",
-        "        'core', 'core.license', 'core.sender', 'core.bounce',",
-        "        'core.warmup', 'core.spam_checker', 'core.updater', 'core._version',",
-        "        'gui', 'gui.app', 'gui.theme', 'gui.icons',",
-        "        'gui.screens', 'gui.screens.screen_dashboard', 'gui.screens.screen_accounts',",
-        "        'gui.screens.screen_compose', 'gui.screens.screen_recipients',",
-        "        'gui.screens.screen_sending', 'gui.screens.screen_analytics',",
-        "        'gui.screens.screen_activation', 'gui.screens.screen_inbox',",
-        "        'gui.widgets', 'gui.widgets.animated_bg',",
-        "        'gui.dialogs', 'gui.dialogs.dialog_update',",
-        "        'ssl', '_ssl', 'hashlib', '_hashlib', '_socket',",
-        "        'aiosmtplib', 'cryptography', 'cryptography.fernet',",
-        "        'cryptography.hazmat.primitives', 'cryptography.hazmat.backends',",
-        "        'jwt', 'requests', 'urllib3', 'dns', 'dns.resolver', 'dns.exception',",
-        "        'email.mime.multipart', 'email.mime.text', 'email.mime.base',",
-        "        'PyQt6', 'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui',",
-        "        'PyQt6.QtSvg', 'PyQt6.QtSvgWidgets', 'PyQt6.QtNetwork',",
-        "        'core.ai_fixer', 'core.utils',",
-        "        'psutil', 'wmi',",
-        "    ] + extra_hidden,",
-        "    hookspath=[],",
-        "    hooksconfig={},",
-        "    runtime_hooks=[],",
-        "    excludes=[",
-        "        'tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas',",
-        "        'cv2', 'flask', 'django', 'tornado', 'IPython', 'notebook',",
-        "        'pytest', 'setuptools', 'pkg_resources', 'multiprocessing',",
-        "        'lib2to3', 'pydoc', 'doctest', 'unittest', 'xmlrpc',",
-        "        'ftplib', 'telnetlib', 'imghdr', 'sndhdr', 'aifc', 'sunau',",
-        "    ],",
-        "    noarchive=False,",
-        ")",
-        "",
-        "pyz = PYZ(a.pure, a.zipped_data)",
-        "",
-        "exe = EXE(",
-        "    pyz,",
-        "    a.scripts,",
-        "    a.binaries,",
-        "    a.zipfiles,",
-        "    a.datas,",
-        "    [],",
-        "    name='FMailSender',",
-        "    debug=False,",
-        "    bootloader_ignore_signals=False,",
-        "    strip=False,",
-        "    upx=True,",
-        "    runtime_tmpdir=None,",
-        "    console=False,",
-        "    disable_windowed_traceback=False,",
-        "    argv_emulation=False,",
-        "    target_arch=None,",
-        "    codesign_identity=None,",
-        "    entitlements_file=None,",
-        f"    {icon_line}",
-        ")",
-    ]
-    return "\n".join(lines) + "\n"
+  def ensure_icon() -> None:
+      """Конвертирует PNG → ICO. Требует Pillow (pip install Pillow)."""
+      if ICON_ICO.exists():
+          print(f"[icon] OK: {ICON_ICO.name}")
+          return
+      if not ICON_PNG.exists():
+          print("[icon] WARN: fmail_logo.png не найден — иконка пропущена")
+          return
+      try:
+          from PIL import Image
+          img = Image.open(ICON_PNG).convert("RGBA")
+          sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+          ICON_ICO.parent.mkdir(parents=True, exist_ok=True)
+          img.save(str(ICON_ICO), format="ICO", sizes=sizes)
+          print(f"[icon] Создан {ICON_ICO.name} из {ICON_PNG.name}")
+      except ImportError:
+          print("[icon] WARN: Pillow не установлен → pip install Pillow")
+      except Exception as e:
+          print(f"[icon] ERR: {e}")
 
 
-def main():
-    print("=" * 60)
-    print("  FMail Sender — Build Script")
-    print("=" * 60)
+  def build_spec() -> str:
+      icon_line = f"icon=r'{ICON_ICO}'," if ICON_ICO.exists() else "icon=None,"
 
-    for d in (DIST, BUILD):
-        if d.exists():
-            shutil.rmtree(d)
-    if SPEC_FILE.exists():
-        SPEC_FILE.unlink()
-    print("[1/5] Очистка предыдущих артефактов")
+      # Собираем datas: core, gui + любые дополнительные папки
+      datas_parts = [
+          f"(r'{ROOT / 'core'}', 'core')",
+          f"(r'{ROOT / 'gui'}', 'gui')",
+      ]
+      for extra in ("assets", "data", "templates", "i18n"):
+          p = ROOT / extra
+          if p.exists():
+              datas_parts.append(f"(r'{p}', '{extra}')")
+      datas_str = ",\n        ".join(datas_parts)
 
-    ensure_icon()
-    print("[2/5] Иконка готова")
+      mode = "COLLECT" if ONE_DIR else "# onefile"
 
-    spec_content = build_spec()
-    SPEC_FILE.write_text(spec_content, encoding="utf-8")
-    print(f"[3/5] Spec-файл: {SPEC_FILE.name}")
+      return f"""# -*- mode: python ; coding: utf-8 -*-
+  # Auto-generated by build.py — do not edit manually
 
-    cmd = [
-        sys.executable, "-m", "PyInstaller",
-        "--clean",
-        "--noconfirm",
-        "--distpath", str(DIST),
-        "--workpath", str(BUILD),
-        str(SPEC_FILE),
-    ]
-    print("[4/5] Запуск PyInstaller...")
-    result = subprocess.run(cmd, cwd=str(ROOT))
-    if result.returncode != 0:
-        print("PyInstaller завершился с ошибкой!")
-        sys.exit(1)
+  block_cipher = None
 
-    exe = DIST / "FMailSender.exe"
-    if not exe.exists():
-        print(".exe не найден после сборки!")
-        sys.exit(1)
+  a = Analysis(
+      [r'{ROOT / 'main.py'}'],
+      pathex=[r'{ROOT}'],
+      binaries=[],
+      datas=[
+          {datas_str},
+      ],
+      hiddenimports=[
+          'core', 'core.license', 'core.sender', 'core.bounce', 'core.html_generator',
+          'core.warmup', 'core.spam_checker', 'core.updater', 'core._version',
+          'core.ai_fixer', 'core.utils', 'core.reply_monitor', 'core.smtp_validator',
+          'core.smtp_configs_extra',
+          'gui', 'gui.app', 'gui.theme', 'gui.icons',
+          'gui.screens', 'gui.screens.screen_dashboard', 'gui.screens.screen_accounts',
+          'gui.screens.screen_compose', 'gui.screens.screen_recipients',
+          'gui.screens.screen_sending', 'gui.screens.screen_analytics',
+          'gui.screens.screen_activation', 'gui.screens.screen_inbox',
+          'gui.widgets', 'gui.widgets.animated_bg',
+          'gui.dialogs', 'gui.dialogs.dialog_update',
+          'ssl', '_ssl', 'hashlib', '_hashlib', '_socket',
+          'aiosmtplib', 'cryptography', 'cryptography.fernet',
+          'cryptography.hazmat.primitives', 'cryptography.hazmat.backends',
+          'jwt', 'requests', 'urllib3', 'certifi',
+          'dns', 'dns.resolver', 'dns.exception', 'dns.rdatatype',
+          'concurrent.futures', 'threading', 'asyncio',
+          'email.mime.multipart', 'email.mime.text', 'email.mime.base',
+          'email.mime.application',
+          'PyQt6', 'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui',
+          'PyQt6.QtSvg', 'PyQt6.QtSvgWidgets', 'PyQt6.QtNetwork',
+          'PyQt6.QtWebEngineWidgets', 'PyQt6.QtWebEngineCore',
+          'psutil', 'wmi', 'win32api', 'win32con',
+          'openpyxl', 'reportlab',
+      ],
+      # ВАЖНО: collect_all PyQt6 необходим — PyInstaller часто пропускает плагины Qt
+      collect_all=['PyQt6', 'PyQt6.Qt6'],
+      hookspath=[],
+      hooksconfig={{}},
+      runtime_hooks=[],
+      excludes=[
+          'tkinter', 'matplotlib', 'numpy', 'scipy', 'pandas',
+          'cv2', 'flask', 'django', 'tornado', 'IPython', 'notebook',
+          'pytest', 'setuptools', 'lib2to3', 'doctest', 'unittest',
+          'xmlrpc', 'ftplib', 'telnetlib', 'imghdr', 'sndhdr',
+      ],
+      noarchive=False,
+  )
 
-    size_mb = exe.stat().st_size / 1024 / 1024
-    print(f"[5/5] Готово: {exe.name} ({size_mb:.1f} MB)")
+  pyz = PYZ(a.pure, a.zipped_data)
 
-    if SPEC_FILE.exists():
-        SPEC_FILE.unlink()
+  exe = EXE(
+      pyz,
+      a.scripts,
+      a.binaries,
+      a.zipfiles,
+      a.datas,
+      [],
+      name='FMailSender',
+      debug=False,
+      bootloader_ignore_signals=False,
+      strip=False,
+      upx=True,
+      upx_exclude=['vcruntime140.dll', 'python*.dll'],
+      runtime_tmpdir=None,
+      console=False,
+      disable_windowed_traceback=False,
+      argv_emulation=False,
+      target_arch=None,
+      codesign_identity=None,
+      entitlements_file=None,
+      {icon_line}
+      version_file=None,
+  )
+  """
 
-    print("\n Сборка завершена успешно!")
+
+  def main():
+      print("=" * 60)
+      print("  FMailSender Build Script v2.0")
+      print(f"  Mode: {'--onedir (debug)' if ONE_DIR else '--onefile (release)'}")
+      print("=" * 60)
+
+      # 1. Проверка зависимостей
+      missing = []
+      for pkg in ("PyInstaller", "PyQt6", "cryptography", "jwt", "aiosmtplib"):
+          try:
+              __import__(pkg.replace("-", "_").split(".")[0])
+          except ImportError:
+              missing.append(pkg)
+      if missing:
+          print(f"[FATAL] Не установлены пакеты: {', '.join(missing)}")
+          print("        Запусти: pip install -r requirements.txt")
+          sys.exit(1)
+      print("[1/5] Зависимости: OK")
+
+      # 2. Очистка
+      for d in (DIST, BUILD):
+          if d.exists():
+              shutil.rmtree(d)
+      if SPEC_FILE.exists():
+          SPEC_FILE.unlink()
+      print("[2/5] Очистка: OK")
+
+      # 3. Иконка
+      ensure_icon()
+      print("[3/5] Иконка: OK")
+
+      # 4. Spec-файл
+      spec_content = build_spec()
+      SPEC_FILE.write_text(spec_content, encoding="utf-8")
+      print(f"[4/5] Spec-файл создан: {SPEC_FILE.name}")
+
+      # 5. PyInstaller
+      cmd = [
+          sys.executable, "-m", "PyInstaller",
+          "--clean",
+          "--noconfirm",
+          "--distpath", str(DIST),
+          "--workpath", str(BUILD),
+          str(SPEC_FILE),
+      ]
+      print("[5/5] PyInstaller запущен...")
+      result = subprocess.run(cmd, cwd=str(ROOT))
+      if result.returncode != 0:
+          print("[FATAL] PyInstaller завершился с ошибкой!")
+          sys.exit(1)
+
+      exe = DIST / "FMailSender.exe"
+      if not exe.exists():
+          print("[FATAL] .exe не найден после сборки!")
+          sys.exit(1)
+
+      size_mb = exe.stat().st_size / 1024 / 1024
+      print(f"\n✅ Готово: {exe} ({size_mb:.1f} MB)")
+      if SPEC_FILE.exists():
+          SPEC_FILE.unlink()
+
+      print("\n=== Build complete! ===")
 
 
-if __name__ == "__main__":
-    main()
+  if __name__ == "__main__":
+      main()
+  
