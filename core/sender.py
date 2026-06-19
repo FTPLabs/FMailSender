@@ -758,13 +758,13 @@ class SendingEngine:
                     use_tls=True, timeout=30,
                 )
             else:
-                # STARTTLS (порт 587): start_tls=True передаётся в конструктор.
-                # FIX: ручной starttls() после connect() в aiosmtplib 3.x вызывает
-                # "Connection already using TLS" — библиотека сама поднимает TLS
-                # при connect() когда сервер объявил STARTTLS в EHLO.
+                # STARTTLS (порт 587): start_tls=False ОБЯЗАТЕЛЕН — aiosmtplib по умолчанию
+                # (start_tls=None) АВТОМАТИЧЕСКИ делает STARTTLS при connect() если сервер
+                # его анонсирует в EHLO. Явный starttls() ниже дублировал → "Connection already using TLS"
+                # ФИКС v2.9.4: start_tls=False в конструкторе, starttls() вручную ниже
                 smtp = aiosmtplib.SMTP(
                     hostname=account.host, port=account.port,
-                    use_tls=False, timeout=30,
+                    use_tls=False, start_tls=False, timeout=30,
                 )
             await smtp.connect()
             try:
