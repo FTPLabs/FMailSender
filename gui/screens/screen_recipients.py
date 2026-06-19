@@ -164,7 +164,6 @@ class RecipientsScreen(QWidget):
         self.total_label = _stat_label("Всего: 0")
         self.valid_label = _stat_label("Валидных: 0", Colors.SUCCESS)
         self.invalid_label = _stat_label("Невалидных: 0", Colors.ERROR)
-        self.unsub_label = _stat_label("Отписавшихся: 0", Colors.WARNING)
         self.dupes_label = _stat_label("Дубликатов: 0", Colors.TEXT_MUTED)
 
         for lbl in [self.total_label, self.valid_label, self.invalid_label,
@@ -248,10 +247,6 @@ class RecipientsScreen(QWidget):
         export_btn = QPushButton("Экспорт в CSV")
         export_btn.clicked.connect(self._export_csv)
         bottom_row.addWidget(export_btn)
-
-        manage_unsub_btn = QPushButton("Управление отписками")
-        manage_unsub_btn.clicked.connect(self._manage_unsubscribe)
-        bottom_row.addWidget(manage_unsub_btn)
 
         bottom_row.addStretch()
 
@@ -707,15 +702,10 @@ class RecipientsScreen(QWidget):
 
         valid_count = 0
         invalid_count = 0
-        unsub_count = 0
 
         for row, r in enumerate(self._recipients):
             # Статистика считается по всему списку
             is_valid = validate_email_format(r.email)
-            is_unsub = r.email.lower() in self._unsubscribe
-
-            if is_unsub:
-                unsub_count += 1
             elif is_valid:
                 valid_count += 1
             else:
@@ -730,200 +720,3 @@ class RecipientsScreen(QWidget):
             self.table.setItem(row, 2, QTableWidgetItem(r.first_name))
             self.table.setItem(row, 3, QTableWidgetItem(r.last_name))
             self.table.setItem(row, 4, QTableWidgetItem(r.company))
-
-            if is_unsub:
-                status = "Отписался"
-                color = Colors.WARNING
-            elif is_valid:
-                status = "✓ Валидный"
-                color = Colors.SUCCESS
-            else:
-                status = "✗ Невалидный"
-                color = Colors.ERROR
-
-            status_item = QTableWidgetItem(status)
-            status_item.setForeground(QColor(color))
-            self.table.setItem(row, 5, status_item)
-
-            del_btn = QPushButton("✕")
-            del_btn.setObjectName("btn_icon")
-            del_btn.setFixedSize(28, 28)
-            del_btn.clicked.connect(lambda _, idx=row: self._delete_recipient(idx))
-            self.table.setCellWidget(row, 6, del_btn)
-            self.table.setRowHeight(row, 40)
-
-        self.table.blockSignals(False)
-        self.table.setUpdatesEnabled(True)
-
-        # Показываем empty state если нет данных
-        if hasattr(self, '_table_stack'):
-            self._table_stack.setCurrentIndex(0 if display_count > 0 else 1)
-
-        self.total_label.setText(f"Всего: {total}" + (f" (показано {_TABLE_PAGE})" if total > _TABLE_PAGE else ""))
-        self.valid_label.setText(f"Валидных: {valid_count}")
-        self.invalid_label.setText(f"Невалидных: {invalid_count}")
-        self.unsub_label.setText(f"Отписавшихся: {unsub_count}")
-        self.use_list_btn.setEnabled(valid_count > 0)
-
-    def _filter_table(self):
-        """Фильтрует строки таблицы."""
-        search = self.search_input.text().lower()
-        filter_mode = self.filter_combo.currentText()
-
-        for row in range(self.table.rowCount()):
-            email_item = self.table.item(row, 1)
-            status_item = self.table.item(row, 5)
-            if not email_item:
-                continue
-
-            email = email_item.text().lower()
-            name = (self.table.item(row, 2) or QTableWidgetItem("")).text().lower()
-            company = (self.table.item(row, 4) or QTableWidgetItem("")).text().lower()
-            status = (status_item or QTableWidgetItem("")).text()
-
-            match_search = not search or search in email or search in name or search in company
-            match_filter = (
-                filter_mode == "Все" or
-                (filter_mode == "Валидные" and "Валидный" in status) or
-                (filter_mode == "Невалидные" and "Невалидный" in status) or
-                (filter_mode == "Отписавшиеся" and "Отписался" in status)
-            )
-            self.table.setRowHidden(row, not (match_search and match_filter))
-
-    def _deduplicate(self):
-        before = len(self._recipients)
-        seen = set()
-        unique = []
-        for r in self._recipients:
-            key = r.email.lower()
-            if key not in seen:
-                seen.add(key)
-                unique.append(r)
-        self._recipients = unique
-        removed = before - len(self._recipients)
-        self._refresh_table()
-        self.dupes_label.setText(f"Удалено дубликатов: {removed}")
-        if removed > 0:
-            QMessageBox.information(self, "Дедупликация", f"Удалено дубликатов: {removed}")
-
-    def _delete_recipient(self, row: int):
-        if 0 <= row < len(self._recipients):
-            self._recipients.pop(row)
-            self._refresh_table()
-
-    def _add_manual(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Добавить получателя")
-        layout = QFormLayout(dialog)
-        email_input = QLineEdit()
-        first_input = QLineEdit()
-        last_input = QLineEdit()
-        company_input = QLineEdit()
-        layout.addRow("Email *:", email_input)
-        layout.addRow("Имя:", first_input)
-        layout.addRow("Фамилия:", last_input)
-        layout.addRow("Компания:", company_input)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addRow(buttons)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            email = email_input.text().strip()
-            if email:
-                r = Recipient(
-                    email=email,
-                    first_name=first_input.text().strip(),
-                    last_name=last_input.text().strip(),
-                    company=company_input.text().strip(),
-                )
-                self._recipients.append(r)
-                self._refresh_table()
-
-    def _manage_unsubscribe(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Список отписавшихся")
-        dialog.setMinimumSize(400, 400)
-        layout = QVBoxLayout(dialog)
-
-        info = QLabel(f"Всего отписавшихся: {len(self._unsubscribe)}")
-        layout.addWidget(info)
-
-        text = QTextEdit()
-        text.setPlainText("\n".join(sorted(self._unsubscribe)))
-        text.setPlaceholderText("По одному email на строку")
-        layout.addWidget(text)
-
-        save_btn = QPushButton("Сохранить")
-        save_btn.setObjectName("btn_primary")
-        layout.addWidget(save_btn)
-
-        def save():
-            lines = [l.strip() for l in text.toPlainText().splitlines() if l.strip()]
-            self._unsubscribe = set(lines)
-            _save_unsubscribe(self._unsubscribe)
-            info.setText(f"Всего отписавшихся: {len(self._unsubscribe)}")
-            self._refresh_table()
-
-        save_btn.clicked.connect(save)
-        dialog.exec()
-
-    def _export_csv(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Экспорт в CSV", "recipients.csv", "CSV files (*.csv)"
-        )
-        if not path:
-            return
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["email", "first_name", "last_name", "company",
-                             "custom_1", "custom_2", "custom_3"])
-            for r in self._recipients:
-                writer.writerow([r.email, r.first_name, r.last_name, r.company,
-                                 r.custom_1, r.custom_2, r.custom_3])
-        QMessageBox.information(self, "Экспорт", f"Сохранено: {path}")
-
-    def _emit_list(self):
-        """Отправляет валидных получателей (без отписок) в следующий экран."""
-        valid = [
-            r for r in self._recipients
-            if validate_email_format(r.email) and r.email.lower() not in self._unsubscribe
-        ]
-        self.list_ready.emit(valid)
-
-    def get_recipients(self) -> List[Recipient]:
-        return [
-            r for r in self._recipients
-            if validate_email_format(r.email) and r.email.lower() not in self._unsubscribe
-        ]
-
-
-    def _delete_selected(self):
-        """Удаляет выбранные в таблице строки из списка получателей."""
-        rows = sorted(set(idx.row() for idx in self.table.selectedIndexes()), reverse=True)
-        visible_rows = [r for r in rows if not self.table.isRowHidden(r)]
-        if not visible_rows:
-            QMessageBox.information(self, "Нет выделения", "Выделите строки для удаления.")
-            return
-        if QMessageBox.question(
-            self, "Удалить", f"Удалить {len(visible_rows)} получателя(ей)?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        ) != QMessageBox.StandardButton.Yes:
-            return
-        emails_to_remove = set()
-        for row in visible_rows:
-            item = self.table.item(row, 1)  # column 1 = Email
-            if item:
-                emails_to_remove.add(item.text().lower())
-        self._recipients = [r for r in self._recipients if r.email.lower() not in emails_to_remove]
-        self._refresh_table()
-        self._emit_list()
-
-
-def _stat_label(text: str, color: str = Colors.TEXT_SECONDARY) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet(f"color: {color}; font-size: 12px;")
-    lbl.setObjectName("card")
-    lbl.setContentsMargins(8, 4, 8, 4)
-    return lbl
