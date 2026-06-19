@@ -777,7 +777,7 @@ async def cb_cabinet(query: CallbackQuery):
     await send_or_edit(query, "\n".join(lines), reply_markup=kb_cabinet)
 
 
-  # ─── Скачать приложение ──────────────────────────────────────────────────────
+# ─── Скачать приложение ──────────────────────────────────────────────────────
 
 @dp.callback_query(F.data == "menu_download")
 async def cb_menu_download(query: CallbackQuery):
@@ -836,68 +836,68 @@ async def cb_menu_download(query: CallbackQuery):
 
 
 
-  # ─── Сброс HWID (1 раз в 30 дней) ───────────────────────────────────────────
+# ─── Сброс HWID (1 раз в 30 дней) ───────────────────────────────────────────
 
-  @dp.callback_query(F.data == "cabinet_reset_hwid")
-  async def cb_cabinet_reset_hwid(query: CallbackQuery):
-      """FIX НОВЫЙ: показывает информацию о сбросе HWID и запрашивает подтверждение."""
-      user_id = query.from_user.id
-      try:
-          reset_info = await db.get_hwid_reset_info(user_id)
-      except Exception as e:
-          logger.error("get_hwid_reset_info error: %s", e)
-          await query.answer("⚠️ Ошибка БД. Попробуй позже.", show_alert=True)
-          return
+@dp.callback_query(F.data == "cabinet_reset_hwid")
+async def cb_cabinet_reset_hwid(query: CallbackQuery):
+    """FIX НОВЫЙ: показывает информацию о сбросе HWID и запрашивает подтверждение."""
+    user_id = query.from_user.id
+    try:
+        reset_info = await db.get_hwid_reset_info(user_id)
+    except Exception as e:
+        logger.error("get_hwid_reset_info error: %s", e)
+        await query.answer("⚠️ Ошибка БД. Попробуй позже.", show_alert=True)
+        return
 
-      if not reset_info.get("can_reset"):
-          days_left = reset_info.get("days_left", 0)
-          await query.answer(
-              f"❌ Сброс HWID доступен 1 раз в 30 дней.\nСледующий сброс через {days_left} дн.",
-              show_alert=True,
-          )
-          return
+    if not reset_info.get("can_reset"):
+        days_left = reset_info.get("days_left", 0)
+        await query.answer(
+            f"❌ Сброс HWID доступен 1 раз в 30 дней.\nСледующий сброс через {days_left} дн.",
+            show_alert=True,
+        )
+        return
 
-      kb_confirm = InlineKeyboardMarkup(inline_keyboard=[
-          [InlineKeyboardButton(text="✅ Да, сбросить HWID", callback_data="confirm_reset_hwid")],
-          [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_cabinet")],
-      ])
-      await send_or_edit(
-          query,
-          "🔄 <b>Сброс HWID</b>\n\n"
-          "После сброса лицензия <b>отвяжется от текущего компьютера</b>.\n"
-          "При следующем запуске FMailSender HWID привяжется автоматически.\n\n"
-          "⏰ Это действие доступно <b>1 раз в 30 дней</b>.\n\n"
-          "Подтвердить сброс?",
-          reply_markup=kb_confirm,
-      )
+    kb_confirm = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, сбросить HWID", callback_data="confirm_reset_hwid")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_cabinet")],
+    ])
+    await send_or_edit(
+        query,
+        "🔄 <b>Сброс HWID</b>\n\n"
+        "После сброса лицензия <b>отвяжется от текущего компьютера</b>.\n"
+        "При следующем запуске FMailSender HWID привяжется автоматически.\n\n"
+        "⏰ Это действие доступно <b>1 раз в 30 дней</b>.\n\n"
+        "Подтвердить сброс?",
+        reply_markup=kb_confirm,
+    )
 
 
-  @dp.callback_query(F.data == "confirm_reset_hwid")
-  async def cb_confirm_reset_hwid(query: CallbackQuery):
-      """FIX НОВЫЙ: выполняет сброс HWID после подтверждения."""
-      user_id = query.from_user.id
-      try:
-          success = await db.reset_user_hwid(user_id)
-      except Exception as e:
-          logger.error("reset_user_hwid error for %d: %s", user_id, e)
-          await query.answer("⚠️ Ошибка при сбросе. Попробуй позже.", show_alert=True)
-          return
+@dp.callback_query(F.data == "confirm_reset_hwid")
+async def cb_confirm_reset_hwid(query: CallbackQuery):
+    """FIX НОВЫЙ: выполняет сброс HWID после подтверждения."""
+    user_id = query.from_user.id
+    try:
+        success = await db.reset_user_hwid(user_id)
+    except Exception as e:
+        logger.error("reset_user_hwid error for %d: %s", user_id, e)
+        await query.answer("⚠️ Ошибка при сбросе. Попробуй позже.", show_alert=True)
+        return
 
-      if not success:
-          await query.answer("❌ Сброс HWID ещё не доступен (прошло менее 30 дней).", show_alert=True)
-          return
+    if not success:
+        await query.answer("❌ Сброс HWID ещё не доступен (прошло менее 30 дней).", show_alert=True)
+        return
 
-      await send_or_edit(
-          query,
-          "✅ <b>HWID успешно сброшен!</b>\n\n"
-          "Лицензия отвязана от старого компьютера.\n"
-          "При следующем запуске FMailSender HWID привяжется автоматически.\n\n"
-          "⏰ Следующий сброс будет доступен через <b>30 дней</b>.",
-          reply_markup=kb_back_main(),
-      )
-      logger.info("User %d successfully reset HWID", user_id)
+    await send_or_edit(
+        query,
+        "✅ <b>HWID успешно сброшен!</b>\n\n"
+        "Лицензия отвязана от старого компьютера.\n"
+        "При следующем запуске FMailSender HWID привяжется автоматически.\n\n"
+        "⏰ Следующий сброс будет доступен через <b>30 дней</b>.",
+        reply_markup=kb_back_main(),
+    )
+    logger.info("User %d successfully reset HWID", user_id)
 
-  # ─── Юридические документы ───────────────────────────────────────────────────
+# ─── Юридические документы ───────────────────────────────────────────────────
 
 _PRIVACY_TEXT = """📜 <b>ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ</b>
 <i>FMailSender · Актуально с июня 2026</i>
