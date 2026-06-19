@@ -1,5 +1,15 @@
 # Changelog
 
+    ## [3.5.2] - 2026-06-19
+
+    ### Fixed
+    - **F1 SMTP портыport**: `blackfirsta.com / firsthidden.com / ishowfirstmail.com / analismail.com` — переключены с port 25 → **465+SSL** (port 25 блокируется ISP/VPN/sandbox)
+    - **F2 Новые домены**: добавлены `iejesusmirey.com` (G Suite → smtp.gmail.com:465) и `buzzmaster.market`
+    - **F3 Мульти-формат импорта**: поддержка файлов с разделителем `;` (формат `email;пароль;псевдоним` — iejesusmirey.com)
+    - **F4 Авто-деактивация аккаунта**: при неудачном SMTP-тесте `is_active` автоматически ставится `False`; при успехе — `True`; статус сохраняется в базу сразу
+    - **F5 Флаг прокси при загрузке**: CountryWorker запускается при открытии таблицы аккаунтов — не нужно ждать SMTP-теста; убран ненужный 🌍 из заголовка колонки
+    - **F6 URL скачивания**: при загрузке `.exe` через web-панель (/admin) `download_url` автоматически ставится на `fmail.shop`, а не GitHub
+
   ## [3.5.1] - 2025-06-19
 
   ### Added
