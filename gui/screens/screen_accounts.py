@@ -929,12 +929,12 @@ class AccountsScreen(QWidget):
       # Не держим ссылку — QThread удалится сам после finished
 
   def _test_all(self) -> None:
-        if not self._accounts:
-            return
-        self._test_cancel_event.clear()
-        self.cancel_test_btn.setEnabled(True)
-        self.test_all_btn.setEnabled(False)
-        self.test_all_btn.setText("\u23f3 Проверяю...")
+      if not self._accounts:
+          return
+      self._test_cancel_event.clear()
+      self.cancel_test_btn.setEnabled(True)
+      self.test_all_btn.setEnabled(False)
+      self.test_all_btn.setText("\u23f3 Проверяю...")
       for row in range(self.table.rowCount()):
           item = self.table.item(row, 5)
           if item:
