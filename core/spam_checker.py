@@ -321,7 +321,15 @@ class SpamChecker:
         else:
             result.passed.append("MX запись найдена")
         if status.spf_valid:
-            result.passed.append("SPF запись найдена")
+            spf_txt = getattr(status, "spf", "") or ""
+            if "-all" in spf_txt and "ip4:" not in spf_txt and "include:" not in spf_txt:
+                # SPF v=spf1 -all → hard fail: no server is authorized
+                result.score += 20
+                result.issues.append(
+                    "SPF -all: домен явно запрещает отправку с любого сервера"
+                )
+            else:
+                result.passed.append("SPF запись найдена")
         else:
             result.warnings.append("SPF запись не найдена")
             result.score += 5
