@@ -255,21 +255,21 @@ async def reset_user_hwid(telegram_id: int) -> bool:
   return True
 
 async def init_db() -> None:
-# FIX БАГ-7: исправлены отступы (было 2 пробела, PEP 8 требует 4)
-# PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL
-# уже применяются в _db() context manager — не дублируем.
-async with _db() as db:
-    # FIX: executescript() auto-commits — заменён на отдельные execute() для корректной транзакции
-    for _stmt in [s.strip() for s in CREATE_SQL.split(";") if s.strip()]:
-        await db.execute(_stmt)
-    for plan_id, plan in PLANS.items():
-        await db.execute(
-            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-            (f"price_{plan_id}", str(plan["price_usdt"])),
-        )
-    await db.commit()
-await _migrate_db()
-logger.info("Database initialized: %s", DB_PATH)
+  # FIX БАГ-7: исправлены отступы (было 2 пробела, PEP 8 требует 4)
+  # PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL
+  # уже применяются в _db() context manager — не дублируем.
+  async with _db() as db:
+      # FIX: executescript() auto-commits — заменён на отдельные execute() для корректной транзакции
+      for _stmt in [s.strip() for s in CREATE_SQL.split(";") if s.strip()]:
+          await db.execute(_stmt)
+      for plan_id, plan in PLANS.items():
+          await db.execute(
+              "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+              (f"price_{plan_id}", str(plan["price_usdt"])),
+          )
+      await db.commit()
+  await _migrate_db()
+  logger.info("Database initialized: %s", DB_PATH)
 
 
 async def upsert_user(telegram_id: int, username: str, first_name: str) -> None:
