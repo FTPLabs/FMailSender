@@ -1,5 +1,6 @@
 """
-FMailSender Duplicate Detector — fast deduplication for email/recipient lists.
+FMailSender Duplicate Detector v1.1.0 — fast deduplication for email/recipient lists.
+FIX v1.1.0: добавлены outlook.co.uk/jp, live.ru, hotmail.ru/es/it, internet.ru, ro.ru в alias-группы.
 
 Features:
 - Case-insensitive deduplication (alice@EXAMPLE.COM == alice@example.com)
@@ -20,11 +21,12 @@ _DOMAIN_ALIAS_GROUPS: list[FrozenSet[str]] = [
     frozenset({"hotmail.com", "hotmail.co.uk", "hotmail.fr", "hotmail.de",
                "hotmail.ru", "hotmail.es", "hotmail.it", "msn.com"}),
     frozenset({"outlook.com", "outlook.fr", "outlook.de", "outlook.es",
-               "outlook.it", "outlook.ru", "live.com", "live.co.uk",
-               "live.fr", "live.de", "windowslive.com"}),
+               "outlook.it", "outlook.ru", "outlook.co.uk", "outlook.jp",
+               "live.com", "live.co.uk", "live.fr", "live.de", "live.ru",
+               "hotmail.ru", "hotmail.es", "hotmail.it", "windowslive.com"}),
     frozenset({"yandex.ru", "yandex.com", "ya.ru", "yandex.kz",
                "yandex.by", "yandex.ua"}),
-    frozenset({"mail.ru", "bk.ru", "list.ru", "inbox.ru"}),
+    frozenset({"mail.ru", "bk.ru", "list.ru", "inbox.ru", "internet.ru", "ro.ru"}),
     frozenset({"protonmail.com", "proton.me", "protonmail.ch", "pm.me"}),
     frozenset({"icloud.com", "me.com", "mac.com"}),
 ]
