@@ -155,7 +155,7 @@ jobs:
         run: |
           $tag = if ("${{ github.event.inputs.tag_name }}" -ne "") { "${{ github.event.inputs.tag_name }}" } else { "${{ github.ref_name }}" }
           Copy-Item "dist\FMailSender.exe" "dist\FMailSender_${tag}.exe"
-          $size = [math]::Round((Get-Item "dist\FMailSender.exe").Length / 1MB, 1)
+          $size = [math]::Round((Get-Item -LiteralPath "dist\FMailSender.exe" | Select-Object -First 1).Length / 1048576, 1)
           Write-Host "Built: FMailSender_${tag}.exe ($size MB)"
 
       - name: Generate patch manifest
