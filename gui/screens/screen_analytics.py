@@ -239,21 +239,16 @@ class AnalyticsScreen(QWidget):
         results = self._current_results
         total = len(results)
         success = sum(1 for r in results if r.success)
-        errors = total - success
 
-        self.card_sent.set_value(str(total))
-        pct_delivered = f"{int(success/total*100)}%" if total > 0 else "0%"
+        self.card_sent.set_value(str(total) if total > 0 else "0")
+        pct_delivered = f"{int(success/total*100)}%" if total > 0 else "—"
         self.card_delivered.set_value(pct_delivered)
 
-        # Opens и clicks — из tracking данных
-        opens = len(self._data.get("opens", {}))
-        clicks = sum(len(v) for v in self._data.get("clicks", {}).values())
-        bounces = len(self._data.get("bounces", []))
-
-        open_rate = f"{int(opens/total*100)}%" if total > 0 else "0%"
-        click_rate = f"{int(clicks/total*100)}%" if total > 0 else "0%"
-        self.card_opens.set_value(open_rate)
-        self.card_clicks.set_value(click_rate)
+        # Opens и clicks требуют внешний tracking-pixel сервер — N/A
+        self.card_opens.set_value("N/A")
+        self.card_opens.setToolTip("Требуется tracking-pixel сервер. Открытия не отслеживаются.")
+        self.card_clicks.set_value("N/A")
+        self.card_clicks.setToolTip("Требуется перезапись ссылок. Клики не отслеживаются.")
 
 
     def _save_campaign(self, results: List[SendResult]) -> None:

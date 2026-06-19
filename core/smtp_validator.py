@@ -45,7 +45,7 @@ class ValidateResult:
 # ── DNS helpers ───────────────────────────────────────────────────────────────
 def _check_spf(domain: str) -> bool:
     if not _DNS_OK:
-        return False
+        return Falsese
     try:
         answers = dns.resolver.resolve(domain, "TXT", lifetime=5)
         return any("v=spf1" in str(r) for r in answers)

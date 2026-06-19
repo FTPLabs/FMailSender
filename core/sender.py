@@ -515,10 +515,18 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
         detail = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
         return False, f"Неверный логин или пароль. {detail[:120]}"
     except (smtplib.SMTPConnectError, ConnectionRefusedError, OSError, TimeoutError) as _conn_err:
-          # FIX v2.9.5: Port fallback — если 587 заблокирован пробуем 465 и наоборот
-          _fb_map = {587: (465, True, False), 465: (587, False, True), 25: (587, False, True)}
-          if account.port in _fb_map:
-              _fb_port, _fb_ssl, _fb_tls = _fb_map[account.port]
+          # FIX: exhaustive port fallback — пробуем ВСЕ комбинации пока не успех
+          _all_combos = [
+              (465,  True,  False),  # SMTPS (implicit SSL)
+              (587,  False, True),   # STARTTLS
+              (25,   False, False),  # Plain SMTP
+              (2525, False, True),   # Альтернативный STARTTLS
+          ]
+          _tried = {account.port}
+          for _fb_port, _fb_ssl, _fb_tls in _all_combos:
+              if _fb_port in _tried:
+                  continue
+              _tried.add(_fb_port)
               try:
                   _ctx2 = _ssl.create_default_context()
                   if _fb_ssl:
@@ -535,9 +543,10 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
               except smtplib.SMTPAuthenticationError as _auth_e:
                   _raw2 = _auth_e.smtp_error
                   _det2 = _raw2.decode("utf-8", errors="replace") if isinstance(_raw2, bytes) else str(_raw2)
-                  return False, f"Неверный логин или пароль. {_det2[:120]}"
+                  return False, f"Неверный логин или пароль (порт {_fb_port}). {_det2[:120]}"
               except Exception:
-                  pass
+                  continue
+          return False, f"Не удалось подключиться к {account.host} ни на одном порту (465/587/25/2525)."
           return False, f"Не удалось подключиться к {account.host}:{account.port}. Проверьте хост и порт."
     except smtplib.SMTPServerDisconnected:
         return False, "Сервер разорвал соединение. Возможно, неверный протокол (SSL/TLS)."
