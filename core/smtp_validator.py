@@ -64,22 +64,32 @@ def _check_dmarc(domain: str) -> bool:
 
 
 def _check_dkim(domain: str, selector: str = "") -> bool:
-    """FIX L1: перебираем популярные DKIM-селекторы (default почти никогда не используется)."""
-    if not _DNS_OK:
-        return False
-    _selectors = [selector] if selector else [
-        "google", "mail", "default", "s1", "s2", "k1", "smtp",
-        "dkim", "selector1", "selector2", "email", "mxvault",
-    ]
-    for sel in _selectors:
-        try:
-            dns.resolver.resolve(f"{sel}._domainkey.{domain}", "TXT", lifetime=3)
-            return True
-        except Exception:
-            continue
-    return False
+      """H-2 FIX: параллельная проверка DKIM-селекторов через ThreadPoolExecutor.
+      Было: последовательный перебор 12 × 3s = до 36s. Стало: все параллельно, ~3s.
+      """
+      if not _DNS_OK:
+          return False
+      from concurrent.futures import ThreadPoolExecutor, as_completed
+      _selectors = [selector] if selector else [
+          "google", "mail", "default", "s1", "s2", "k1", "smtp",
+          "dkim", "selector1", "selector2", "email", "mxvault",
+      ]
 
+      def _probe(sel: str) -> bool:
+          try:
+              dns.resolver.resolve(f"{sel}._domainkey.{domain}", "TXT", lifetime=3)
+              return True
+          except Exception:
+              return False
 
+      with ThreadPoolExecutor(max_workers=min(len(_selectors), 6)) as executor:
+          futures = {executor.submit(_probe, sel): sel for sel in _selectors}
+          for fut in as_completed(futures):
+              if fut.result():
+                  for f in futures:
+                      f.cancel()
+                  return True
+      return False
 def _check_mx(domain: str) -> bool:
     if not _DNS_OK:
         return False
