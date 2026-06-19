@@ -193,80 +193,80 @@ async def get_all_passed_users() -> tuple[set[int], set[int]]:
 
 
 
-  async def get_hwid_reset_info(telegram_id: int) -> dict:
-      """Возвращает информацию о возможности сброса HWID.
+async def get_hwid_reset_info(telegram_id: int) -> dict:
+    """Возвращает информацию о возможности сброса HWID.
       
-      Returns:
-          dict с полями:
-            - can_reset (bool): True если прошло >=30 дней с последнего сброса
-            - days_left (int): сколько дней осталось до следующего сброса
-            - last_reset (str): ISO-дата последнего сброса или ''
-      """
-      async with _db() as conn:
-          async with conn.execute(
-              "SELECT hwid_reset_at FROM users WHERE telegram_id=?", (telegram_id,)
-          ) as cur:
-              row = await cur.fetchone()
+    Returns:
+        dict с полями:
+          - can_reset (bool): True если прошло >=30 дней с последнего сброса
+          - days_left (int): сколько дней осталось до следующего сброса
+          - last_reset (str): ISO-дата последнего сброса или ''
+    """
+    async with _db() as conn:
+        async with conn.execute(
+            "SELECT hwid_reset_at FROM users WHERE telegram_id=?", (telegram_id,)
+        ) as cur:
+            row = await cur.fetchone()
       
-      if not row or not row[0]:
-          return {"can_reset": True, "days_left": 0, "last_reset": ""}
+    if not row or not row[0]:
+        return {"can_reset": True, "days_left": 0, "last_reset": ""}
       
-      try:
-          last_reset = datetime.fromisoformat(row[0].replace("Z", "+00:00"))
-          if last_reset.tzinfo is None:
-              last_reset = last_reset.replace(tzinfo=timezone.utc)
-          elapsed = (datetime.now(timezone.utc) - last_reset).days
-          can_reset = elapsed >= 30
-          days_left = max(0, 30 - elapsed)
-          return {"can_reset": can_reset, "days_left": days_left, "last_reset": row[0]}
-      except Exception:
-          return {"can_reset": True, "days_left": 0, "last_reset": ""}
+    try:
+        last_reset = datetime.fromisoformat(row[0].replace("Z", "+00:00"))
+        if last_reset.tzinfo is None:
+            last_reset = last_reset.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - last_reset).days
+        can_reset = elapsed >= 30
+        days_left = max(0, 30 - elapsed)
+        return {"can_reset": can_reset, "days_left": days_left, "last_reset": row[0]}
+    except Exception:
+        return {"can_reset": True, "days_left": 0, "last_reset": ""}
 
 
-  async def reset_user_hwid(telegram_id: int) -> bool:
-      """Сбрасывает HWID пользователя и всех его активных лицензий.
-      Доступно не чаще 1 раза в 30 дней.
+async def reset_user_hwid(telegram_id: int) -> bool:
+    """Сбрасывает HWID пользователя и всех его активных лицензий.
+    Доступно не чаще 1 раза в 30 дней.
       
-      Returns:
-          True если сброс выполнен, False если ещё не прошло 30 дней.
-      """
-      info = await get_hwid_reset_info(telegram_id)
-      if not info["can_reset"]:
-          return False
+    Returns:
+        True если сброс выполнен, False если ещё не прошло 30 дней.
+    """
+    info = await get_hwid_reset_info(telegram_id)
+    if not info["can_reset"]:
+        return False
       
-      now = _now()
-      async with _db() as conn:
-          # Сбрасываем hwid у пользователя и фиксируем дату сброса
-          await conn.execute(
-              "UPDATE users SET hwid='', hwid_reset_at=?, last_seen=? WHERE telegram_id=?",
-              (now, now, telegram_id)
+    now = _now()
+    async with _db() as conn:
+        # Сбрасываем hwid у пользователя и фиксируем дату сброса
+        await conn.execute(
+            "UPDATE users SET hwid='', hwid_reset_at=?, last_seen=? WHERE telegram_id=?",
+            (now, now, telegram_id)
+        )
+        # Сбрасываем hwid у всех активных лицензий пользователя
+        await conn.execute(
+            "UPDATE licenses SET hwid='' WHERE telegram_id=? AND is_active=1",
+            (telegram_id,)
+        )
+        await conn.commit()
+      
+    logger.info("HWID reset for telegram_id=%d at %s", telegram_id, now)
+    return True
+
+async def init_db() -> None:
+  # FIX БАГ-7: исправлены отступы (было 2 пробела, PEP 8 требует 4)
+  # PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL
+  # уже применяются в _db() context manager — не дублируем.
+  async with _db() as db:
+      # FIX: executescript() auto-commits — заменён на отдельные execute() для корректной транзакции
+      for _stmt in [s.strip() for s in CREATE_SQL.split(";") if s.strip()]:
+          await db.execute(_stmt)
+      for plan_id, plan in PLANS.items():
+          await db.execute(
+              "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+              (f"price_{plan_id}", str(plan["price_usdt"])),
           )
-          # Сбрасываем hwid у всех активных лицензий пользователя
-          await conn.execute(
-              "UPDATE licenses SET hwid='' WHERE telegram_id=? AND is_active=1",
-              (telegram_id,)
-          )
-          await conn.commit()
-      
-      logger.info("HWID reset for telegram_id=%d at %s", telegram_id, now)
-      return True
-
-  async def init_db() -> None:
-    # FIX БАГ-7: исправлены отступы (было 2 пробела, PEP 8 требует 4)
-    # PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL
-    # уже применяются в _db() context manager — не дублируем.
-    async with _db() as db:
-        # FIX: executescript() auto-commits — заменён на отдельные execute() для корректной транзакции
-        for _stmt in [s.strip() for s in CREATE_SQL.split(";") if s.strip()]:
-            await db.execute(_stmt)
-        for plan_id, plan in PLANS.items():
-            await db.execute(
-                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-                (f"price_{plan_id}", str(plan["price_usdt"])),
-            )
-        await db.commit()
-    await _migrate_db()
-    logger.info("Database initialized: %s", DB_PATH)
+      await db.commit()
+  await _migrate_db()
+  logger.info("Database initialized: %s", DB_PATH)
 
 
 async def upsert_user(telegram_id: int, username: str, first_name: str) -> None:
