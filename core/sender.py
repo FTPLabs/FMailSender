@@ -148,12 +148,20 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "zoho.eu":           {"host": "smtp.zoho.eu",          "port": 465, "use_ssl": True,  "use_tls": False},
     "zohomail.eu":       {"host": "smtp.zoho.eu",          "port": 465, "use_ssl": True,  "use_tls": False},
     "zoho.in":           {"host": "smtp.zoho.com",         "port": 465, "use_ssl": True,  "use_tls": False},
-    # firstmail.ltd family (SMTP + IMAP via imap.firstmail.ltd:993)
-    "blackfirsta.com":   {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
-    "firsthidden.com":   {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
-    "ishowfirstmail.com":{"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
-    "analismail.com":    {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    # firstmail.ltd family — port 25 (465/587 TIMEOUT; tcp diag: only 25 is open)
+    "blackfirsta.com":   {"host": "smtp.firstmail.ltd",    "port": 25,  "use_ssl": False, "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    "firsthidden.com":   {"host": "smtp.firstmail.ltd",    "port": 25,  "use_ssl": False, "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    "ishowfirstmail.com":{"host": "smtp.firstmail.ltd",    "port": 25,  "use_ssl": False, "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    "analismail.com":    {"host": "smtp.firstmail.ltd",    "port": 25,  "use_ssl": False, "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
 }
+
+# Load extended SMTP providers (poczta.fm, sapo.pt, bigpond, telenet, comcast +80 more)
+# Per smtp-configs-extended skill — update at module init so all domains are available
+try:
+    from core.smtp_configs_extra import load_extra_configs as _load_extra
+    _SMTP_CONFIGS.update(_load_extra())
+except Exception:
+    pass
 
 # Pattern-based fallback: outline/hotmail/live/* → office365; yahoo.* → yahoo; gmx.* → gmx.net
 _O365 = {"host": "smtp.office365.com", "port": 587, "use_ssl": False, "use_tls": True}
