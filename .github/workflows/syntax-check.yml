@@ -25,7 +25,7 @@ jobs:
           echo "=== Syntax check: py_compile ==="
           SYNTAX_FAILED=0
           while IFS= read -r -d "" f; do
-            if ! python -m py_compile "$f" 2>/tmp/py_err; then
+            if ! python3 -m py_compile "$f" 2>/tmp/py_err; then
               echo "FAIL: $f"
               cat /tmp/py_err
               SYNTAX_FAILED=1
@@ -42,6 +42,6 @@ jobs:
       - name: pyflakes check
         shell: bash
         run: |
-          pip install pyflakes --quiet
-          python -m pyflakes . 2>&1 | grep -v "__pycache__" | grep -v ".venv" || true
+          pip3 install pyflakes --quiet
+          python3 -m pyflakes . 2>&1 | grep -v "__pycache__" | grep -v ".venv" || true
           echo "pyflakes check complete"
