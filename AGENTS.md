@@ -45,7 +45,7 @@
   ```
   main.py              — точка входа + patch loader
   core/
-    sender.py          — async SMTP engine v2.9.1
+    sender.py          — async SMTP engine v2.9.3
     ai_fixer.py        — OpenAI spam fixer
     spam_checker.py    — анализатор спама (score 0-100)
     warmup.py          — прогрев SMTP аккаунтов
