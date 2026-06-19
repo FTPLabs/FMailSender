@@ -163,7 +163,53 @@ _SMTP_CONFIGS: dict[str, dict] = {
     # Google Workspace custom domains — FIX: iejesusmirey.com / buzzmaster.market = G Suite → smtp.gmail.com
     "iejesusmirey.com":  {"host": "smtp.gmail.com",        "port": 465, "use_ssl": True,  "use_tls": False},
     "buzzmaster.market": {"host": "smtp.gmail.com",        "port": 465, "use_ssl": True,  "use_tls": False},
-}
+
+      # Web.de (Germany) — FIX v2.9.4: добавлен отсутствующий провайдер
+      "web.de":            {"host": "smtp.web.de",           "port": 587, "use_ssl": False, "use_tls": True,
+                            "imap_host": "imap.web.de",      "imap_port": 993, "imap_ssl": True},
+      # Yandex
+      "yandex.ru":         {"host": "smtp.yandex.ru",        "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.yandex.ru",   "imap_port": 993, "imap_ssl": True},
+      "ya.ru":             {"host": "smtp.yandex.ru",        "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.yandex.ru",   "imap_port": 993, "imap_ssl": True},
+      "yandex.com":        {"host": "smtp.yandex.com",       "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.yandex.com",  "imap_port": 993, "imap_ssl": True},
+      "yandex.kz":         {"host": "smtp.yandex.kz",        "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.yandex.kz",   "imap_port": 993, "imap_ssl": True},
+      # Zoho
+      "zoho.com":          {"host": "smtp.zoho.com",         "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.zoho.com",    "imap_port": 993, "imap_ssl": True},
+      "zohomail.com":      {"host": "smtp.zoho.com",         "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.zoho.com",    "imap_port": 993, "imap_ssl": True},
+      # Fastmail
+      "fastmail.com":      {"host": "smtp.fastmail.com",     "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.fastmail.com","imap_port": 993, "imap_ssl": True},
+      "fastmail.fm":       {"host": "smtp.fastmail.com",     "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.fastmail.com","imap_port": 993, "imap_ssl": True},
+      # Yahoo international
+      "yahoo.de":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
+      "yahoo.co.uk":       {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
+      "yahoo.fr":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
+      "yahoo.es":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
+      "yahoo.it":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
+      "yahoo.ca":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
+      "yahoo.com.au":      {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
+      # T-Online (Telekom Germany)
+      "t-online.de":       {"host": "securesmtp.t-online.de","port": 465, "use_ssl": True,  "use_tls": False,
+                            "imap_host": "secureimap.t-online.de","imap_port": 993, "imap_ssl": True},
+      # Tutanota
+      "tutanota.com":      {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True,
+                            "imap_host": "mail.tutanota.com","imap_port": 993, "imap_ssl": True},
+      "tutamail.com":      {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True,
+                            "imap_host": "mail.tutanota.com","imap_port": 993, "imap_ssl": True},
+  }
 
 # Load extended SMTP providers (poczta.fm, sapo.pt, bigpond, telenet, comcast +80 more)
 # Per smtp-configs-extended skill — update at module init so all domains are available
