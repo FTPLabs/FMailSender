@@ -1,5 +1,8 @@
 """SQLite database layer for FMail Sender licensing system."""
-import logging
+  import os as _os, sys as _sys
+  # Fix C-3: ensure server/ parent is on sys.path so 'from config import' works with any cwd
+  _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+  import logging
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
