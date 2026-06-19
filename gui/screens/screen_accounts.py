@@ -818,17 +818,17 @@ class AccountsScreen(QWidget):
                   item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
                   item.setToolTip(msg)
               if 0 <= r < len(self._accounts):
-              self._accounts[r].last_test_ok = ok
-              # FIX: автоматически деактивируем аккаунт при ошибке, активируем при успехе
-              self._accounts[r].is_active = ok
-              save_accounts(self._accounts)
-              active_item = self.table.item(r, 7)
-              if active_item:
+                  self._accounts[r].last_test_ok = ok
+                  # FIX: автоматически деактивируем аккаунт при ошибке, активируем при успехе
+                  self._accounts[r].is_active = ok
+                  save_accounts(self._accounts)
+                  active_item = self.table.item(r, 7)
+                  if active_item:
                   from PyQt6.QtGui import QColor
                   active_item.setText("✓" if ok else "✗")
                   active_item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
-              completed[0] += 1
-              if completed[0] >= total:
+                  completed[0] += 1
+                  if completed[0] >= total:
                   self.test_all_btn.setEnabled(True)
                   self.test_all_btn.setText("Проверить все")
                   ok_cnt = sum(
