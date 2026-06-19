@@ -36,7 +36,7 @@ def load_extra_configs() -> dict[str, dict]:
         # "tutanota.com": NOT SUPPORTED — uses proprietary protocol
         # ProtonMail Bridge (local proxy required)
         "protonmail.com":{"host": "127.0.0.1",         "port": 1025, "use_ssl": False, "use_tls": False,
-                          "_note": "Requires ProtonMail Bridge app running locally"},
+                          "_note": "⚠ Требуется ProtonMail Bridge (https://proton.me/mail/bridge). Без него — Connection refused на 127.0.0.1:1025"},
         "proton.me":     {"host": "127.0.0.1",         "port": 1025, "use_ssl": False, "use_tls": False},
         # Mailbox.org
         "mailbox.org":   {"host": "smtp.mailbox.org",  "port": 465, "use_ssl": True,  "use_tls": False,
