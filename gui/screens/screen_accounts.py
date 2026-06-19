@@ -1174,139 +1174,139 @@ class AccountsScreen(QWidget):
           )
 
 
-    def _test_selected(self) -> None:
-        """Проверить выбранные аккаунты (из таблицы)."""
-        rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
-        if not rows:
-            QMessageBox.information(self, "Нет выбранных", "Выберите строки в таблице для проверки.")
-            return
-        for r in rows:
-            self._test_single(r)
+  def _test_selected(self) -> None:
+      """Проверить выбранные аккаунты (из таблицы)."""
+      rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
+      if not rows:
+          QMessageBox.information(self, "Нет выбранных", "Выберите строки в таблице для проверки.")
+          return
+      for r in rows:
+          self._test_single(r)
 
-    def _cancel_test(self) -> None:
-        """Отменить текущую проверку всех аккаунтов."""
-        self._test_cancel_event.set()
-        for w in self._test_workers:
-            if w.isRunning():
-                w.quit()
-        self._test_workers.clear()
-        self.test_all_btn.setEnabled(True)
-        self.test_all_btn.setText("Проверить все")
-        self.cancel_test_btn.setEnabled(False)
-        self.status_label.setText(f"\u23f9 Проверка отменена | Аккаунтов: {len(self._accounts)}")
+  def _cancel_test(self) -> None:
+      """Отменить текущую проверку всех аккаунтов."""
+      self._test_cancel_event.set()
+      for w in self._test_workers:
+          if w.isRunning():
+              w.quit()
+      self._test_workers.clear()
+      self.test_all_btn.setEnabled(True)
+      self.test_all_btn.setText("Проверить все")
+      self.cancel_test_btn.setEnabled(False)
+      self.status_label.setText(f"\u23f9 Проверка отменена | Аккаунтов: {len(self._accounts)}")
 
-    def _save_config(self) -> None:
-        """Сохранить аккаунты в файл по выбору пользователя."""
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Сохранить конфиг аккаунтов", "",
-            "JSON (*.json);;Все файлы (*)"
-        )
-        if not path:
-            return
-        try:
-            import json as _j
-            data = [
-                {
-                    "email": a.email,
-                    "password": a.password,
-                    "host": a.host,
-                    "port": a.port,
-                    "use_ssl": a.use_ssl,
-                    "use_tls": a.use_tls,
-                    "display_name": getattr(a, "display_name", ""),
-                    "daily_limit": getattr(a, "daily_limit", 500),
-                    "hourly_limit": getattr(a, "hourly_limit", 50),
-                    "is_active": getattr(a, "is_active", True),
-                    "imap_host": getattr(a, "imap_host", ""),
-                    "imap_port": getattr(a, "imap_port", 993),
-                    "imap_ssl": getattr(a, "imap_ssl", True),
-                }
-                for a in self._accounts
-            ]
-            from pathlib import Path as _P
-            _P(path).write_text(_j.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            QMessageBox.information(self, "Сохранено", f"Конфиг сохранён:\n{path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка сохранения", str(e))
-
-    def _load_config(self) -> None:
-        """Загрузить аккаунты из файла по выбору пользователя."""
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Загрузить конфиг аккаунтов", "",
-            "JSON (*.json);;Все файлы (*)"
-        )
-        if not path:
-            return
-        try:
-            import json as _j
-            from pathlib import Path as _P
-            raw = _j.loads(_P(path).read_text(encoding="utf-8"))
-            loaded = []
-            for d in raw:
-                a = SmtpAccount(
-                    email=d["email"],
-                    password=d.get("password",""),
-                    host=d["host"],
-                    port=d.get("port", 587),
-                    use_ssl=d.get("use_ssl", False),
-                    use_tls=d.get("use_tls", True),
-                    display_name=d.get("display_name",""),
-                    daily_limit=d.get("daily_limit", 500),
-                    hourly_limit=d.get("hourly_limit", 50),
-                    is_active=d.get("is_active", True),
-                )
-                a.imap_host = d.get("imap_host","")
-                a.imap_port = d.get("imap_port", 993)
-                a.imap_ssl = d.get("imap_ssl", True)
-                loaded.append(a)
-            self._accounts = loaded
-            save_accounts(self._accounts)
-            self._refresh_table()
-            self.accounts_changed.emit(self._accounts)
-            QMessageBox.information(self, "Загружено", f"Загружено {len(loaded)} аккаунтов из:\n{path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка загрузки", str(e))
-
-    def _import_accounts(self):
-      path, _ = QFileDialog.getOpenFileName(
-          self, "Импорт аккаунтов", "", "Text files (*.txt);;All files (*)"
+  def _save_config(self) -> None:
+      """Сохранить аккаунты в файл по выбору пользователя."""
+      path, _ = QFileDialog.getSaveFileName(
+          self, "Сохранить конфиг аккаунтов", "",
+          "JSON (*.json);;Все файлы (*)"
       )
       if not path:
           return
+      try:
+          import json as _j
+          data = [
+              {
+                  "email": a.email,
+                  "password": a.password,
+                  "host": a.host,
+                  "port": a.port,
+                  "use_ssl": a.use_ssl,
+                  "use_tls": a.use_tls,
+                  "display_name": getattr(a, "display_name", ""),
+                  "daily_limit": getattr(a, "daily_limit", 500),
+                  "hourly_limit": getattr(a, "hourly_limit", 50),
+                  "is_active": getattr(a, "is_active", True),
+                  "imap_host": getattr(a, "imap_host", ""),
+                  "imap_port": getattr(a, "imap_port", 993),
+                  "imap_ssl": getattr(a, "imap_ssl", True),
+              }
+              for a in self._accounts
+          ]
+          from pathlib import Path as _P
+          _P(path).write_text(_j.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+          QMessageBox.information(self, "Сохранено", f"Конфиг сохранён:\n{path}")
+      except Exception as e:
+          QMessageBox.critical(self, "Ошибка сохранения", str(e))
 
-      existing = {a.email.lower() for a in self._accounts}
-      worker = BulkImportWorker(path, existing, self)
-
-      progress_dlg = QProgressDialog("Импорт аккаунтов...", "Отмена", 0, 100, self)
-      progress_dlg.setWindowTitle("Импорт")
-      progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
-      progress_dlg.setMinimumDuration(0)
-      progress_dlg.setValue(0)
-
-      def on_progress(cur, total):
-          if total > 0:
-              progress_dlg.setValue(int(cur * 100 / total))
-
-      def on_finished(imported, errors):
-          progress_dlg.close()
-          self._accounts.extend(worker.new_accounts)
+  def _load_config(self) -> None:
+      """Загрузить аккаунты из файла по выбору пользователя."""
+      path, _ = QFileDialog.getOpenFileName(
+          self, "Загрузить конфиг аккаунтов", "",
+          "JSON (*.json);;Все файлы (*)"
+      )
+      if not path:
+          return
+      try:
+          import json as _j
+          from pathlib import Path as _P
+          raw = _j.loads(_P(path).read_text(encoding="utf-8"))
+          loaded = []
+          for d in raw:
+              a = SmtpAccount(
+                  email=d["email"],
+                  password=d.get("password",""),
+                  host=d["host"],
+                  port=d.get("port", 587),
+                  use_ssl=d.get("use_ssl", False),
+                  use_tls=d.get("use_tls", True),
+                  display_name=d.get("display_name",""),
+                  daily_limit=d.get("daily_limit", 500),
+                  hourly_limit=d.get("hourly_limit", 50),
+                  is_active=d.get("is_active", True),
+              )
+              a.imap_host = d.get("imap_host","")
+              a.imap_port = d.get("imap_port", 993)
+              a.imap_ssl = d.get("imap_ssl", True)
+              loaded.append(a)
+          self._accounts = loaded
           save_accounts(self._accounts)
           self._refresh_table()
           self.accounts_changed.emit(self._accounts)
-          QMessageBox.information(
-              self, "Импорт завершён",
-              f"Импортировано: {imported}\nПропущено: {errors}",
-          )
-          self._import_worker = None
+          QMessageBox.information(self, "Загружено", f"Загружено {len(loaded)} аккаунтов из:\n{path}")
+      except Exception as e:
+          QMessageBox.critical(self, "Ошибка загрузки", str(e))
 
-      def on_error(msg):
-          progress_dlg.close()
-          QMessageBox.critical(self, "Ошибка импорта", msg)
-          self._import_worker = None
+  def _import_accounts(self):
+    path, _ = QFileDialog.getOpenFileName(
+        self, "Импорт аккаунтов", "", "Text files (*.txt);;All files (*)"
+    )
+    if not path:
+        return
 
-      worker.progress.connect(on_progress)
-      worker.finished.connect(on_finished)
-      worker.error.connect(on_error)
-      progress_dlg.canceled.connect(worker.quit)
-      self._import_worker = worker
-      worker.start()
+    existing = {a.email.lower() for a in self._accounts}
+    worker = BulkImportWorker(path, existing, self)
+
+    progress_dlg = QProgressDialog("Импорт аккаунтов...", "Отмена", 0, 100, self)
+    progress_dlg.setWindowTitle("Импорт")
+    progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
+    progress_dlg.setMinimumDuration(0)
+    progress_dlg.setValue(0)
+
+    def on_progress(cur, total):
+        if total > 0:
+            progress_dlg.setValue(int(cur * 100 / total))
+
+    def on_finished(imported, errors):
+        progress_dlg.close()
+        self._accounts.extend(worker.new_accounts)
+        save_accounts(self._accounts)
+        self._refresh_table()
+        self.accounts_changed.emit(self._accounts)
+        QMessageBox.information(
+            self, "Импорт завершён",
+            f"Импортировано: {imported}\nПропущено: {errors}",
+        )
+        self._import_worker = None
+
+    def on_error(msg):
+        progress_dlg.close()
+        QMessageBox.critical(self, "Ошибка импорта", msg)
+        self._import_worker = None
+
+    worker.progress.connect(on_progress)
+    worker.finished.connect(on_finished)
+    worker.error.connect(on_error)
+    progress_dlg.canceled.connect(worker.quit)
+    self._import_worker = worker
+    worker.start()
