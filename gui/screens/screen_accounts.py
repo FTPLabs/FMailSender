@@ -1268,45 +1268,45 @@ class AccountsScreen(QWidget):
           QMessageBox.critical(self, "Ошибка загрузки", str(e))
 
   def _import_accounts(self):
-    path, _ = QFileDialog.getOpenFileName(
-        self, "Импорт аккаунтов", "", "Text files (*.txt);;All files (*)"
-    )
-    if not path:
-        return
+      path, _ = QFileDialog.getOpenFileName(
+          self, "Импорт аккаунтов", "", "Text files (*.txt);;All files (*)"
+      )
+      if not path:
+          return
 
-    existing = {a.email.lower() for a in self._accounts}
-    worker = BulkImportWorker(path, existing, self)
+      existing = {a.email.lower() for a in self._accounts}
+      worker = BulkImportWorker(path, existing, self)
 
-    progress_dlg = QProgressDialog("Импорт аккаунтов...", "Отмена", 0, 100, self)
-    progress_dlg.setWindowTitle("Импорт")
-    progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
-    progress_dlg.setMinimumDuration(0)
-    progress_dlg.setValue(0)
+      progress_dlg = QProgressDialog("Импорт аккаунтов...", "Отмена", 0, 100, self)
+      progress_dlg.setWindowTitle("Импорт")
+      progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
+      progress_dlg.setMinimumDuration(0)
+      progress_dlg.setValue(0)
 
-    def on_progress(cur, total):
-        if total > 0:
-            progress_dlg.setValue(int(cur * 100 / total))
+      def on_progress(cur, total):
+          if total > 0:
+              progress_dlg.setValue(int(cur * 100 / total))
 
-    def on_finished(imported, errors):
-        progress_dlg.close()
-        self._accounts.extend(worker.new_accounts)
-        save_accounts(self._accounts)
-        self._refresh_table()
-        self.accounts_changed.emit(self._accounts)
-        QMessageBox.information(
-            self, "Импорт завершён",
-            f"Импортировано: {imported}\nПропущено: {errors}",
-        )
-        self._import_worker = None
+      def on_finished(imported, errors):
+          progress_dlg.close()
+          self._accounts.extend(worker.new_accounts)
+          save_accounts(self._accounts)
+          self._refresh_table()
+          self.accounts_changed.emit(self._accounts)
+          QMessageBox.information(
+              self, "Импорт завершён",
+              f"Импортировано: {imported}\nПропущено: {errors}",
+          )
+          self._import_worker = None
 
-    def on_error(msg):
-        progress_dlg.close()
-        QMessageBox.critical(self, "Ошибка импорта", msg)
-        self._import_worker = None
+      def on_error(msg):
+          progress_dlg.close()
+          QMessageBox.critical(self, "Ошибка импорта", msg)
+          self._import_worker = None
 
-    worker.progress.connect(on_progress)
-    worker.finished.connect(on_finished)
-    worker.error.connect(on_error)
-    progress_dlg.canceled.connect(worker.quit)
-    self._import_worker = worker
-    worker.start()
+      worker.progress.connect(on_progress)
+      worker.finished.connect(on_finished)
+      worker.error.connect(on_error)
+      progress_dlg.canceled.connect(worker.quit)
+      self._import_worker = worker
+      worker.start()
