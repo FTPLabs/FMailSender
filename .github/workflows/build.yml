@@ -33,7 +33,7 @@ jobs:
           echo "=== Gate 1: Syntax Check ==="
           FAILED=0
           while IFS= read -r -d "" f; do
-            if ! python -m py_compile "$f" 2>/tmp/err; then
+            if ! python3 -m py_compile "$f" 2>/tmp/err; then
               echo "❌ SYNTAX ERROR: $f"
               cat /tmp/err
               FAILED=1
@@ -49,7 +49,7 @@ jobs:
       - name: "[GATE-2] pyflakes — code analysis (warning)"
         run: |
           echo "=== Gate 2: pyflakes (informational only) ==="
-          python -m pyflakes . 2>&1 | grep -v "__pycache__" | grep -v ".venv" | grep -v "imported but unused" || true
+          python3 -m pyflakes . 2>&1 | grep -v "__pycache__" | grep -v ".venv" | grep -v "imported but unused" || true
           echo "✅ pyflakes complete (non-blocking)"
 
       - name: "[GATE-3] Secret scan — tokens и ключи"
@@ -93,7 +93,7 @@ jobs:
             echo "⚠️ WARN: datetime.utcnow() найден — замени на datetime.now(timezone.utc)"
           fi
           # Версия файла
-          python -c "from core._version import APP_VERSION; print(f'Version: {APP_VERSION}')"
+          python3 -c "from core._version import APP_VERSION; print(f'Version: {APP_VERSION}')"
           [ $FAILED -eq 0 ] && echo "✅ Build Guard OK" || { echo "❌ Build blocked"; exit 1; }
 
   # ══════════════════════════════════════════════════════════════════
@@ -123,7 +123,7 @@ jobs:
 
       - name: "[GATE-5] Import verification"
         run: |
-          python -c "
+          python3 -c "
           import sys
           sys.path.insert(0, '.')
           from core._version import APP_NAME, APP_VERSION
