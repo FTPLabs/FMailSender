@@ -40,8 +40,9 @@ jobs:
             Write-Error "EXE not found in dist/"
             exit 1
           }
-          \$sz = [math]::Round([double](Get-Item -LiteralPath "dist/FMailSender.exe").Length / 1048576, 1)
-          Write-Host "FMailSender.exe - \$sz MB"
+          $item = Get-Item "dist/FMailSender.exe"
+          $szMB = [math]::Round([long]$item.Length / 1MB, 1)
+          Write-Host "FMailSender.exe - $szMB MB"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
