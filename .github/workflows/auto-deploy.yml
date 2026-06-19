@@ -26,5 +26,5 @@ name: Auto Deploy to VPS
               venv/bin/pip install -q -r server/requirements.txt
               systemctl daemon-reload
               systemctl restart fmailsender && echo "Service restarted OK" || echo "Service restart skipped"
-              echo "Deploy complete: $(git log --oneline -1)"
+              echo "Deploy complete"
   
