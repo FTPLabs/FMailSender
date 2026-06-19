@@ -242,56 +242,56 @@ class EmailTemplate:
 
 
 # H-1 FIX: MX-запись = ВХОДЯЩИЙ сервер, не исходящий SMTP!
-  # Карта: подстрока MX-хоста → правильный исходящий SMTP
-  _MX_TO_SMTP: dict[str, dict] = {
-      "google.com":         {"host": "smtp.gmail.com",                         "port": 465, "use_ssl": True,  "use_tls": False},
-      "googlemail.com":     {"host": "smtp.gmail.com",                         "port": 465, "use_ssl": True,  "use_tls": False},
-      "outlook.com":        {"host": "smtp.office365.com",                     "port": 587, "use_ssl": False, "use_tls": True},
-      "protection.outlook": {"host": "smtp.office365.com",                     "port": 587, "use_ssl": False, "use_tls": True},
-      "yahoodns.net":       {"host": "smtp.mail.yahoo.com",                    "port": 465, "use_ssl": True,  "use_tls": False},
-      "mimecast.com":       {"host": "smtp.office365.com",                     "port": 587, "use_ssl": False, "use_tls": True},
-      "pphosted.com":       {"host": "smtp.office365.com",                     "port": 587, "use_ssl": False, "use_tls": True},
-      "mailgun.org":        {"host": "smtp.mailgun.org",                       "port": 587, "use_ssl": False, "use_tls": True},
-      "amazonses.com":      {"host": "email-smtp.us-east-1.amazonaws.com",     "port": 587, "use_ssl": False, "use_tls": True},
-  }
+# Карта: подстрока MX-хоста → правильный исходящий SMTP
+_MX_TO_SMTP: dict[str, dict] = {
+    "google.com":         {"host": "smtp.gmail.com",                         "port": 465, "use_ssl": True,  "use_tls": False},
+    "googlemail.com":     {"host": "smtp.gmail.com",                         "port": 465, "use_ssl": True,  "use_tls": False},
+    "outlook.com":        {"host": "smtp.office365.com",                     "port": 587, "use_ssl": False, "use_tls": True},
+    "protection.outlook": {"host": "smtp.office365.com",                     "port": 587, "use_ssl": False, "use_tls": True},
+    "yahoodns.net":       {"host": "smtp.mail.yahoo.com",                    "port": 465, "use_ssl": True,  "use_tls": False},
+    "mimecast.com":       {"host": "smtp.office365.com",                     "port": 587, "use_ssl": False, "use_tls": True},
+    "pphosted.com":       {"host": "smtp.office365.com",                     "port": 587, "use_ssl": False, "use_tls": True},
+    "mailgun.org":        {"host": "smtp.mailgun.org",                       "port": 587, "use_ssl": False, "use_tls": True},
+    "amazonses.com":      {"host": "email-smtp.us-east-1.amazonaws.com",     "port": 587, "use_ssl": False, "use_tls": True},
+}
 
 
-  def _resolve_via_mx(domain: str) -> "Optional[dict]":
-      """Query DNS MX records and map to the correct OUTGOING SMTP server.
+def _resolve_via_mx(domain: str) -> "Optional[dict]":
+    """Query DNS MX records and map to the correct OUTGOING SMTP server.
 
-      H-1 FIX: MX-хост — это входящий сервер. Мы маппим его на исходящий SMTP
-      через известные паттерны. Напрямую MX-хост как SMTP НЕ используем.
-      """
-      if not _DNS_OK:
-          return None
-      try:
-          answers = sorted(
-              _dns_resolver.resolve(domain, "MX", lifetime=5),
-              key=lambda r: r.preference,
-          )
-          if not answers:
-              return None
-          mx_host = str(answers[0].exchange).rstrip(".").lower()
-          mx_base = ".".join(mx_host.split(".")[-2:])
+    H-1 FIX: MX-хост — это входящий сервер. Мы маппим его на исходящий SMTP
+    через известные паттерны. Напрямую MX-хост как SMTP НЕ используем.
+    """
+    if not _DNS_OK:
+        return None
+    try:
+        answers = sorted(
+            _dns_resolver.resolve(domain, "MX", lifetime=5),
+            key=lambda r: r.preference,
+        )
+        if not answers:
+            return None
+        mx_host = str(answers[0].exchange).rstrip(".").lower()
+        mx_base = ".".join(mx_host.split(".")[-2:])
 
-          # 1) Точное совпадение в основном конфиге
-          if mx_base in _SMTP_CONFIGS:
-              return _SMTP_CONFIGS[mx_base]
+        # 1) Точное совпадение в основном конфиге
+        if mx_base in _SMTP_CONFIGS:
+            return _SMTP_CONFIGS[mx_base]
 
-          # 2) Паттерн-матчинг (outlook.*, hotmail.*, live.*, yahoo.*, gmx.*)
-          for prefix, cfg in _SMTP_DOMAIN_PATTERNS:
-              if prefix.rstrip(".") in mx_host:
-                  return cfg
+        # 2) Паттерн-матчинг (outlook.*, hotmail.*, live.*, yahoo.*, gmx.*)
+        for prefix, cfg in _SMTP_DOMAIN_PATTERNS:
+            if prefix.rstrip(".") in mx_host:
+                return cfg
 
-          # 3) Карта MX-провайдеров → исходящий SMTP
-          for mx_key, smtp_cfg in _MX_TO_SMTP.items():
-              if mx_key in mx_host:
-                  return smtp_cfg
+        # 3) Карта MX-провайдеров → исходящий SMTP
+        for mx_key, smtp_cfg in _MX_TO_SMTP.items():
+            if mx_key in mx_host:
+                return smtp_cfg
 
-          # 4) НЕ используем mx_host напрямую — вернём None, tier-4 даст smtp.<domain>
-          return None
-      except Exception:
-          return None
+        # 4) НЕ используем mx_host напрямую — вернём None, tier-4 даст smtp.<domain>
+        return None
+    except Exception:
+        return None
 
 
 def get_smtp_config_for_domain(domain: str) -> Optional[dict]:
