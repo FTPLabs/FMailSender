@@ -155,11 +155,14 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "zoho.eu":           {"host": "smtp.zoho.eu",          "port": 465, "use_ssl": True,  "use_tls": False},
     "zohomail.eu":       {"host": "smtp.zoho.eu",          "port": 465, "use_ssl": True,  "use_tls": False},
     "zoho.in":           {"host": "smtp.zoho.com",         "port": 465, "use_ssl": True,  "use_tls": False},
-    # firstmail.ltd family — port 25 (465/587 TIMEOUT; tcp diag: only 25 is open)
-    "blackfirsta.com":   {"host": "smtp.firstmail.ltd",    "port": 25,  "use_ssl": False, "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
-    "firsthidden.com":   {"host": "smtp.firstmail.ltd",    "port": 25,  "use_ssl": False, "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
-    "ishowfirstmail.com":{"host": "smtp.firstmail.ltd",    "port": 25,  "use_ssl": False, "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
-    "analismail.com":    {"host": "smtp.firstmail.ltd",    "port": 25,  "use_ssl": False, "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    # firstmail.ltd family — FIX: port 465 SSL (port 25 блокируется ISP/VPN)
+    "blackfirsta.com":   {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    "firsthidden.com":   {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    "ishowfirstmail.com":{"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    "analismail.com":    {"host": "smtp.firstmail.ltd",    "port": 465, "use_ssl": True,  "use_tls": False, "imap_host": "imap.firstmail.ltd", "imap_port": 993, "imap_ssl": True},
+    # Google Workspace custom domains — FIX: iejesusmirey.com / buzzmaster.market = G Suite → smtp.gmail.com
+    "iejesusmirey.com":  {"host": "smtp.gmail.com",        "port": 465, "use_ssl": True,  "use_tls": False},
+    "buzzmaster.market": {"host": "smtp.gmail.com",        "port": 465, "use_ssl": True,  "use_tls": False},
 }
 
 # Load extended SMTP providers (poczta.fm, sapo.pt, bigpond, telenet, comcast +80 more)
