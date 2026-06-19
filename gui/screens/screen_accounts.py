@@ -354,8 +354,8 @@ class BulkImportWorker(QThread):
                 acc.imap_host = cfg.get("imap_host", "")
                 acc.imap_port = cfg.get("imap_port", 993)
                 acc.imap_ssl = cfg.get("imap_ssl", True)
-                  if alias and "@" in alias:
-                      acc.reply_to = alias  # Google Workspace alias (iejesusmirey.com → buzzmaster.market)
+                if alias and "@" in alias:
+                    acc.reply_to = alias  # Google Workspace alias
                 self.new_accounts.append(acc)
                 self._existing.add(email.lower())
                 imported += 1
