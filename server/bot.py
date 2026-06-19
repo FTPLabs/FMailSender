@@ -150,11 +150,8 @@ async def fetch_latest_release() -> dict:
                         _release_cache = {
                             "tag": data.get("tag_name", ""),
                             "html_url": data.get("html_url", ""),
-                            "download_url": (
-                                exe_asset["browser_download_url"]
-                                if exe_asset
-                                else data.get("html_url", DOWNLOAD_URL)
-                            ),
+                            # FIX КРИТ-1: используем DOWNLOAD_URL из config/DB, НЕ GitHub URL
+                            "download_url": DOWNLOAD_URL,
                             "vt_url": _extract_vt_url(data.get("body", "")),
                             "body": data.get("body", ""),
                         }
@@ -769,10 +766,18 @@ async def cb_cabinet(query: CallbackQuery):
         lines.append("📦 Подписка: <b>нет активной</b>")
         lines.append("💡 Нажми «Купить лицензию» для покупки")
 
-    await send_or_edit(query, "\n".join(lines), reply_markup=kb_back_main())
+    # FIX НОВЫЙ: кнопка сброса HWID если привязан
+      if hwid and active_lic:
+          kb_cabinet = InlineKeyboardMarkup(inline_keyboard=[
+              [InlineKeyboardButton(text="🔄 Сбросить HWID (1 раз/30 дн.)", callback_data="cabinet_reset_hwid")],
+              [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
+          ])
+      else:
+          kb_cabinet = kb_back_main()
+      await send_or_edit(query, "\n".join(lines), reply_markup=kb_cabinet)
 
 
-# ─── Скачать приложение ──────────────────────────────────────────────────────
+  # ─── Скачать приложение ──────────────────────────────────────────────────────
 
 @dp.callback_query(F.data == "menu_download")
 async def cb_menu_download(query: CallbackQuery):
@@ -802,8 +807,7 @@ async def cb_menu_download(query: CallbackQuery):
 
     except Exception as _fetch_err:
         logger.warning("Download info fetch error: %s", _fetch_err)
-        dl_url = DOWNLOAD_URL
-        dl_url = DOWNLOAD_URL
+        dl_url = DOWNLOAD_URL  # FIX: убран дубликат
 
     _lic_key = active_lic.get("key", "")
 
@@ -830,7 +834,70 @@ async def cb_menu_download(query: CallbackQuery):
     )
 
 
-# ─── Юридические документы ───────────────────────────────────────────────────
+
+
+  # ─── Сброс HWID (1 раз в 30 дней) ───────────────────────────────────────────
+
+  @dp.callback_query(F.data == "cabinet_reset_hwid")
+  async def cb_cabinet_reset_hwid(query: CallbackQuery):
+      """FIX НОВЫЙ: показывает информацию о сбросе HWID и запрашивает подтверждение."""
+      user_id = query.from_user.id
+      try:
+          reset_info = await db.get_hwid_reset_info(user_id)
+      except Exception as e:
+          logger.error("get_hwid_reset_info error: %s", e)
+          await query.answer("⚠️ Ошибка БД. Попробуй позже.", show_alert=True)
+          return
+
+      if not reset_info.get("can_reset"):
+          days_left = reset_info.get("days_left", 0)
+          await query.answer(
+              f"❌ Сброс HWID доступен 1 раз в 30 дней.\nСледующий сброс через {days_left} дн.",
+              show_alert=True,
+          )
+          return
+
+      kb_confirm = InlineKeyboardMarkup(inline_keyboard=[
+          [InlineKeyboardButton(text="✅ Да, сбросить HWID", callback_data="confirm_reset_hwid")],
+          [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_cabinet")],
+      ])
+      await send_or_edit(
+          query,
+          "🔄 <b>Сброс HWID</b>\n\n"
+          "После сброса лицензия <b>отвяжется от текущего компьютера</b>.\n"
+          "При следующем запуске FMailSender HWID привяжется автоматически.\n\n"
+          "⏰ Это действие доступно <b>1 раз в 30 дней</b>.\n\n"
+          "Подтвердить сброс?",
+          reply_markup=kb_confirm,
+      )
+
+
+  @dp.callback_query(F.data == "confirm_reset_hwid")
+  async def cb_confirm_reset_hwid(query: CallbackQuery):
+      """FIX НОВЫЙ: выполняет сброс HWID после подтверждения."""
+      user_id = query.from_user.id
+      try:
+          success = await db.reset_user_hwid(user_id)
+      except Exception as e:
+          logger.error("reset_user_hwid error for %d: %s", user_id, e)
+          await query.answer("⚠️ Ошибка при сбросе. Попробуй позже.", show_alert=True)
+          return
+
+      if not success:
+          await query.answer("❌ Сброс HWID ещё не доступен (прошло менее 30 дней).", show_alert=True)
+          return
+
+      await send_or_edit(
+          query,
+          "✅ <b>HWID успешно сброшен!</b>\n\n"
+          "Лицензия отвязана от старого компьютера.\n"
+          "При следующем запуске FMailSender HWID привяжется автоматически.\n\n"
+          "⏰ Следующий сброс будет доступен через <b>30 дней</b>.",
+          reply_markup=kb_back_main(),
+      )
+      logger.info("User %d successfully reset HWID", user_id)
+
+  # ─── Юридические документы ───────────────────────────────────────────────────
 
 _PRIVACY_TEXT = """📜 <b>ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ</b>
 <i>FMailSender · Актуально с июня 2026</i>
@@ -1246,6 +1313,7 @@ async def cb_buy_plan(query: CallbackQuery, state: FSMContext):
         price = await db.get_plan_price(plan_id)
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Использовать текущий", callback_data=f"use_hwid:{current_hwid}")],
+            [InlineKeyboardButton(text="⏭ Пропустить (HWID привяжется при запуске)", callback_data=f"skip_hwid:{plan_id}")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_buy")],
         ])
         await send_or_edit(
@@ -1257,14 +1325,19 @@ async def cb_buy_plan(query: CallbackQuery, state: FSMContext):
         )
     else:
         await state.set_state(BuyFlow.waiting_hwid)
-        await send_or_edit(
-            query,
-            f"📦 <b>{PLANS[plan_id]['name']}</b>\n\n"
-            "💻 Отправь свой <b>HWID</b> компьютера.\n"
-            "Его можно скопировать на экране активации программы.",
-            reply_markup=kb_back_main(),
-        )
-
+          kb_hwid_skip = InlineKeyboardMarkup(inline_keyboard=[
+              [InlineKeyboardButton(text="⏭ Пропустить (HWID привяжется при запуске)", callback_data=f"skip_hwid:{plan_id}")],
+              [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_buy")],
+          ])
+          await send_or_edit(
+              query,
+              f"📦 <b>{PLANS[plan_id]['name']}</b>\n\n"
+              "💻 <b>HWID</b> — уникальный ID вашего ПК.\n\n"
+              "<b>Нет программы?</b> Нажмите «Пропустить» — HWID привяжется автоматически при первом запуске.\n"
+              "<b>Уже установлена?</b> Скопируйте HWID с экрана активации и отправьте сюда:",
+              reply_markup=kb_hwid_skip,
+          )
+  
 
 @dp.callback_query(F.data.startswith("use_hwid:"))
 async def cb_use_hwid(query: CallbackQuery, state: FSMContext):
@@ -1273,7 +1346,19 @@ async def cb_use_hwid(query: CallbackQuery, state: FSMContext):
     await _proceed_to_payment(query, state, hwid, data.get("plan_id", "week"))
 
 
-@dp.message(BuyFlow.waiting_hwid)
+@dp.callback_query(F.data.startswith("skip_hwid:"))
+  async def cb_skip_hwid(query: CallbackQuery, state: FSMContext):
+      """FIX НОВЫЙ: HWID пропущен при покупке — лицензия без HWID,
+      автопривязка произойдёт при первом запуске приложения (/v1/activate)."""
+      plan_id = query.data.split(":", 1)[1]
+      if plan_id not in PLANS or PLANS[plan_id].get("admin_only"):
+          await query.answer("Неизвестный план", show_alert=True)
+          return
+      await state.clear()
+      await _proceed_to_payment(query, state, "", plan_id)
+
+
+  @dp.message(BuyFlow.waiting_hwid)
 async def msg_hwid(message: Message, state: FSMContext):
     hwid = (message.text or "").strip().upper()
     data = await state.get_data()
