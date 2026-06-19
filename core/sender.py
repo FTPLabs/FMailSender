@@ -23,6 +23,12 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 try:
+    import dns.resolver as _dns_resolver
+    _DNS_OK = True
+except ImportError:
+    _DNS_OK = False
+
+try:
     import aiosmtplib
     _HAS_AIOSMTPLIB = True
 except ImportError:
@@ -231,16 +237,45 @@ class EmailTemplate:
         )
 
 
+def _resolve_via_mx(domain: str) -> "Optional[dict]":
+    """Query DNS MX records, map to known provider, or use MX host as SMTP server."""
+    if not _DNS_OK:
+        return None
+    try:
+        answers = sorted(
+            _dns_resolver.resolve(domain, "MX", lifetime=5),
+            key=lambda r: r.preference,
+        )
+        if not answers:
+            return None
+        mx_host = str(answers[0].exchange).rstrip(".")
+        mx_base = ".".join(mx_host.split(".")[-2:])
+        if mx_base in _SMTP_CONFIGS:
+            return _SMTP_CONFIGS[mx_base]
+        for prefix, cfg in _SMTP_DOMAIN_PATTERNS:
+            if prefix.rstrip(".") in mx_host:
+                return cfg
+        return {"host": mx_host, "port": 587, "use_ssl": False, "use_tls": True}
+    except Exception:
+        return None
+
+
 def get_smtp_config_for_domain(domain: str) -> Optional[dict]:
-    """Exact lookup first, then prefix-pattern fallback for outlook/hotmail/live/yahoo/gmx families."""
+    """4-tier SMTP resolution: dict -> pattern -> MX lookup -> generic smtp.<domain> fallback."""
     d = domain.lower().strip()
+    # Tier 1: exact match in master config
     if d in _SMTP_CONFIGS:
         return _SMTP_CONFIGS[d]
-    # Pattern fallback: prefix match (e.g. "outlook." matches "outlook.com", "outlook.de", …)
+    # Tier 2: prefix pattern (outlook.*, hotmail.*, live.*, yahoo.*, gmx.*)
     for prefix, cfg in _SMTP_DOMAIN_PATTERNS:
         if d.startswith(prefix):
             return cfg
-    return None
+    # Tier 3: MX record lookup via dnspython
+    mx_cfg = _resolve_via_mx(d)
+    if mx_cfg:
+        return mx_cfg
+    # Tier 4: generic fallback
+    return {"host": "smtp." + d, "port": 587, "use_ssl": False, "use_tls": True}
 
 
 @dataclass
@@ -705,6 +740,43 @@ class SendingEngine:
                     await smtp.quit()
                 except Exception:
                     pass
+        except (socket.timeout, TimeoutError, ConnectionRefusedError, OSError) as _conn_err:
+            # Port fallback: try alternate port before giving up (465<->587)
+            _fallback_map = {
+                465: (587, False, True),
+                587: (465, True, False),
+                25:  (587, False, True),
+            }
+            if account.port in _fallback_map:
+                _fb_port, _fb_ssl, _fb_tls = _fallback_map[account.port]
+                try:
+                    import ssl as _ssl2
+                    _ctx2 = _ssl2.create_default_context()
+                    if _fb_ssl:
+                        _s2 = smtplib.SMTP_SSL(account.host, _fb_port, context=_ctx2, timeout=30)
+                    else:
+                        _s2 = smtplib.SMTP(account.host, _fb_port, timeout=30)
+                        _s2.ehlo()
+                        if _fb_tls:
+                            _s2.starttls(context=_ctx2)
+                            _s2.ehlo()
+                    _s2.login(account.email, account.password)
+                    _s2.send_message(msg)
+                    _s2.quit()
+                    return SendResult(
+                        recipient_email=recipient.email,
+                        success=True,
+                        account_used=account.email,
+                        message_id=msg.get("Message-ID", ""),
+                    )
+                except Exception:
+                    pass
+            return SendResult(
+                recipient_email=recipient.email,
+                success=False,
+                error=str(_conn_err),
+                account_used=account.email,
+            )
         except Exception as e:
             return SendResult(
                 recipient_email=recipient.email,
