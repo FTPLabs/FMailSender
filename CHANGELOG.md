@@ -1,6 +1,32 @@
 ## [3.5.3] — 2025-06-19
 
-  ### Fixed (CRITICAL)
+## [3.5.3] — 2026-06-19
+
+  ### 🔴 Critical fixes
+  - **C-2** `core/sender.py`: Добавлен `ehlo()` до и после `starttls()` в async SMTP — **главная причина сбоев** на Office365 / Hotmail / Exchange / всех корп. серверах с STARTTLS
+  - **C-3** `server/database.py`: `sys.path.insert(0, ...)` перед импортами — устранён `ImportError` при запуске через systemd  
+  - **C-4** `server/.env.example`: убраны leading spaces — `python-dotenv` теперь корректно читает переменные
+
+  ### 🟠 High fixes
+  - **H-1** `core/sender.py`: добавлена таблица `_MX_TO_SMTP` — MX-хост (входящий) больше не используется напрямую как SMTP-сервер исходящей почты. Google / Office365 / Yahoo / Mimecast маппятся на правильные SMTP
+  - **H-2** `core/smtp_validator.py`: параллельная проверка DKIM-селекторов через `ThreadPoolExecutor` — 36 сек → ~3 сек
+
+  ### 🟡 Medium fixes
+  - **M-1** `server/crypto_pay.py`: `aiohttp.ClientSession` инвалидируется после сетевой ошибки; `content_type=None` для нестандартных ответов CryptoBot
+  - **M-2** `server/bot.py`: восстановление FSM-состояний из `.tmp` при падении бота
+
+  ### 🆕 New features
+  - **GUI-2** `gui/screens/screen_accounts.py`: кнопка «🔌 Тест подключения» прямо в диалоге добавления/редактирования аккаунта — SMTP-проверка без закрытия окна
+  - **CI** `build.yml`: job `restore-privacy` — автоматически возвращает репозиторий в приватный режим после завершения сборки (обход лимитов GitHub Actions через временный публичный режим)
+  - **CI** `scripts/toggle_and_build.py`: скрипт-обёртка для запуска сборки с автоматическим переключением видимости репозитория
+
+  ### 📦 Build & deps
+  - `build.py` обновлён до v2.0: `collect_all` для PyQt6, проверка зависимостей, UPX excludes
+  - `requirements.txt`: добавлен `Pillow>=10.0.0`
+  - `server/requirements.txt`: добавлен `cryptography>=41.0.0`
+  - `build-release.yml`: исправлены leading spaces (workflow не запускался)
+
+    ### Fixed (CRITICAL)
   - **C-2**: SMTP STARTTLS — добавлен `ehlo()` до/после `starttls()` в async-движке. Главная причина «SMTP не работает» на Office365/Hotmail/Exchange/корп. серверах
   - **C-3**: `server/database.py` — `sys.path.insert` перед импортами; устранён `ImportError` при systemd-запуске
   - **C-4**: `server/.env.example` — убраны leading spaces; `dotenv` теперь корректно читает переменные
