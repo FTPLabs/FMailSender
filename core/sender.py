@@ -725,11 +725,12 @@ class SendingEngine:
                 # при connect() когда сервер объявил STARTTLS в EHLO.
                 smtp = aiosmtplib.SMTP(
                     hostname=account.host, port=account.port,
-                    use_tls=False, start_tls=account.use_tls, timeout=30,
+                    use_tls=False, timeout=30,
                 )
             await smtp.connect()
             try:
-                pass  # FIX: STARTTLS управляется start_tls= в конструкторе
+                if not account.use_ssl and account.use_tls:
+                    await smtp.starttls()  # FIX H3: aiosmtplib 3.x — явный STARTTLS
                 await smtp.login(account.email, account.password)
                 await smtp.send_message(msg)
                 return SendResult(
