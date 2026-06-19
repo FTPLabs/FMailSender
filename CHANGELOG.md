@@ -1,4 +1,27 @@
-# Changelog
+## [3.5.3] — 2025-06-19
+
+  ### Fixed (CRITICAL)
+  - **C-2**: SMTP STARTTLS — добавлен `ehlo()` до/после `starttls()` в async-движке. Главная причина «SMTP не работает» на Office365/Hotmail/Exchange/корп. серверах
+  - **C-3**: `server/database.py` — `sys.path.insert` перед импортами; устранён `ImportError` при systemd-запуске
+  - **C-4**: `server/.env.example` — убраны leading spaces; `dotenv` теперь корректно читает переменные
+
+  ### Fixed (HIGH)
+  - **H-1**: `_resolve_via_mx` — таблица `_MX_TO_SMTP` (Google/O365/Yahoo/Mimecast/etc); MX-хост больше не используется как SMTP напрямую
+  - **H-2**: `_check_dkim` — параллельный перебор селекторов через `ThreadPoolExecutor`; время: 36s → ~3s
+
+  ### Fixed (MEDIUM)
+  - **M-1**: `crypto_pay.py` — инвалидация `aiohttp.ClientSession` при сетевой ошибке; `content_type=None` для robust JSON parse
+  - **M-2**: `bot.py JsonFileStorage._load` — восстановление из `.tmp`-файла при краше в ходе записи
+
+  ### Changed
+  - `build.py v2.0`: проверка зависимостей перед сборкой, `collect_all PyQt6`, UPX excludes для DLL, режим `--onedir`
+  - `requirements.txt`: добавлен `Pillow>=10.0.0`
+  - `server/requirements.txt`: добавлен `cryptography>=41.0.0`
+  - `core/smtp_validator.py`: параллельная DKIM-проверка через `ThreadPoolExecutor`
+
+  ---
+
+  # Changelog
 
     ## [3.5.2] - 2026-06-19
 
