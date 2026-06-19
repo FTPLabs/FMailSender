@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="280" viewBox="0 0 900 280">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#07090f"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="900" height="280" rx="16" fill="url(#bg)" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+
+  <text x="36" y="36" font-family="'Inter',system-ui,sans-serif" font-size="14" font-weight="700" fill="rgba(255,255,255,0.8)" letter-spacing="-0.01em">FMail Sender — Цветовая палитра</text>
+
+  <!-- Row 1: Main colors -->
+  <g transform="translate(36,56)">
+    <!-- bg -->
+    <rect x="0"   y="0" width="80" height="80" rx="10" fill="#07090f" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+    <text x="40"  y="100" font-family="'Inter',system-ui" font-size="9" fill="rgba(255,255,255,0.5)" text-anchor="middle">Background</text>
+    <text x="40"  y="112" font-family="monospace" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">#07090f</text>
+
+    <!-- surface -->
+    <rect x="96"  y="0" width="80" height="80" rx="10" fill="#0d1117" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+    <text x="136" y="100" font-family="'Inter',system-ui" font-size="9" fill="rgba(255,255,255,0.5)" text-anchor="middle">Surface</text>
+    <text x="136" y="112" font-family="monospace" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">#0d1117</text>
+
+    <!-- surface2 -->
+    <rect x="192" y="0" width="80" height="80" rx="10" fill="#12171f" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+    <text x="232" y="100" font-family="'Inter',system-ui" font-size="9" fill="rgba(255,255,255,0.5)" text-anchor="middle">Surface 2</text>
+    <text x="232" y="112" font-family="monospace" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">#12171f</text>
+
+    <!-- Purple primary -->
+    <rect x="312" y="0" width="80" height="80" rx="10" fill="#8b5cf6"/>
+    <text x="352" y="100" font-family="'Inter',system-ui" font-size="9" fill="rgba(255,255,255,0.5)" text-anchor="middle">Primary</text>
+    <text x="352" y="112" font-family="monospace" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">#8b5cf6</text>
+
+    <!-- Purple dark -->
+    <rect x="408" y="0" width="80" height="80" rx="10" fill="#7c3aed"/>
+    <text x="448" y="100" font-family="'Inter',system-ui" font-size="9" fill="rgba(255,255,255,0.5)" text-anchor="middle">Primary Dark</text>
+    <text x="448" y="112" font-family="monospace" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">#7c3aed</text>
+
+    <!-- Purple light -->
+    <rect x="504" y="0" width="80" height="80" rx="10" fill="#a78bfa"/>
+    <text x="544" y="100" font-family="'Inter',system-ui" font-size="9" fill="rgba(255,255,255,0.5)" text-anchor="middle">Primary Light</text>
+    <text x="544" y="112" font-family="monospace" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">#a78bfa</text>
+
+    <!-- Green -->
+    <rect x="624" y="0" width="80" height="80" rx="10" fill="#22c55e"/>
+    <text x="664" y="100" font-family="'Inter',system-ui" font-size="9" fill="rgba(255,255,255,0.5)" text-anchor="middle">Success</text>
+    <text x="664" y="112" font-family="monospace" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">#22c55e</text>
+
+    <!-- Red -->
+    <rect x="720" y="0" width="80" height="80" rx="10" fill="#ef4444"/>
+    <text x="760" y="100" font-family="'Inter',system-ui" font-size="9" fill="rgba(255,255,255,0.5)" text-anchor="middle">Error</text>
+    <text x="760" y="112" font-family="monospace" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">#ef4444</text>
+  </g>
+
+  <!-- Row 2: Semantic + Text colors -->
+  <g transform="translate(36,188)">
+    <!-- Amber -->
+    <rect x="0"   y="0" width="60" height="40" rx="8" fill="#f59e0b"/>
+    <text x="30"  y="56" font-family="monospace" font-size="8" fill="rgba(255,255,255,0.4)" text-anchor="middle">#f59e0b  Warning</text>
+
+    <!-- Blue -->
+    <rect x="72"  y="0" width="60" height="40" rx="8" fill="#3b82f6"/>
+    <text x="102" y="56" font-family="monospace" font-size="8" fill="rgba(255,255,255,0.4)" text-anchor="middle">#3b82f6  Info</text>
+
+    <!-- Text -->
+    <rect x="144" y="0" width="60" height="40" rx="8" fill="#e2e8f0"/>
+    <text x="174" y="56" font-family="monospace" font-size="8" fill="rgba(255,255,255,0.4)" text-anchor="middle">#e2e8f0  Text</text>
+
+    <!-- Muted -->
+    <rect x="216" y="0" width="60" height="40" rx="8" fill="rgba(255,255,255,0.38)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+    <text x="246" y="56" font-family="monospace" font-size="8" fill="rgba(255,255,255,0.4)" text-anchor="middle">38% white  Muted</text>
+
+    <!-- Border -->
+    <rect x="288" y="0" width="60" height="40" rx="8" fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+    <text x="318" y="56" font-family="monospace" font-size="8" fill="rgba(255,255,255,0.4)" text-anchor="middle">7% white  Border</text>
+
+    <!-- Purple dim -->
+    <rect x="360" y="0" width="60" height="40" rx="8" fill="rgba(139,92,246,0.12)" stroke="rgba(139,92,246,0.35)" stroke-width="1"/>
+    <text x="390" y="56" font-family="monospace" font-size="8" fill="rgba(255,255,255,0.4)" text-anchor="middle">#8b5cf6 12%  Dim</text>
+  </g>
+</svg>
