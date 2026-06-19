@@ -1325,25 +1325,25 @@ async def cb_buy_plan(query: CallbackQuery, state: FSMContext):
         )
     else:
         await state.set_state(BuyFlow.waiting_hwid)
-          kb_hwid_skip = InlineKeyboardMarkup(inline_keyboard=[
-              [InlineKeyboardButton(text="⏭ Пропустить (HWID привяжется при запуске)", callback_data=f"skip_hwid:{plan_id}")],
-              [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_buy")],
-          ])
-          await send_or_edit(
-              query,
-              f"📦 <b>{PLANS[plan_id]['name']}</b>\n\n"
-              "💻 <b>HWID</b> — уникальный ID вашего ПК.\n\n"
-              "<b>Нет программы?</b> Нажмите «Пропустить» — HWID привяжется автоматически при первом запуске.\n"
-              "<b>Уже установлена?</b> Скопируйте HWID с экрана активации и отправьте сюда:",
-              reply_markup=kb_hwid_skip,
-          )
-  
+        kb_hwid_skip = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Пропустить (HWID привяжется при запуске)", callback_data=f"skip_hwid:{plan_id}")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_buy")],
+        ])
+        await send_or_edit(
+            query,
+            f"📦 <b>{PLANS[plan_id]['name']}</b>\n\n"
+            "💻 <b>HWID</b> — уникальный ID вашего ПК.\n\n"
+            "<b>Нет программы?</b> Нажмите «Пропустить» — HWID привяжется автоматически при первом запуске.\n"
+            "<b>Уже установлена?</b> Скопируйте HWID с экрана активации и отправьте сюда:",
+            reply_markup=kb_hwid_skip,
+        )
+
 
 @dp.callback_query(F.data.startswith("use_hwid:"))
 async def cb_use_hwid(query: CallbackQuery, state: FSMContext):
     hwid = query.data.split(":", 1)[1]
     data = await state.get_data()
-  await _proceed_to_payment(query, state, hwid, data.get("plan_id", "week"))
+    await _proceed_to_payment(query, state, hwid, data.get("plan_id", "week"))
 
 
 @dp.callback_query(F.data.startswith("skip_hwid:"))
@@ -1360,9 +1360,9 @@ async def cb_skip_hwid(query: CallbackQuery, state: FSMContext):
 
 @dp.message(BuyFlow.waiting_hwid)
 async def msg_hwid(message: Message, state: FSMContext):
-  hwid = (message.text or "").strip().upper()
-  data = await state.get_data()
-  if len(hwid) < 8 or " " in hwid:
+    hwid = (message.text or "").strip().upper()
+    data = await state.get_data()
+    if len(hwid) < 8 or " " in hwid:
         await message.answer("❌ Неверный формат HWID. Скопируй его из программы.")
         return
     await db.set_user_hwid(message.from_user.id, hwid)
