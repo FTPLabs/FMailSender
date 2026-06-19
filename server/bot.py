@@ -766,15 +766,15 @@ async def cb_cabinet(query: CallbackQuery):
         lines.append("📦 Подписка: <b>нет активной</b>")
         lines.append("💡 Нажми «Купить лицензию» для покупки")
 
-    # FIX НОВЫЙ: кнопка сброса HWID если привязан
-      if hwid and active_lic:
-          kb_cabinet = InlineKeyboardMarkup(inline_keyboard=[
-              [InlineKeyboardButton(text="🔄 Сбросить HWID (1 раз/30 дн.)", callback_data="cabinet_reset_hwid")],
-              [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
-          ])
-      else:
-          kb_cabinet = kb_back_main()
-      await send_or_edit(query, "\n".join(lines), reply_markup=kb_cabinet)
+    # FIX: кнопка сброса HWID если привязан
+    if hwid and active_lic:
+        kb_cabinet = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Сбросить HWID (1 раз/30 дн.)", callback_data="cabinet_reset_hwid")],
+            [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
+        ])
+    else:
+        kb_cabinet = kb_back_main()
+    await send_or_edit(query, "\n".join(lines), reply_markup=kb_cabinet)
 
 
   # ─── Скачать приложение ──────────────────────────────────────────────────────
