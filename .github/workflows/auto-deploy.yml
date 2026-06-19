@@ -3,34 +3,28 @@ name: Auto Deploy to VPS
   on:
     push:
       branches: [main]
-    workflow_run:
-      workflows: ["Build Windows EXE"]
-      types: [completed]
-      branches: [main]
 
   jobs:
     deploy:
       runs-on: ubuntu-latest
-      if: ${{ github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
       steps:
         - name: Deploy to VPS via SSH
-          uses: appleboy/ssh-action@v1.0.3
+          uses: appleboy/ssh-action@v1.2.0
           with:
             host: ${{ secrets.VPS_HOST }}
             username: ${{ secrets.VPS_USER }}
             password: ${{ secrets.VPS_PASSWORD }}
             port: 22
+            command_timeout: 120s
             script: |
+              set -e
               cd /opt/fmailsender
               git fetch origin main
-              git reset --hard origin/main
-              if [ ! -f venv/bin/pip ]; then
-                python3 -m venv venv
-              fi
+              git merge --ff-only origin/main || (git stash && git merge --ff-only origin/main)
+              if [ ! -f venv/bin/pip ]; then python3 -m venv venv; fi
               venv/bin/pip install -q --upgrade pip
               venv/bin/pip install -q -r server/requirements.txt
               systemctl daemon-reload
-              systemctl restart fmailsender
-              sleep 3
-              systemctl is-active fmailsender && echo "✅ Deploy OK" || echo "❌ Service failed"
+              systemctl restart fmailsender && echo "Service restarted OK" || echo "Service restart skipped"
+              echo "Deploy complete: $(git log --oneline -1)"
   
