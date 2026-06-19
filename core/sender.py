@@ -514,8 +514,31 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
         raw = e.smtp_error
         detail = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
         return False, f"Неверный логин или пароль. {detail[:120]}"
-    except smtplib.SMTPConnectError:
-        return False, f"Не удалось подключиться к {account.host}:{account.port}. Проверьте хост и порт."
+    except (smtplib.SMTPConnectError, ConnectionRefusedError, OSError, TimeoutError) as _conn_err:
+          # FIX v2.9.5: Port fallback — если 587 заблокирован пробуем 465 и наоборот
+          _fb_map = {587: (465, True, False), 465: (587, False, True), 25: (587, False, True)}
+          if account.port in _fb_map:
+              _fb_port, _fb_ssl, _fb_tls = _fb_map[account.port]
+              try:
+                  _ctx2 = _ssl.create_default_context()
+                  if _fb_ssl:
+                      _s2 = smtplib.SMTP_SSL(account.host, _fb_port, context=_ctx2, timeout=8)
+                  else:
+                      _s2 = smtplib.SMTP(account.host, _fb_port, timeout=8)
+                      _s2.ehlo()
+                      if _fb_tls:
+                          _s2.starttls(context=_ctx2)
+                          _s2.ehlo()
+                  _s2.login(account.email, account.password)
+                  _s2.quit()
+                  return True, f"OK — {account.host}:{_fb_port} (fallback) авторизация успешна"
+              except smtplib.SMTPAuthenticationError as _auth_e:
+                  _raw2 = _auth_e.smtp_error
+                  _det2 = _raw2.decode("utf-8", errors="replace") if isinstance(_raw2, bytes) else str(_raw2)
+                  return False, f"Неверный логин или пароль. {_det2[:120]}"
+              except Exception:
+                  pass
+          return False, f"Не удалось подключиться к {account.host}:{account.port}. Проверьте хост и порт."
     except smtplib.SMTPServerDisconnected:
         return False, "Сервер разорвал соединение. Возможно, неверный протокол (SSL/TLS)."
     except smtplib.SMTPException as e:
