@@ -819,11 +819,10 @@ class AccountsScreen(QWidget):
                   from PyQt6.QtGui import QColor
                   active_item.setText("✓" if ok else "✗")
                   active_item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
-              # После OK — обновляем флаг страны прокси
-              if ok and 0 <= r < len(self._accounts):
-                  _px = self._accounts[r].proxy or ""
-                  if _px.strip():
-                      self._fetch_proxy_country(r, _px.strip())
+              # FIX: прокси-детект всегда — независимо от результата SMTP-теста
+              _px = (self._accounts[r].proxy or "") if 0 <= r < len(self._accounts) else ""
+              if _px.strip():
+                  self._fetch_proxy_country(r, _px.strip())
 
       w.result_ready.connect(on_result)
       self._test_workers.append(w)
