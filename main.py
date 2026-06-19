@@ -65,7 +65,7 @@ def main():
     threading.Thread(target=security_check, daemon=True).start()
 
     # Ждём HWID не более 3 сек, чтобы check_license получил актуальный кэш
-    hwid_ready.wait(timeout=3.0)
+    hwid_ready.wait(timeout=10.0)
 
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QFont
