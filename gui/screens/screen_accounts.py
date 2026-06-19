@@ -612,26 +612,92 @@ class _CountryWorker(QThread):
         self.result_ready.emit(self._row, flag)
 
     @staticmethod
-    def _resolve(proxy_url: str) -> str:
-        try:
-            parsed = urllib.parse.urlparse(proxy_url)
-            host = parsed.hostname or ""
-            if not host:
-                return "❓"
-            req = urllib.request.Request(
-                f"http://ip-api.com/json/{host}?fields=country,countryCode",
-                headers={"User-Agent": "FMailSender/3.1"},
-            )
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                data = json.loads(resp.read())
-                cc = data.get("countryCode", "")
-                country = data.get("country", "")
-                # Конвертируем ISO код → эмодзи флаг
-                flag = "".join(chr(0x1F1E0 + ord(c) - ord('A')) for c in cc.upper()) if len(cc) == 2 else "🌍"
-                return f"{flag} {country}" if country else flag
-        except Exception:
-            return "🌐"
+      def _cc_flag(cc: str) -> str:
+          if len(cc) == 2:
+              return "".join(chr(0x1F1E0 + ord(c) - ord('A')) for c in cc.upper())
+          return "\U0001f30d"
 
+      @staticmethod
+      def _resolve(proxy_url: str) -> str:
+          """Connects THROUGH the proxy to ip-api.com for the real exit-IP country.
+          Supports HTTP/HTTPS proxies natively; SOCKS5 via PySocks if available.
+          Falls back to direct host-IP lookup on any error.
+          """
+          try:
+              parsed = urllib.parse.urlparse(proxy_url)
+              scheme = (parsed.scheme or "http").lower().rstrip("://")
+              host = parsed.hostname or ""
+              port = parsed.port or (1080 if "socks" in scheme else 8080)
+              uname = parsed.username or ""
+              upass = parsed.password or ""
+              if not host:
+                  return "\u2753"
+
+              auth = ""
+              if uname:
+                  auth = (f"{urllib.parse.quote(uname,safe='')}"
+                          f":{urllib.parse.quote(upass,safe='')}@")
+
+              # HTTP/HTTPS proxy: urllib ProxyHandler
+              if scheme in ("http", "https", ""):
+                  proxy_full = f"http://{auth}{host}:{port}"
+                  handler = urllib.request.ProxyHandler({"http": proxy_full, "https": proxy_full})
+                  opener = urllib.request.build_opener(handler)
+                  for url in [
+                      "http://ip-api.com/json/?fields=status,country,countryCode",
+                      "http://ipinfo.io/json",
+                  ]:
+                      try:
+                          req = urllib.request.Request(url, headers={"User-Agent": "FMailSender/3.1"})
+                          with opener.open(req, timeout=7) as resp:
+                              d = json.loads(resp.read())
+                              cc = d.get("countryCode") or d.get("country","")[:2]
+                              ctry = d.get("country", cc)
+                              return f"{_CountryWorker._cc_flag(cc)} {ctry}".strip()
+                      except Exception:
+                          continue
+
+              # SOCKS5/SOCKS4 proxy
+              elif "socks" in scheme:
+                  try:
+                      import socks
+                      stype = socks.SOCKS5 if "socks5" in scheme else socks.SOCKS4
+                      s = socks.socksocket()
+                      s.set_proxy(stype, host, port, True, uname or None, upass or None)
+                      s.settimeout(7)
+                      s.connect(("ip-api.com", 80))
+                      s.send(b"GET /json/?fields=status,country,countryCode HTTP/1.0\r\n"
+                             b"Host: ip-api.com\r\nUser-Agent: FMailSender/3.1\r\n\r\n")
+                      raw = b""
+                      while True:
+                          c = s.recv(4096)
+                          if not c:
+                              break
+                          raw += c
+                      s.close()
+                      if b"\r\n\r\n" in raw:
+                          body = raw.split(b"\r\n\r\n", 1)[1].decode("utf-8","replace")
+                          d = json.loads(body)
+                          cc = d.get("countryCode","")
+                          ctry = d.get("country", cc)
+                          return f"{_CountryWorker._cc_flag(cc)} {ctry}".strip()
+                  except ImportError:
+                      pass
+                  except Exception:
+                      pass
+
+              # Fallback: look up proxy host directly
+              req = urllib.request.Request(
+                  f"http://ip-api.com/json/{host}?fields=country,countryCode",
+                  headers={"User-Agent": "FMailSender/3.1"},
+              )
+              with urllib.request.urlopen(req, timeout=4) as resp:
+                  d = json.loads(resp.read())
+                  cc = d.get("countryCode","")
+                  ctry = d.get("country","")
+                  return f"{_CountryWorker._cc_flag(cc)} {ctry} (хост)".strip()
+          except Exception:
+              return "\U0001f310"
 
 class AccountsScreen(QWidget):
   accounts_changed = pyqtSignal(list)
@@ -642,6 +708,7 @@ class AccountsScreen(QWidget):
       self._test_workers: list[TestWorker] = []
       self._import_worker = None
       self._proxy_check_worker = None
+      self._test_cancel_event = threading.Event()
       self._setup_ui()
       self._load()
 
@@ -675,11 +742,22 @@ class AccountsScreen(QWidget):
       toolbar.addStretch()
 
       self.test_all_btn = QPushButton("Проверить все")
-      self.test_all_btn.setObjectName("btn_icon")
-      self.test_all_btn.clicked.connect(self._test_all)
-      toolbar.addWidget(self.test_all_btn)
+        self.test_all_btn.setObjectName("btn_icon")
+        self.test_all_btn.clicked.connect(self._test_all)
+        toolbar.addWidget(self.test_all_btn)
 
-      select_all_btn = QPushButton("Выделить всё")
+        self.test_one_btn = QPushButton("Проверить выбранный")
+        self.test_one_btn.setObjectName("btn_icon")
+        self.test_one_btn.clicked.connect(self._test_selected)
+        toolbar.addWidget(self.test_one_btn)
+
+        self.cancel_test_btn = QPushButton("\u23f9 Отмена")
+        self.cancel_test_btn.setObjectName("btn_secondary")
+        self.cancel_test_btn.clicked.connect(self._cancel_test)
+        self.cancel_test_btn.setEnabled(False)
+        toolbar.addWidget(self.cancel_test_btn)
+
+        select_all_btn = QPushButton("Выделить всё")
       select_all_btn.setObjectName("btn_icon")
       select_all_btn.clicked.connect(lambda: self.table.selectAll())
       toolbar.addWidget(select_all_btn)
@@ -690,7 +768,19 @@ class AccountsScreen(QWidget):
       toolbar.addWidget(del_btn)
       layout.addLayout(toolbar)
 
-      self.table = QTableWidget(0, 8)
+        cfg_row = QHBoxLayout()
+        save_cfg_btn = QPushButton("\U0001f4be Сохранить конфиг")
+        save_cfg_btn.setObjectName("btn_secondary")
+        save_cfg_btn.clicked.connect(self._save_config)
+        cfg_row.addWidget(save_cfg_btn)
+        load_cfg_btn = QPushButton("\U0001f4c2 Загрузить конфиг")
+        load_cfg_btn.setObjectName("btn_secondary")
+        load_cfg_btn.clicked.connect(self._load_config)
+        cfg_row.addWidget(load_cfg_btn)
+        cfg_row.addStretch()
+        layout.addLayout(cfg_row)
+
+        self.table = QTableWidget(0, 8)
       self.table.setHorizontalHeaderLabels([
           "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Прокси", "Активен",
       ])
@@ -712,9 +802,7 @@ class AccountsScreen(QWidget):
       self._accounts = load_accounts()
       self._refresh_table()
       self.accounts_changed.emit(self._accounts)
-      # Автопроверка всех аккаунтов при загрузке
-      if self._accounts:
-          QTimer.singleShot(400, self._test_all)
+      # Автопроверка при загрузке отключена — слишком много потоков при большом кол-ве аккаунтов
 
   def _refresh_table(self):
       self.table.setRowCount(0)
@@ -840,11 +928,13 @@ class AccountsScreen(QWidget):
       w.start()
       # Не держим ссылку — QThread удалится сам после finished
 
-  def _test_all(self):
-      if not self._accounts:
-          return
-      self.test_all_btn.setEnabled(False)
-      self.test_all_btn.setText("⏳ Проверяю...")
+  def _test_all(self) -> None:
+        if not self._accounts:
+            return
+        self._test_cancel_event.clear()
+        self.cancel_test_btn.setEnabled(True)
+        self.test_all_btn.setEnabled(False)
+        self.test_all_btn.setText("\u23f3 Проверяю...")
       for row in range(self.table.rowCount()):
           item = self.table.item(row, 5)
           if item:
@@ -878,6 +968,7 @@ class AccountsScreen(QWidget):
               if completed[0] >= total:
                   self.test_all_btn.setEnabled(True)
                   self.test_all_btn.setText("Проверить все")
+                  self.cancel_test_btn.setEnabled(False)
                   ok_cnt = sum(
                       1 for i in range(self.table.rowCount())
                       if self.table.item(i, 5) and "✓" in (self.table.item(i, 5).text() or "")
@@ -1082,7 +1173,101 @@ class AccountsScreen(QWidget):
               f"Назначено {len(valid_proxies)} прокси {len(self._accounts)} аккаунтам."
           )
 
-  def _import_accounts(self):
+
+    def _test_selected(self) -> None:
+        """Проверить выбранные аккаунты (из таблицы)."""
+        rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
+        if not rows:
+            QMessageBox.information(self, "Нет выбранных", "Выберите строки в таблице для проверки.")
+            return
+        for r in rows:
+            self._test_single(r)
+
+    def _cancel_test(self) -> None:
+        """Отменить текущую проверку всех аккаунтов."""
+        self._test_cancel_event.set()
+        for w in self._test_workers:
+            if w.isRunning():
+                w.quit()
+        self._test_workers.clear()
+        self.test_all_btn.setEnabled(True)
+        self.test_all_btn.setText("Проверить все")
+        self.cancel_test_btn.setEnabled(False)
+        self.status_label.setText(f"\u23f9 Проверка отменена | Аккаунтов: {len(self._accounts)}")
+
+    def _save_config(self) -> None:
+        """Сохранить аккаунты в файл по выбору пользователя."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить конфиг аккаунтов", "",
+            "JSON (*.json);;Все файлы (*)"
+        )
+        if not path:
+            return
+        try:
+            import json as _j
+            data = [
+                {
+                    "email": a.email,
+                    "password": a.password,
+                    "host": a.host,
+                    "port": a.port,
+                    "use_ssl": a.use_ssl,
+                    "use_tls": a.use_tls,
+                    "display_name": getattr(a, "display_name", ""),
+                    "daily_limit": getattr(a, "daily_limit", 500),
+                    "hourly_limit": getattr(a, "hourly_limit", 50),
+                    "is_active": getattr(a, "is_active", True),
+                    "imap_host": getattr(a, "imap_host", ""),
+                    "imap_port": getattr(a, "imap_port", 993),
+                    "imap_ssl": getattr(a, "imap_ssl", True),
+                }
+                for a in self._accounts
+            ]
+            from pathlib import Path as _P
+            _P(path).write_text(_j.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            QMessageBox.information(self, "Сохранено", f"Конфиг сохранён:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка сохранения", str(e))
+
+    def _load_config(self) -> None:
+        """Загрузить аккаунты из файла по выбору пользователя."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Загрузить конфиг аккаунтов", "",
+            "JSON (*.json);;Все файлы (*)"
+        )
+        if not path:
+            return
+        try:
+            import json as _j
+            from pathlib import Path as _P
+            raw = _j.loads(_P(path).read_text(encoding="utf-8"))
+            loaded = []
+            for d in raw:
+                a = SmtpAccount(
+                    email=d["email"],
+                    password=d.get("password",""),
+                    host=d["host"],
+                    port=d.get("port", 587),
+                    use_ssl=d.get("use_ssl", False),
+                    use_tls=d.get("use_tls", True),
+                    display_name=d.get("display_name",""),
+                    daily_limit=d.get("daily_limit", 500),
+                    hourly_limit=d.get("hourly_limit", 50),
+                    is_active=d.get("is_active", True),
+                )
+                a.imap_host = d.get("imap_host","")
+                a.imap_port = d.get("imap_port", 993)
+                a.imap_ssl = d.get("imap_ssl", True)
+                loaded.append(a)
+            self._accounts = loaded
+            save_accounts(self._accounts)
+            self._refresh_table()
+            self.accounts_changed.emit(self._accounts)
+            QMessageBox.information(self, "Загружено", f"Загружено {len(loaded)} аккаунтов из:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка загрузки", str(e))
+
+    def _import_accounts(self):
       path, _ = QFileDialog.getOpenFileName(
           self, "Импорт аккаунтов", "", "Text files (*.txt);;All files (*)"
       )
