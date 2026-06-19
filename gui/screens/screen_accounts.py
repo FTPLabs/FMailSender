@@ -612,92 +612,92 @@ class _CountryWorker(QThread):
         self.result_ready.emit(self._row, flag)
 
     @staticmethod
-      def _cc_flag(cc: str) -> str:
-          if len(cc) == 2:
-              return "".join(chr(0x1F1E0 + ord(c) - ord('A')) for c in cc.upper())
-          return "\U0001f30d"
+    def _cc_flag(cc: str) -> str:
+        if len(cc) == 2:
+            return "".join(chr(0x1F1E0 + ord(c) - ord('A')) for c in cc.upper())
+        return "\U0001f30d"
 
-      @staticmethod
-      def _resolve(proxy_url: str) -> str:
-          """Connects THROUGH the proxy to ip-api.com for the real exit-IP country.
-          Supports HTTP/HTTPS proxies natively; SOCKS5 via PySocks if available.
-          Falls back to direct host-IP lookup on any error.
-          """
-          try:
-              parsed = urllib.parse.urlparse(proxy_url)
-              scheme = (parsed.scheme or "http").lower().rstrip("://")
-              host = parsed.hostname or ""
-              port = parsed.port or (1080 if "socks" in scheme else 8080)
-              uname = parsed.username or ""
-              upass = parsed.password or ""
-              if not host:
-                  return "\u2753"
+    @staticmethod
+    def _resolve(proxy_url: str) -> str:
+        """Connects THROUGH the proxy to ip-api.com for the real exit-IP country.
+        Supports HTTP/HTTPS proxies natively; SOCKS5 via PySocks if available.
+        Falls back to direct host-IP lookup on any error.
+        """
+        try:
+            parsed = urllib.parse.urlparse(proxy_url)
+            scheme = (parsed.scheme or "http").lower().rstrip("://")
+            host = parsed.hostname or ""
+            port = parsed.port or (1080 if "socks" in scheme else 8080)
+            uname = parsed.username or ""
+            upass = parsed.password or ""
+            if not host:
+                return "\u2753"
 
               auth = ""
-              if uname:
-                  auth = (f"{urllib.parse.quote(uname,safe='')}"
-                          f":{urllib.parse.quote(upass,safe='')}@")
+            if uname:
+                auth = (f"{urllib.parse.quote(uname,safe='')}"
+                        f":{urllib.parse.quote(upass,safe='')}@")
 
               # HTTP/HTTPS proxy: urllib ProxyHandler
-              if scheme in ("http", "https", ""):
-                  proxy_full = f"http://{auth}{host}:{port}"
-                  handler = urllib.request.ProxyHandler({"http": proxy_full, "https": proxy_full})
-                  opener = urllib.request.build_opener(handler)
-                  for url in [
-                      "http://ip-api.com/json/?fields=status,country,countryCode",
-                      "http://ipinfo.io/json",
-                  ]:
-                      try:
-                          req = urllib.request.Request(url, headers={"User-Agent": "FMailSender/3.1"})
-                          with opener.open(req, timeout=7) as resp:
-                              d = json.loads(resp.read())
-                              cc = d.get("countryCode") or d.get("country","")[:2]
-                              ctry = d.get("country", cc)
-                              return f"{_CountryWorker._cc_flag(cc)} {ctry}".strip()
-                      except Exception:
-                          continue
+            if scheme in ("http", "https", ""):
+                proxy_full = f"http://{auth}{host}:{port}"
+                handler = urllib.request.ProxyHandler({"http": proxy_full, "https": proxy_full})
+                opener = urllib.request.build_opener(handler)
+                for url in [
+                    "http://ip-api.com/json/?fields=status,country,countryCode",
+                    "http://ipinfo.io/json",
+                ]:
+                    try:
+                        req = urllib.request.Request(url, headers={"User-Agent": "FMailSender/3.1"})
+                        with opener.open(req, timeout=7) as resp:
+                            d = json.loads(resp.read())
+                            cc = d.get("countryCode") or d.get("country","")[:2]
+                            ctry = d.get("country", cc)
+                            return f"{_CountryWorker._cc_flag(cc)} {ctry}".strip()
+                    except Exception:
+                        continue
 
               # SOCKS5/SOCKS4 proxy
-              elif "socks" in scheme:
-                  try:
-                      import socks
-                      stype = socks.SOCKS5 if "socks5" in scheme else socks.SOCKS4
-                      s = socks.socksocket()
-                      s.set_proxy(stype, host, port, True, uname or None, upass or None)
-                      s.settimeout(7)
-                      s.connect(("ip-api.com", 80))
-                      s.send(b"GET /json/?fields=status,country,countryCode HTTP/1.0\r\n"
-                             b"Host: ip-api.com\r\nUser-Agent: FMailSender/3.1\r\n\r\n")
-                      raw = b""
-                      while True:
-                          c = s.recv(4096)
-                          if not c:
-                              break
-                          raw += c
-                      s.close()
-                      if b"\r\n\r\n" in raw:
-                          body = raw.split(b"\r\n\r\n", 1)[1].decode("utf-8","replace")
-                          d = json.loads(body)
-                          cc = d.get("countryCode","")
-                          ctry = d.get("country", cc)
-                          return f"{_CountryWorker._cc_flag(cc)} {ctry}".strip()
-                  except ImportError:
-                      pass
-                  except Exception:
-                      pass
+            elif "socks" in scheme:
+                try:
+                    import socks
+                    stype = socks.SOCKS5 if "socks5" in scheme else socks.SOCKS4
+                    s = socks.socksocket()
+                    s.set_proxy(stype, host, port, True, uname or None, upass or None)
+                    s.settimeout(7)
+                    s.connect(("ip-api.com", 80))
+                    s.send(b"GET /json/?fields=status,country,countryCode HTTP/1.0\r\n"
+                           b"Host: ip-api.com\r\nUser-Agent: FMailSender/3.1\r\n\r\n")
+                    raw = b""
+                    while True:
+                        c = s.recv(4096)
+                        if not c:
+                            break
+                        raw += c
+                    s.close()
+                    if b"\r\n\r\n" in raw:
+                        body = raw.split(b"\r\n\r\n", 1)[1].decode("utf-8","replace")
+                        d = json.loads(body)
+                        cc = d.get("countryCode","")
+                        ctry = d.get("country", cc)
+                        return f"{_CountryWorker._cc_flag(cc)} {ctry}".strip()
+                except ImportError:
+                    pass
+                except Exception:
+                    pass
 
               # Fallback: look up proxy host directly
-              req = urllib.request.Request(
-                  f"http://ip-api.com/json/{host}?fields=country,countryCode",
-                  headers={"User-Agent": "FMailSender/3.1"},
-              )
-              with urllib.request.urlopen(req, timeout=4) as resp:
-                  d = json.loads(resp.read())
-                  cc = d.get("countryCode","")
-                  ctry = d.get("country","")
-                  return f"{_CountryWorker._cc_flag(cc)} {ctry} (хост)".strip()
-          except Exception:
-              return "\U0001f310"
+            req = urllib.request.Request(
+                f"http://ip-api.com/json/{host}?fields=country,countryCode",
+                headers={"User-Agent": "FMailSender/3.1"},
+            )
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                d = json.loads(resp.read())
+                cc = d.get("countryCode","")
+                ctry = d.get("country","")
+                return f"{_CountryWorker._cc_flag(cc)} {ctry} (хост)".strip()
+        except Exception:
+            return "\U0001f310"
 
 class AccountsScreen(QWidget):
   accounts_changed = pyqtSignal(list)
