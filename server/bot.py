@@ -1343,26 +1343,26 @@ async def cb_buy_plan(query: CallbackQuery, state: FSMContext):
 async def cb_use_hwid(query: CallbackQuery, state: FSMContext):
     hwid = query.data.split(":", 1)[1]
     data = await state.get_data()
-    await _proceed_to_payment(query, state, hwid, data.get("plan_id", "week"))
+  await _proceed_to_payment(query, state, hwid, data.get("plan_id", "week"))
 
 
 @dp.callback_query(F.data.startswith("skip_hwid:"))
-  async def cb_skip_hwid(query: CallbackQuery, state: FSMContext):
-      """FIX НОВЫЙ: HWID пропущен при покупке — лицензия без HWID,
-      автопривязка произойдёт при первом запуске приложения (/v1/activate)."""
-      plan_id = query.data.split(":", 1)[1]
-      if plan_id not in PLANS or PLANS[plan_id].get("admin_only"):
-          await query.answer("Неизвестный план", show_alert=True)
-          return
-      await state.clear()
-      await _proceed_to_payment(query, state, "", plan_id)
+async def cb_skip_hwid(query: CallbackQuery, state: FSMContext):
+    """FIX НОВЫЙ: HWID пропущен при покупке — лицензия без HWID,
+    автопривязка произойдёт при первом запуске приложения (/v1/activate)."""
+    plan_id = query.data.split(":", 1)[1]
+    if plan_id not in PLANS or PLANS[plan_id].get("admin_only"):
+        await query.answer("Неизвестный план", show_alert=True)
+        return
+    await state.clear()
+    await _proceed_to_payment(query, state, "", plan_id)
 
 
-  @dp.message(BuyFlow.waiting_hwid)
+@dp.message(BuyFlow.waiting_hwid)
 async def msg_hwid(message: Message, state: FSMContext):
-    hwid = (message.text or "").strip().upper()
-    data = await state.get_data()
-    if len(hwid) < 8 or " " in hwid:
+  hwid = (message.text or "").strip().upper()
+  data = await state.get_data()
+  if len(hwid) < 8 or " " in hwid:
         await message.answer("❌ Неверный формат HWID. Скопируй его из программы.")
         return
     await db.set_user_hwid(message.from_user.id, hwid)
