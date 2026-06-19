@@ -58,7 +58,7 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "bellsouth.net":     {"host": "smtp.att.yahoo.com",    "port": 465, "use_ssl": True,  "use_tls": False},
     "ameritech.net":     {"host": "smtp.att.yahoo.com",    "port": 465, "use_ssl": True,  "use_tls": False},
     "cs.com":            {"host": "smtp.cs.com",           "port": 587, "use_ssl": False, "use_tls": True},
-    "gmx.com":           {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
+    "gmx.com":           {"host": "smtp.gmx.com",           "port": 465, "use_ssl": True,  "use_tls": False},
     "gmx.net":           {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
     "gmx.de":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
     "gmx.at":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
@@ -66,7 +66,7 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "gmx.co.uk":         {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
     "gmx.fr":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
     "gmx.es":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
-    "gmx.us":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True},
+    "gmx.us":            {"host": "smtp.gmx.com",           "port": 465, "use_ssl": True,  "use_tls": False},
     # Outlook / Hotmail / Live family — explicit popular TLDs as safety net
     "outlook.com":       {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
     "outlook.de":        {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},
