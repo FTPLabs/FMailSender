@@ -37,7 +37,8 @@ class ValidateResult:
         icon = "✅" if self.ok else "❌"
         dns_info = ""
         if self.spf_ok is not None:
-            dns_info = f" | SPF:{'✓' if self.spf_ok else '✗'} DKIM:{'✓' if self.dkim_ok else '✗'} DMARC:{'✓' if self.dmarc_ok else '✗'}"
+            mx_str = f" MX:{'✓' if self.mx_ok else '✗'}" if self.mx_ok is not None else ""
+            dns_info = f" | SPF:{'✓' if self.spf_ok else '✗'} DKIM:{'✓' if self.dkim_ok else '✗'} DMARC:{'✓' if self.dmarc_ok else '✗'}{mx_str}"  # FIX M3
         return f"{icon} {self.email} → {self.host}:{self.port} [{self.code}]{dns_info}"
 
 
@@ -62,14 +63,21 @@ def _check_dmarc(domain: str) -> bool:
         return False
 
 
-def _check_dkim(domain: str, selector: str = "default") -> bool:
+def _check_dkim(domain: str, selector: str = "") -> bool:
+    """FIX L1: перебираем популярные DKIM-селекторы (default почти никогда не используется)."""
     if not _DNS_OK:
         return False
-    try:
-        dns.resolver.resolve(f"{selector}._domainkey.{domain}", "TXT", lifetime=5)
-        return True
-    except Exception:
-        return False
+    _selectors = [selector] if selector else [
+        "google", "mail", "default", "s1", "s2", "k1", "smtp",
+        "dkim", "selector1", "selector2", "email", "mxvault",
+    ]
+    for sel in _selectors:
+        try:
+            dns.resolver.resolve(f"{sel}._domainkey.{domain}", "TXT", lifetime=3)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def _check_mx(domain: str) -> bool:
