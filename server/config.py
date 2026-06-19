@@ -26,9 +26,13 @@ def _require(key: str) -> str:
 
 
 BOT_TOKEN = _require("BOT_TOKEN")
-ADMIN_IDS = [int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
-if not ADMIN_IDS:
-    print("[WARN] ADMIN_IDS env var is not set — admin panel will be inaccessible.", file=sys.stderr)
+ADMIN_IDS_RAW = os.environ.get("ADMIN_IDS", "").strip()
+  ADMIN_IDS = [int(x) for x in ADMIN_IDS_RAW.split(",") if x.strip().isdigit()]
+  _invalid_admin_ids = [x.strip() for x in ADMIN_IDS_RAW.split(",") if x.strip() and not x.strip().isdigit()]
+  if _invalid_admin_ids:
+      print(f"[WARN] ADMIN_IDS содержит некорректные значения (не числа): {_invalid_admin_ids}", file=sys.stderr)
+  if not ADMIN_IDS:
+      print("[WARN] ADMIN_IDS не задан — admin-панель недоступна.", file=sys.stderr)
 
 MODERATOR_IDS: list[int] = [int(x) for x in os.environ.get("MODERATOR_IDS", "").split(",") if x.strip().isdigit()]
 
