@@ -1,5 +1,19 @@
 # Changelog
 
+  ## [3.5.1] - 2025-06-19
+
+  ### Added
+  - SMTP support for 198 domains via smtp_configs_extra.py: poczta.fm (interia), sapo.pt, bigpond.com/net.au (Telstra), btinternet.com, talktalk.net, tiscali.co.uk, telenet.be, skynet.be, comcast.net, charter.net + all *.rr.com (Spectrum), nifty.com (Japan), kpnmail.nl, ziggo.nl, bluewin.ch, aon.at/a1.net, bell.net, videotron.ca, shaw.ca, telia.com, lyse.net, netvision.net.il, freemail.hu, и ещё 150+ провайдеров по всему миру
+  - load_extra_configs() теперь автоматически инжектируется в _SMTP_CONFIGS при старте
+  - SPF -all hard-fail обнаружение в spam_checker._check_dns (+20 score, предупреждение пользователю)
+
+  ### Fixed
+  - firstmail.ltd: исправлен порт 465 → 25 (tcp-диагностика: порты 465/587 TIMEOUT, только 25 открыт)
+  - t-online.de: подтверждён корректный хост securesmtp.t-online.de:465 (по официальной документации Telekom); для работы требует отдельный "E-Mail-Passwort" из Kundencenter, а не портальный пароль
+
+  ### Changed
+  - smtp_configs_extra.py реструктурирован по регионам: Польша, Чехия/Словакия, UK, Бенилюкс, Скандинавия, Швейцария/Австрия, Австралия/NZ, Канада, США ISP, Япония, Тайвань, Израиль, ЮАР, Франция, Латинская Америка и др.
+
   ## [3.4.3] — 2026-06-18
 
   ### 🔴 Критические исправления
