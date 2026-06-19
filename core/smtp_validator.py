@@ -52,16 +52,18 @@ class ValidateResult:
     mx_ok:    Optional[bool] = None
 
     def summary(self) -> str:
-        icon = "\u2705" if self.ok else "\u274c"
+        tick  = "\u2713"
+        cross = "\u2717"
+        icon  = "\u2705" if self.ok else "\u274c"
         dns_info = ""
         if self.spf_ok is not None:
-            mx_str = f" MX:{'\u2713' if self.mx_ok else '\u2717'}" if self.mx_ok is not None else ""
-            dns_info = (
-                f" | SPF:{'\u2713' if self.spf_ok else '\u2717'}"
-                f" DKIM:{'\u2713' if self.dkim_ok else '\u2717'}"
-                f" DMARC:{'\u2713' if self.dmarc_ok else '\u2717'}{mx_str}"
-            )
-        return f"{icon} {self.email} -> {self.host}:{self.port} [{self.code}]{dns_info}"
+            mx_val = (tick if self.mx_ok else cross) if self.mx_ok is not None else ""
+            mx_str = (" MX:" + mx_val) if mx_val else ""
+            spf_v   = tick if self.spf_ok  else cross
+            dkim_v  = tick if self.dkim_ok else cross
+            dmarc_v = tick if self.dmarc_ok else cross
+            dns_info = " | SPF:" + spf_v + " DKIM:" + dkim_v + " DMARC:" + dmarc_v + mx_str
+        return icon + " " + self.email + " -> " + self.host + ":" + str(self.port) + " [" + self.code + "]" + dns_info
 
 
 # ── DNS helpers ───────────────────────────────────────────────────────────────
