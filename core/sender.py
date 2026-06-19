@@ -1,5 +1,5 @@
 """
-FMailSender core sending engine v2.9.2.
+FMailSender core sending engine v2.9.3.
 Fixes: IndentationError in increment_sent/try_increment/Recipient,
        async parallelism (delay moved inside task wrapper),
        duplicate params documented, race condition eliminated via try_increment.
@@ -697,16 +697,22 @@ class SendingEngine:
         return results
 
 
-    def _pick_account(self) -> Optional[SmtpAccount]:
-        """Pick first account that passes atomic try_increment check."""
-        active = [a for a in self.accounts if a.is_active and a.last_test_ok is not False]
-        if self.config.rotate_accounts:
-            random.shuffle(active)
-        for account in active:
-            if account.try_increment():
-                return account
-        return None
-
+    def _pick_account(self, exclude: "set | None" = None) -> Optional[SmtpAccount]:
+          """Pick first account that passes atomic try_increment check.
+          exclude: set of account emails to skip (retry logic).
+          FIX v2.9.3: added missing exclude param — TypeError crashed every send.
+          """
+          _skip = exclude or set()
+          active = [
+              a for a in self.accounts
+              if a.is_active and a.last_test_ok is not False and a.email not in _skip
+          ]
+          if self.config.rotate_accounts:
+              random.shuffle(active)
+          for account in active:
+              if account.try_increment():
+                  return account
+          return None
     def _emit_progress(
         self,
         results: list,
