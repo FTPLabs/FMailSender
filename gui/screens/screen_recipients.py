@@ -281,15 +281,15 @@ class RecipientsScreen(QWidget):
             try:
                 if ext in ('csv', 'txt', 'tsv', 'dat'):
                     for enc in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
-                          try:
-                              sample = open(path, encoding=enc, errors="replace").read(2048)
-                              break
-                          except Exception:
-                              continue
+                        try:
+                            sample = open(path, encoding=enc, errors="replace").read(2048)
+                            break
+                        except Exception:
+                            continue
                     if self._looks_like_credential_list(sample):
-                          self._import_credential_list(path)
+                        self._import_credential_list(path)
                     else:
-                          self._import_csv(path)
+                        self._import_csv(path)
                 elif ext == 'xlsx':
                     self._import_xlsx(path)
             except Exception as e:
@@ -705,7 +705,7 @@ class RecipientsScreen(QWidget):
         for row, r in enumerate(self._recipients):
             # Статистика считается по всему списку
             is_valid = validate_email_format(r.email)
-            elif is_valid:
+            if is_valid:
                 valid_count += 1
             else:
                 invalid_count += 1
