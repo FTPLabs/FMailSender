@@ -813,7 +813,7 @@ async def cb_menu_download(query: CallbackQuery):
 
         manual_dl  = await db.get_setting("download_url") or ""
 
-        dl_url = manual_dl or release.get("download_url") or DOWNLOAD_URL
+        dl_url = manual_dl or DOWNLOAD_URL  # FIX: всегда fmail.shop, не GitHub
 
     except Exception as _fetch_err:
         logger.warning("Download info fetch error: %s", _fetch_err)
