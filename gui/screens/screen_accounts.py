@@ -460,6 +460,18 @@ class AccountDialog(QDialog):
         self.active_check.setChecked(True)
         layout.addRow("", self.active_check)
 
+        # GUI-2 FIX: кнопка теста SMTP прямо в диалоге — мгновенная обратная связь
+        test_row = QHBoxLayout()
+        self.test_btn = QPushButton("🔌 Тест подключения")
+        self.test_btn.setObjectName("test_smtp_btn")
+        self.test_btn.setToolTip("Проверить SMTP-подключение с текущими данными")
+        self.test_btn.clicked.connect(self._test_smtp_now)
+        self.test_status = QLabel("")
+        self.test_status.setObjectName("test_smtp_status")
+        test_row.addWidget(self.test_btn)
+        test_row.addWidget(self.test_status, 1)
+        layout.addRow("", test_row)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -467,6 +479,43 @@ class AccountDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
+
+    def _test_smtp_now(self):
+        """GUI-2 FIX: тест SMTP прямо в диалоге — без закрытия окна, мгновенная обратная связь."""
+        from PyQt6.QtWidgets import QApplication
+        email    = self.email_edit.text().strip()
+        password = self.password_edit.text().strip()
+        host     = self.host_edit.text().strip()
+        if not email or not password or not host:
+            self.test_status.setText("⚠️  Введите email, пароль и SMTP-хост")
+            self.test_status.setStyleSheet("color: orange;")
+            return
+        self.test_btn.setEnabled(False)
+        self.test_status.setText("⏳ Подключение…")
+        self.test_status.setStyleSheet("color: gray;")
+        QApplication.processEvents()
+        acc = SmtpAccount(
+            email=email, password=password,
+            host=host,
+            port=self.port_spin.value(),
+            use_ssl=self.ssl_check.isChecked(),
+            use_tls=self.tls_check.isChecked(),
+        )
+        self._test_worker = TestWorker(acc, parent=self)
+
+        @pyqtSlot(bool, str)
+        def _on_done(ok: bool, msg: str):
+            self.test_btn.setEnabled(True)
+            if ok:
+                self.test_status.setText("✅ Подключение успешно")
+                self.test_status.setStyleSheet("color: #4caf50;")
+            else:
+                short = msg[:80] + "…" if len(msg) > 80 else msg
+                self.test_status.setText(f"❌ {short}")
+                self.test_status.setStyleSheet("color: #f44336;")
+
+        self._test_worker.result_ready.connect(_on_done)
+        self._test_worker.start()
     def _autofill_smtp(self, email: str):
         if "@" not in email:
             return
