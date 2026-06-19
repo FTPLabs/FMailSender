@@ -1,8 +1,9 @@
 """
-FMailSender core sending engine v2.9.3.
+FMailSender core sending engine v2.9.4.
 Fixes: IndentationError in increment_sent/try_increment/Recipient,
        async parallelism (delay moved inside task wrapper),
        duplicate params documented, race condition eliminated via try_increment.
+v2.9.4: добавлено логирование во все silent except-блоки.
 """
 from __future__ import annotations
 
@@ -216,8 +217,8 @@ _SMTP_CONFIGS: dict[str, dict] = {
 try:
     from core.smtp_configs_extra import load_extra_configs as _load_extra
     _SMTP_CONFIGS.update(_load_extra())
-except Exception:
-    pass
+except Exception as _exc:
+    import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
 
 # Pattern-based fallback: outline/hotmail/live/* → office365; yahoo.* → yahoo; gmx.* → gmx.net
 _O365 = {"host": "smtp.office365.com", "port": 587, "use_ssl": False, "use_tls": True}
@@ -544,8 +545,8 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                   _raw2 = _auth_e.smtp_error
                   _det2 = _raw2.decode("utf-8", errors="replace") if isinstance(_raw2, bytes) else str(_raw2)
                   return False, f"Неверный логин или пароль (порт {_fb_port}). {_det2[:120]}"
-              except Exception:
-                  continue
+              except Exception as _exc:
+                  import logging as _lg; _lg.getLogger("sender").warning("Пропущен элемент: %s", _exc); continue
           return False, f"Не удалось подключиться к {account.host} ни на одном порту (465/587/25/2525)."
           return False, f"Не удалось подключиться к {account.host}:{account.port}. Проверьте хост и порт."
     except smtplib.SMTPNotSupportedError:
@@ -626,8 +627,8 @@ class SendingEngine:
         if task is not None and not task.done():
             try:
                 task.cancel()
-            except Exception:
-                pass
+            except Exception as _exc:
+                import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
 
     def run(self) -> None:
         loop = asyncio.new_event_loop()
@@ -854,13 +855,13 @@ class SendingEngine:
                     # C-2 FIX: ehlo() перед starttls() — RFC 3207 + требование Exchange/Office365
                     try:
                         await smtp.ehlo()
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
                     await smtp.starttls()
                     try:
                         await smtp.ehlo()  # повторный EHLO после STARTTLS — обязателен по RFC 3207
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
                 await smtp.login(account.email, account.password)
                 await smtp.send_message(msg)
                 return SendResult(
@@ -872,8 +873,8 @@ class SendingEngine:
             finally:
                 try:
                     await smtp.quit()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
         except (socket.timeout, TimeoutError, ConnectionRefusedError, OSError) as _conn_err:
             # Port fallback: try alternate port before giving up (465<->587)
             _fallback_map = {
@@ -903,8 +904,8 @@ class SendingEngine:
                         account_used=account.email,
                         message_id=msg.get("Message-ID", ""),
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
             return SendResult(
                 recipient_email=recipient.email,
                 success=False,
