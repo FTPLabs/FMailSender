@@ -633,12 +633,12 @@ class _CountryWorker(QThread):
             if not host:
                 return "\u2753"
 
-              auth = ""
+            auth = ""
             if uname:
                 auth = (f"{urllib.parse.quote(uname,safe='')}"
                         f":{urllib.parse.quote(upass,safe='')}@")
 
-              # HTTP/HTTPS proxy: urllib ProxyHandler
+            # HTTP/HTTPS proxy: urllib ProxyHandler
             if scheme in ("http", "https", ""):
                 proxy_full = f"http://{auth}{host}:{port}"
                 handler = urllib.request.ProxyHandler({"http": proxy_full, "https": proxy_full})
