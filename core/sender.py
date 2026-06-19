@@ -548,10 +548,14 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                   continue
           return False, f"Не удалось подключиться к {account.host} ни на одном порту (465/587/25/2525)."
           return False, f"Не удалось подключиться к {account.host}:{account.port}. Проверьте хост и порт."
+    except smtplib.SMTPNotSupportedError:
+        return False, "Сервер не поддерживает SMTP AUTH. Outlook/Hotmail — требуется App Password. T-online — нужен пароль для внешних программ."
+    except smtplib.SMTPException as _smtp_ex:
+        _smtp_msg = str(_smtp_ex)
+        if "5.7.139" in _smtp_msg or "basic authentication is disabled" in _smtp_msg.lower():
+            return False, "Microsoft отключил базовую SMTP-аутентификацию. Требуется App Password (outlook.com/account/security)."
     except smtplib.SMTPServerDisconnected:
         return False, "Сервер разорвал соединение. Возможно, неверный протокол (SSL/TLS)."
-    except smtplib.SMTPException as e:
-        return False, f"Ошибка SMTP: {e}"
     except OSError as e:
         return False, f"Сетевая ошибка: {e}"
     except Exception as e:
