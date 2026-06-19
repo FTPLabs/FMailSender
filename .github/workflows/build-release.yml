@@ -1,70 +1,69 @@
 name: Build Windows EXE
 
-  on:
-    push:
-      tags:
-        - 'v*'
-    workflow_dispatch:
-      inputs:
-        version:
-          description: 'Version tag (e.g. v3.5.0)'
-          required: true
-          default: 'v3.5.0'
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v3.5.0)'
+        required: true
+        default: 'v3.5.0'
 
-  jobs:
-    build-windows:
-      runs-on: windows-latest
-      steps:
-        - name: Checkout repository
-          uses: actions/checkout@v4
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-        - name: Setup Python 3.12
-          uses: actions/setup-python@v5
-          with:
-            python-version: '3.12'
-            cache: 'pip'
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
 
-        - name: Install dependencies
-          run: |
-            python -m pip install --upgrade pip wheel
-            pip install -r requirements.txt
-            pip install pyinstaller pillow
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -r requirements.txt
+          pip install pyinstaller pillow
 
-        - name: Build EXE
-          run: python build.py
+      - name: Build EXE
+        run: python build.py
 
-        - name: Verify output
-          shell: pwsh
-          run: |
-            if (!(Test-Path "dist/FMailSender.exe")) {
-              Write-Error "EXE not found in dist/"
-              exit 1
-            }
-            \$sz = [math]::Round((Get-Item "dist/FMailSender.exe").length / 1MB, 1)
-            Write-Host "FMailSender.exe - \$sz MB"
+      - name: Verify output
+        shell: pwsh
+        run: |
+          if (!(Test-Path "dist/FMailSender.exe")) {
+            Write-Error "EXE not found in dist/"
+            exit 1
+          }
+          \$sz = [math]::Round((Get-Item "dist/FMailSender.exe").length / 1MB, 1)
+          Write-Host "FMailSender.exe - \$sz MB"
 
-        - name: Upload artifact
-          uses: actions/upload-artifact@v4
-          with:
-            name: FMailSender-${{ github.ref_name || inputs.version }}
-            path: dist/FMailSender.exe
-            retention-days: 30
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMailSender-${{ github.ref_name || inputs.version }}
+          path: dist/FMailSender.exe
+          retention-days: 30
 
-        - name: Create GitHub Release
-          if: startsWith(github.ref, 'refs/tags/')
-          uses: softprops/action-gh-release@v2
-          with:
-            name: "FMailSender ${{ github.ref_name }}"
-            files: dist/FMailSender.exe
-            generate_release_notes: true
-            body: |
-              ## FMailSender ${{ github.ref_name }}
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "FMailSender ${{ github.ref_name }}"
+          files: dist/FMailSender.exe
+          generate_release_notes: true
+          body: |
+            ## FMailSender ${{ github.ref_name }}
 
-              ### Что нового
-              - 300+ доменов, MX-autodiscovery, port fallback 465<->587
-              - Исправлен btinternet.com (mail.btinternet.com)
-              - Добавлены Interia aliases: 2gb.pl, intmail.pl, adresik.net
-              - HWID skip при покупке + HWID сброс 1x/30дней
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  
+            ### Что нового
+            - 300+ доменов, MX-autodiscovery, port fallback 465<->587
+            - Исправлен btinternet.com (mail.btinternet.com)
+            - Добавлены Interia aliases: 2gb.pl, intmail.pl, adresik.net
+            - HWID skip при покупке + HWID сброс 1x/30дней
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
