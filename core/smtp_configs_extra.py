@@ -38,9 +38,7 @@ def load_extra_configs() -> dict[str, dict]:
         "protonmail.com":{"host": "127.0.0.1",         "port": 1025, "use_ssl": False, "use_tls": False,
                           "_note": "⚠ Требуется ProtonMail Bridge (https://proton.me/mail/bridge). Без него — Connection refused на 127.0.0.1:1025"},
         "proton.me":     {"host": "127.0.0.1",         "port": 1025, "use_ssl": False, "use_tls": False},
-        # Mailbox.org
-        "mailbox.org":   {"host": "smtp.mailbox.org",  "port": 465, "use_ssl": True,  "use_tls": False,
-                          "imap_host": "imap.mailbox.org", "imap_port": 993, "imap_ssl": True},
+        # mailbox.org определён в core/sender.py._SMTP_CONFIGS — дубликат удалён (FIX M1)
 
         # ── Asian providers ───────────────────────────────────────────────────
         "qq.com":        {"host": "smtp.qq.com",       "port": 465, "use_ssl": True,  "use_tls": False,
