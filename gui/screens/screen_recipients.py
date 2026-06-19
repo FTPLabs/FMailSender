@@ -166,7 +166,7 @@ class RecipientsScreen(QWidget):
         self.invalid_label = _stat_label("Невалидных: 0", Colors.ERROR)
         self.dupes_label = _stat_label("Дубликатов: 0", Colors.TEXT_MUTED)
 
-        for lbl in [self.total_label, self.valid_label, self.invalid_label,
+        for lbl in [self.total_label, self.valid_label, self.invalid_label, self.dupes_label]:
             stats_row.addWidget(lbl)
         stats_row.addStretch()
 
