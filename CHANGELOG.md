@@ -1,225 +1,36 @@
-## [3.5.3] — 2025-06-19
+# Changelog
 
-## [3.5.3] — 2026-06-19
+  ## v3.6.2 — GUI Python PyQt6 + Bugfixes (2025-06-19)
 
-  ### 🔴 Critical fixes
-  - **C-2** `core/sender.py`: Добавлен `ehlo()` до и после `starttls()` в async SMTP — **главная причина сбоев** на Office365 / Hotmail / Exchange / всех корп. серверах с STARTTLS
-  - **C-3** `server/database.py`: `sys.path.insert(0, ...)` перед импортами — устранён `ImportError` при запуске через systemd  
-  - **C-4** `server/.env.example`: убраны leading spaces — `python-dotenv` теперь корректно читает переменные
+  ### ✨ New
+  - **gui/**: Полный PyQt6 GUI-пакет v3.6.2 (CyberPro dark theme)
+    - `gui/theme.py` — Colors, Spacing, Typography, get_stylesheet()
+    - `gui/icons.py` — иконки и nav-конфигурация
+    - `gui/app.py` — MainWindow с sidebar-навигацией и StackedWidget
+    - `gui/widgets/animated_bg.py` — анимированный фон (3 orbs + dot grid)
+    - `gui/screens/screen_activation.py` — экран активации лицензии (сигнал activation_success)
+    - `gui/screens/screen_dashboard.py` — дашборд: KPI-карточки, прогресс, live-лог
+    - `gui/screens/screen_accounts.py` — SMTP-аккаунты: таблица, добавление, импорт, проверка
+    - `gui/screens/screen_recipients.py` — получатели: список, импорт, валидация, дедупликация, экспорт
+    - `gui/screens/screen_compose.py` — редактор письма: HTML/plain, вложения, опции
+    - `gui/screens/screen_sending.py` — рассылка: настройки, прогресс, лог, управление
+    - `gui/screens/screen_inbox.py` — входящие: bounce-таблица, ответы, автоправила
+  - `core/_version.py`: APP_VERSION обновлён до 3.6.2
 
-  ### 🟠 High fixes
-  - **H-1** `core/sender.py`: добавлена таблица `_MX_TO_SMTP` — MX-хост (входящий) больше не используется напрямую как SMTP-сервер исходящей почты. Google / Office365 / Yahoo / Mimecast маппятся на правильные SMTP
-  - **H-2** `core/smtp_validator.py`: параллельная проверка DKIM-селекторов через `ThreadPoolExecutor` — 36 сек → ~3 сек
+  ### 🔧 Bugfixes v2.9.4
+  - **smtp_validator**: удалены IMAP-порты 993/143/994 из SMTP fallback-списка
+  - **bounce**: regex разделён на HARD_CODE_RE + HARD_TEXT_RE (многострочные DSN)
+  - **duplicate_detector**: добавлены outlook.co.uk/jp, live.ru, hotmail.ru/es/it, internet.ru, ro.ru
+  - **server/config**: WARN при некорректных значениях ADMIN_IDS
+  - **sender v2.9.4**: логирование в silent except-блоках
 
-  ### 🟡 Medium fixes
-  - **M-1** `server/crypto_pay.py`: `aiohttp.ClientSession` инвалидируется после сетевой ошибки; `content_type=None` для нестандартных ответов CryptoBot
-  - **M-2** `server/bot.py`: восстановление FSM-состояний из `.tmp` при падении бота
-
-  ### 🆕 New features
-  - **GUI-2** `gui/screens/screen_accounts.py`: кнопка «🔌 Тест подключения» прямо в диалоге добавления/редактирования аккаунта — SMTP-проверка без закрытия окна
-  - **CI** `build.yml`: job `restore-privacy` — автоматически возвращает репозиторий в приватный режим после завершения сборки (обход лимитов GitHub Actions через временный публичный режим)
-  - **CI** `scripts/toggle_and_build.py`: скрипт-обёртка для запуска сборки с автоматическим переключением видимости репозитория
-
-  ### 📦 Build & deps
-  - `build.py` обновлён до v2.0: `collect_all` для PyQt6, проверка зависимостей, UPX excludes
-  - `requirements.txt`: добавлен `Pillow>=10.0.0`
-  - `server/requirements.txt`: добавлен `cryptography>=41.0.0`
-  - `build-release.yml`: исправлены leading spaces (workflow не запускался)
-
-    ### Fixed (CRITICAL)
-  - **C-2**: SMTP STARTTLS — добавлен `ehlo()` до/после `starttls()` в async-движке. Главная причина «SMTP не работает» на Office365/Hotmail/Exchange/корп. серверах
-  - **C-3**: `server/database.py` — `sys.path.insert` перед импортами; устранён `ImportError` при systemd-запуске
-  - **C-4**: `server/.env.example` — убраны leading spaces; `dotenv` теперь корректно читает переменные
-
-  ### Fixed (HIGH)
-  - **H-1**: `_resolve_via_mx` — таблица `_MX_TO_SMTP` (Google/O365/Yahoo/Mimecast/etc); MX-хост больше не используется как SMTP напрямую
-  - **H-2**: `_check_dkim` — параллельный перебор селекторов через `ThreadPoolExecutor`; время: 36s → ~3s
-
-  ### Fixed (MEDIUM)
-  - **M-1**: `crypto_pay.py` — инвалидация `aiohttp.ClientSession` при сетевой ошибке; `content_type=None` для robust JSON parse
-  - **M-2**: `bot.py JsonFileStorage._load` — восстановление из `.tmp`-файла при краше в ходе записи
-
-  ### Changed
-  - `build.py v2.0`: проверка зависимостей перед сборкой, `collect_all PyQt6`, UPX excludes для DLL, режим `--onedir`
-  - `requirements.txt`: добавлен `Pillow>=10.0.0`
-  - `server/requirements.txt`: добавлен `cryptography>=41.0.0`
-  - `core/smtp_validator.py`: параллельная DKIM-проверка через `ThreadPoolExecutor`
+  ### 🎨 Design
+  - GUI_STATUS.md обновлён до v3.6.2
+  - design/ — новые SVG-ассеты (color-palette, banner, avatar, icons-sprite)
+  - .agents/skills/gui-status/ и .agents/skills/color-palette/ созданы
 
   ---
 
-  # Changelog
-
-    ## [3.5.2] - 2026-06-19
-
-    ### Fixed
-    - **F1 SMTP портыport**: `blackfirsta.com / firsthidden.com / ishowfirstmail.com / analismail.com` — переключены с port 25 → **465+SSL** (port 25 блокируется ISP/VPN/sandbox)
-    - **F2 Новые домены**: добавлены `iejesusmirey.com` (G Suite → smtp.gmail.com:465) и `buzzmaster.market`
-    - **F3 Мульти-формат импорта**: поддержка файлов с разделителем `;` (формат `email;пароль;псевдоним` — iejesusmirey.com)
-    - **F4 Авто-деактивация аккаунта**: при неудачном SMTP-тесте `is_active` автоматически ставится `False`; при успехе — `True`; статус сохраняется в базу сразу
-    - **F5 Флаг прокси при загрузке**: CountryWorker запускается при открытии таблицы аккаунтов — не нужно ждать SMTP-теста; убран ненужный 🌍 из заголовка колонки
-    - **F6 URL скачивания**: при загрузке `.exe` через web-панель (/admin) `download_url` автоматически ставится на `fmail.shop`, а не GitHub
-
-  ## [3.5.1] - 2025-06-19
-
-  ### Added
-  - SMTP support for 198 domains via smtp_configs_extra.py: poczta.fm (interia), sapo.pt, bigpond.com/net.au (Telstra), btinternet.com, talktalk.net, tiscali.co.uk, telenet.be, skynet.be, comcast.net, charter.net + all *.rr.com (Spectrum), nifty.com (Japan), kpnmail.nl, ziggo.nl, bluewin.ch, aon.at/a1.net, bell.net, videotron.ca, shaw.ca, telia.com, lyse.net, netvision.net.il, freemail.hu, и ещё 150+ провайдеров по всему миру
-  - load_extra_configs() теперь автоматически инжектируется в _SMTP_CONFIGS при старте
-  - SPF -all hard-fail обнаружение в spam_checker._check_dns (+20 score, предупреждение пользователю)
-
-  ### Fixed
-  - firstmail.ltd: исправлен порт 465 → 25 (tcp-диагностика: порты 465/587 TIMEOUT, только 25 открыт)
-  - t-online.de: подтверждён корректный хост securesmtp.t-online.de:465 (по официальной документации Telekom); для работы требует отдельный "E-Mail-Passwort" из Kundencenter, а не портальный пароль
-
-  ### Changed
-  - smtp_configs_extra.py реструктурирован по регионам: Польша, Чехия/Словакия, UK, Бенилюкс, Скандинавия, Швейцария/Австрия, Австралия/NZ, Канада, США ISP, Япония, Тайвань, Израиль, ЮАР, Франция, Латинская Америка и др.
-
-  ## [3.4.3] — 2026-06-18
-
-  ### 🔴 Критические исправления
-
-  - **server/bot.py `_lic_rows()` / `_ticket_rows()`**: Функции генерации HTML внутри `admin_html`
-    вызывались без `try/except` — при любом неожиданном поле в БД сервер возвращал HTTP 500.
-    Теперь каждый блок обёрнут `try/except` с безопасным fallback-сообщением.
-  - **server/bot.py `cb_mod_ticket_view`**: Обращение к `m["sender"]` вместо `m["role"]` вызывало
-    `KeyError` при просмотре тикета модератором — кнопки "Ответить" и "Закрыть" недоступны.
-    Исправлено на `m["role"]`.
-  - **server/database.py `set_terms_accepted()` / `set_captcha_passed()`**: Использовались чистые
-    `UPDATE`-запросы — silent fail если пользователь ещё не существует в БД.
-    Заменены на `INSERT OR IGNORE + UPDATE` (UPSERT).
-
-  ### 🟠 Высокоприоритетные исправления
-
-  - **core/license.py `generate_hwid()`**: При таймауте WMI и пустом кэше все компоненты
-    становились `UNKNOWN_*` — каждая машина получала одинаковый HWID, что ломало активацию.
-    Добавлен fallback через `MachineGuid` (реестр Windows).
-  - **server/bot.py**: `sys.path.insert()` стоял после части `import`-ов — потенциальный
-    `ImportError` при нестандартной среде. Перемещён в самое начало файла.
-
-  ### 🟡 Прочие исправления
-
-  - **server/bot.py footer**: `{{APP_VERSION}}` теперь корректно отображает версию в /admin.
-  - **server/database.py `_migrate_db()`**: Одно соединение вместо нового на каждый ALTER TABLE.
-  - **server/bot.py**: Исправлен противоречивый комментарий про asyncio.Lock.
-
-  ---
-
-  ## [3.3.2] — 2026-06-17
-
-### 🔴 Критические исправления (хотфикс: нестабильный HWID)
-
-- **core/license.py `generate_hwid()`**: Полностью переработана формула HWID.
-  - **Удалены** нестабильные компоненты: MAC-адрес (`uuid.getnode()` — менялся при установке VPN/Docker/Hyper-V/виртуальных адаптеров), серийник диска (нестабилен — разный порядок при нескольких дисках, меняется после замены), `HWID_SALT` (серверная константа, не должна входить в клиентский ID)
-  - **Новая формула**: `SHA256(CPU_ProcessorId | Motherboard_SerialNumber | GPU_Name)[:32]`
-  - **Добавлен** `_get_gpu_id()` — список GPU отсортированный, меняется при замене/добавлении видеокарты
-  - **Улучшен** `_get_board_id()` — фильтрует мусорные значения ("Default string", "To be filled by O.E.M.", "None")
-  - **Удалён файловый кэш** `hwid.dat` из логики `generate_hwid()` — файл удаляется при первом запуске чтобы не тянуть старые нестабильные ID. Кэш — только в памяти на время сессии
-- **VPS**: HWID-привязка ключа `FMSND-GZ6V5U-Q7H94Z-Z9NDH5-BDZ37C` сброшена для повторной активации
-
-### Гарантии стабильности HWID
-
-| Событие | HWID меняется? |
-|---|---|
-| Переустановка Windows / обновление ОС | ❌ Нет |
-| Установка VPN, Docker, Hyper-V | ❌ Нет |
-| Замена жёсткого диска / SSD | ❌ Нет |
-| Смена IP / сети / Wi-Fi | ❌ Нет |
-| Замена процессора (CPU) | ✅ Да |
-| Замена материнской платы | ✅ Да |
-| Замена / добавление видеокарты | ✅ Да |
-
----
-
-## [3.3.1] — 2026-06-17
-
-### 🔴 Критические исправления (хотфикс: бесконечная проверка лицензии)
-
-- **core/license.py**: Восстановлены `LICENSE_API_URL` / `LICENSE_VERIFY_URL` как константы с hardcoded fallback-URL сервера (`https://31.76.100.190:8000/v1/activate`). Замена на `_require_env()` + `sys.exit(1)` в v3.3.0 вызывала тихую гибель QThread → UI зависал в "Активация..." навсегда
-- **core/license.py**: Восстановлен fallback в `_get_fernet_key()` — при отсутствии `HWID_SALT` используется встроенная строка с предупреждением вместо `sys.exit(1)`. Без фикса EXE на Windows падал при сохранении `license.dat`
-- **core/license.py**: Исправлен `_get_ssl_verify()` — дефолт изменён с `"1"` (True) на `"0"` (False). Сервер использует self-signed сертификат; `verify=True` по умолчанию давало SSL-ошибку при каждом запросе к API лицензий
-
-### Инфраструктура
-
-- **VPS**: Добавлен ключ `FMSND-GZ6V5U-Q7H94Z-Z9NDH5-BDZ37C` в БД лицензий (план PRO, 365 дней, активен)
-
----
-
-## [3.3.0] — 2026-06-16
-
-### 🔴 Критические исправления
-
-- **core/license.py**: Устранён `sys.exit(1)` при импорте модуля — `_require_env()` теперь вызывается лениво через `_get_license_api_url()` / `_get_license_verify_url()`, только при фактическом обращении к серверу лицензий
-- **core/sender.py**: Исправлен конфликт параметров `aiosmtplib` ≥ 3.0 — удалён несуществующий `start_tls=` из конструктора SMTP; STARTTLS теперь корректно активируется через `await smtp.starttls()` после `connect()`
-
-### 🟠 Серьёзные исправления
-
-- **core/sender.py**: Исправлен сброс часового счётчика `sent_this_hour` — теперь обнуляется только если с момента предыдущего сброса прошло ≥ 3600 сек; ранее новая кампания обнуляла лимиты, отправленные за текущий час
-- **core/sender.py**: Удалено мёртвое определение `_EMAIL_RE` — regex определялся, но никогда не использовался (вся валидация идёт через `core.utils.validate_email_format`)
-- **core/license.py**: `datetime.utcnow()` заменён на `datetime.now(timezone.utc).replace(tzinfo=None)` — устранён `DeprecationWarning` в Python 3.12+
-
-### 🟡 Минорные исправления
-
-- **core/bounce.py**: Унифицированы отступы в `to_dict()` / `from_dict()` — смешение 2-пробельных и 4-пробельных отступов заменено единым 4-пробельным стандартом PEP 8
-
-### Новое
-
-- **`.agents/skills/build-guard`**: Новый скилл — полная проверка проекта перед сборкой `.exe` и созданием релиза: PyInstaller 6.x совместимость, aiosmtplib параметры, lazy license URLs, синтаксис, hourly counter, hiddenimports
-
----
-
-## [3.0.1] — 2026-06-14
-
-  ### Исправлено (Bug Fixes)
-  - **core/ai_fixer.py**: Добавлен try/except вокруг `data["choices"][0]` и `json.loads()` — больше нет необработанных KeyError/IndexError при нестандартных ответах OpenAI
-  - **server/database.py**: Исправлен баг в `save_payment()` — INSERT OR IGNORE возвращал lastrowid=0 при дублирующемся invoice_id; теперь корректно возвращает ID существующей записи
-  - **server/bot.py**: `JsonFileStorage._dump()` переведён в асинхронный режим через `asyncio.to_thread()` — устранена блокировка event loop при каждом изменении состояния FSM
-  - **server/bot.py**: `send_or_edit()` теперь логирует ошибки `edit_text()` через DEBUG вместо молчаливого проглатывания
-  - **core/license.py**: Рефакторинг: дублирующийся WMI-код в `_get_cpu_id()`, `_get_disk_serial()`, `_get_board_id()` вынесен в единую вспомогательную функцию `_wmi_query()` (~180 строк → ~50 строк)
-
-  ### Новое (New Features)
-  - **Автоматизация Download URL**: Ссылка для скачивания теперь автоматически берётся из последнего GitHub Release (кэш 5 мин). Ручное переопределение через бот по-прежнему имеет приоритет
-  - **Автоматизация VirusTotal**: CI/CD теперь автоматически отправляет .exe на VirusTotal после каждого релиза и вставляет ссылку в Release Notes. Бот автоматически парсит её из описания релиза — ручное обновление не требуется
-  - **GitHub Actions**: Добавлен шаг VirusTotal в build.yml (требует секрет `VIRUSTOTAL_API_KEY`)
-
-  ### Рефакторинг
-  - Унифицирован WMI-helper, удалено ~130 строк дублирующегося кода в license.py
-
-  ---
-
-    All notable changes are documented here.
-
-  ---
-
-  ## [2.0.0] — 2025-06-11 — Premium Visual Overhaul
-
-  ### Visual
-  - New **Aether Dark** premium color palette: deep violet #8B5CF6 + hot-rose #EC4899 gradient
-  - Updated entire QSS stylesheet across all screens, modals, dialogs, toasts
-  - Progress bars, buttons, tabs now use violet→rose gradient
-  - Activation screen: gradient CTA button with glow border
-
-  ### Assets
-  - Phase 2: SVG logo (envelope + gradient fill) embedded in activation screen
-  - Custom in-app icon set (20 icons) as inline SVG in `gui/app.py`
-  - Sidebar nav icons updated to new stroke colors
-
-  ### Fixes
-  - **build.py**: `APP_VERSION` was hardcoded as "1.0.0"; now imported from `core._version`
-  - **core/license.py**: activation payload now sends real `APP_VERSION` (was "1.0.0")
-  - **core/license.py**: `_load_license_data` now logs on decrypt error instead of silently returning `None`
-  - **core/license.py**: `ESP_HWID_SALT` missing env now raises `WARNING` (was `DEBUG`)
-  - **core/sender.py**: fixed regex `<brs*/?> ` (stray space) in `_html_to_text` — `<br>` tags now correctly become newlines
-  - **core/sender.py**: `SMTP_CONFIGS` dict moved from inside function to module level — eliminates per-call allocation
-  - **gui/screens/screen_sending.py**: `_speed_timer.start()` was never called — speed KPI now updates every 5 s
-  - **core/spam_checker.py**: all `dns.resolver.resolve()` calls now have `lifetime=5` timeout — no more hangs on slow DNS
-  - **requirements.txt**: removed unused `PyQt6-WebEngine` (~150 MB); moved `pyinstaller` to `requirements-dev.txt`
-
-  ### Performance
-  - SMTP config lookup is O(1) dict lookup (was O(n) re-allocation)
-  - DNS checks time-bounded to 5 s maximum per call
-
-  ---
-
-  ## [1.0.1] — 2025-06-10
-
-  - Initial public release
+  ## v3.5.5 — Premium GUI overhaul (ранее)
+  - Redesign всего GUI: тёмная тема CyberPro, фиолетовый неон
   
