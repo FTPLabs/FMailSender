@@ -324,24 +324,25 @@ def kb_back_main() -> InlineKeyboardMarkup:
     ])
 
 
-def kb_admin() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎟 Выдать ключ",          callback_data="admin_issue")],
-        [InlineKeyboardButton(text="📋 Все лицензии",          callback_data="admin_list")],
-        [InlineKeyboardButton(text="📊 Статистика",            callback_data="admin_stats")],
-        [InlineKeyboardButton(text="💲 Изменить цены",         callback_data="admin_prices")],
-        [InlineKeyboardButton(text="🚫 Отозвать ключ",         callback_data="admin_revoke")],
-        [InlineKeyboardButton(text="📢 Рассылка",              callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text="🎫 Тикеты поддержки",     callback_data="admin_tickets")],
+def kb_admin(maintenance: bool = False) -> InlineKeyboardMarkup:
+      maint_text = "🔧 Техработы: ВКЛ ✅" if maintenance else "🔧 Техработы: ВЫКЛ ❌"
+      return InlineKeyboardMarkup(inline_keyboard=[
+          [InlineKeyboardButton(text=maint_text,                callback_data="admin_maintenance_toggle")],
+          [InlineKeyboardButton(text="🎟 Выдать ключ",          callback_data="admin_issue")],
+          [InlineKeyboardButton(text="📋 Все лицензии",          callback_data="admin_list")],
+          [InlineKeyboardButton(text="📊 Статистика",            callback_data="admin_stats")],
+          [InlineKeyboardButton(text="💲 Изменить цены",         callback_data="admin_prices")],
+          [InlineKeyboardButton(text="🚫 Отозвать ключ",         callback_data="admin_revoke")],
+          [InlineKeyboardButton(text="📢 Рассылка",              callback_data="admin_broadcast")],
+          [InlineKeyboardButton(text="🎫 Тикеты поддержки",     callback_data="admin_tickets")],
 
 
 
-        [InlineKeyboardButton(text="📤 Загрузить .exe на сервер", callback_data="admin_upload_file")],
-        [InlineKeyboardButton(text="🗑 Удалить все ключи",     callback_data="admin_clear_keys")],
-        [InlineKeyboardButton(text="👥 Управление модераторами", callback_data="manage_moderators")],
-        [InlineKeyboardButton(text="◀️ Главное меню",          callback_data="menu_main")],
-    ])
-
+          [InlineKeyboardButton(text="📤 Загрузить .exe на сервер", callback_data="admin_upload_file")],
+          [InlineKeyboardButton(text="🗑 Удалить все ключи",     callback_data="admin_clear_keys")],
+          [InlineKeyboardButton(text="👥 Управление модераторами", callback_data="manage_moderators")],
+          [InlineKeyboardButton(text="◀️ Главное меню",          callback_data="menu_main")],
+      ])
 
 def kb_moderator() -> InlineKeyboardMarkup:
     """Панель модератора — ограниченный набор действий без опасных операций."""
@@ -792,6 +793,17 @@ async def cb_cabinet(query: CallbackQuery):
 @dp.callback_query(F.data == "menu_download")
 async def cb_menu_download(query: CallbackQuery):
     user_id = query.from_user.id
+    try:
+        _maint = (await db.get_setting("maintenance_mode") or "0") == "1"
+    except Exception:
+        _maint = False
+    if _maint:
+        await send_or_edit(
+            query,
+            "⚙️ <b>Технические работы</b>\n\nСкачивание временно недоступно. Попробуйте позже.",
+            reply_markup=kb_main(is_admin(query.from_user.id), is_mod_user=is_moderator(query.from_user.id)),
+        )
+        return
     try:
         licenses = await db.get_license_by_telegram(user_id)
     except Exception as e:
@@ -1292,6 +1304,17 @@ async def cb_ticket_view(query: CallbackQuery):
 
 @dp.callback_query(F.data == "menu_buy")
 async def cb_menu_buy(query: CallbackQuery):
+    try:
+        _maint = (await db.get_setting("maintenance_mode") or "0") == "1"
+    except Exception:
+        _maint = False
+    if _maint:
+        await send_or_edit(
+            query,
+            "⚙️ <b>Технические работы</b>\n\nПокупка подписки временно недоступна. Попробуйте позже.",
+            reply_markup=kb_main(is_admin(query.from_user.id), is_mod_user=is_moderator(query.from_user.id)),
+        )
+        return
     lines = ["💳 <b>Выбери тарифный план:</b>\n"]
     for plan_id, plan in PLANS.items():
         if plan.get("admin_only"):
@@ -1307,6 +1330,13 @@ async def cb_menu_buy(query: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("buy_plan:"))
 async def cb_buy_plan(query: CallbackQuery, state: FSMContext):
+    try:
+        _maint = (await db.get_setting("maintenance_mode") or "0") == "1"
+    except Exception:
+        _maint = False
+    if _maint:
+        await query.answer("⚙️ Покупка временно недоступна — ведутся технические работы.", show_alert=True)
+        return
     plan_id = query.data.split(":", 1)[1]
     if plan_id not in PLANS:
         await query.answer("Неизвестный план", show_alert=True)
@@ -1463,23 +1493,66 @@ async def cb_check_pay(query: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_panel")
 async def cb_admin_panel(query: CallbackQuery, state: FSMContext):
+      if not is_admin(query.from_user.id):
+          return
+      await state.clear()
+      try:
+          stats = await db.get_stats()
+      except Exception as e:
+          logger.error("Admin stats error: %s", e)
+          stats = {"active": 0, "total": 0, "users": 0, "paid": 0, "open_tickets": 0}
+      try:
+          maintenance = (await db.get_setting("maintenance_mode") or "0") == "1"
+      except Exception:
+          maintenance = False
+      tickets_note = f"\n🎫 Открытых тикетов: <b>{stats.get('open_tickets', 0)}</b>" if stats.get("open_tickets") else ""
+      maint_note = "\n🔧 Режим техработ: <b>ВКЛЮЧЁН</b> — покупки и скачивание заблокированы." if maintenance else ""
+      text = (
+          f"⚙️ <b>Панель администратора</b>\n\n"
+          f"✅ Активных лицензий: <b>{stats.get('active', 0)}</b>\n"
+          f"📦 Всего лицензий: <b>{stats.get('total', 0)}</b>\n"
+          f"👥 Пользователей: <b>{stats.get('users', 0)}</b>"
+          f"{tickets_note}"
+          f"{maint_note}"
+      )
+      await send_or_edit(query, text, reply_markup=kb_admin(maintenance))
+
+
+  
+
+
+
+@dp.callback_query(F.data == "admin_maintenance_toggle")
+async def cb_admin_maintenance_toggle(query: CallbackQuery):
     if not is_admin(query.from_user.id):
         return
-    await state.clear()
+    try:
+        current = (await db.get_setting("maintenance_mode") or "0") == "1"
+        new_val = "0" if current else "1"
+        await db.set_setting("maintenance_mode", new_val)
+        maintenance = new_val == "1"
+    except Exception as e:
+        logger.error("maintenance toggle error: %s", e)
+        await query.answer("Ошибка переключения режима", show_alert=True)
+        return
+    status = "ВКЛЮЧЁН" if maintenance else "ВЫКЛЮЧЕН"
+    await query.answer(f"🔧 Режим техработ {status}", show_alert=True)
+    # Обновляем панель
     try:
         stats = await db.get_stats()
-    except Exception as e:
-        logger.error("Admin stats error: %s", e)
+    except Exception:
         stats = {"active": 0, "total": 0, "users": 0, "paid": 0, "open_tickets": 0}
     tickets_note = f"\n🎫 Открытых тикетов: <b>{stats.get('open_tickets', 0)}</b>" if stats.get("open_tickets") else ""
+    maint_note = "\n🔧 Режим техработ: <b>ВКЛЮЧЁН</b> — покупки и скачивание заблокированы." if maintenance else ""
     text = (
         f"⚙️ <b>Панель администратора</b>\n\n"
         f"✅ Активных лицензий: <b>{stats.get('active', 0)}</b>\n"
         f"📦 Всего лицензий: <b>{stats.get('total', 0)}</b>\n"
         f"👥 Пользователей: <b>{stats.get('users', 0)}</b>"
         f"{tickets_note}"
+        f"{maint_note}"
     )
-    await send_or_edit(query, text, reply_markup=kb_admin())
+    await send_or_edit(query, text, reply_markup=kb_admin(maintenance))
 
 
 @dp.callback_query(F.data == "admin_list")
