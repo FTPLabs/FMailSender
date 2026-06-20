@@ -57,24 +57,24 @@ class BounceRecord:
 
 
 # FIX v2.1.0: раздельные паттерны — код 5xx/4xx и текст независимы.
-  # В реальных DSN 5xx-код и текст причины на разных строках.
-  HARD_CODE_RE = re.compile(r"\b5[0-9]{2}\b")
-  HARD_TEXT_RE = re.compile(
-      r"(user.?unknown|no.?such.?user|invalid.?address|does.?not.?exist|"
-      r"mailbox.?not.?found|address.?rejected|bad.?destination|"
-      r"permanent.?failure|undeliverable|account.?does.?not.?exist|"
-      r"recipient.?rejected|inactive.?user)",
-      re.IGNORECASE,
-  )
-  SOFT_CODE_RE = re.compile(r"\b4[0-9]{2}\b")
-  SOFT_TEXT_RE = re.compile(
-      r"(temporarily|try.?again|over.?quota|mailbox.?full|"
-      r"service.?unavailable|deferred|too.?many|greylisted|rate.?limit)",
-      re.IGNORECASE,
-  )
-  HARD_BOUNCE_CODES = HARD_CODE_RE  # обратная совместимость
-  SOFT_BOUNCE_CODES = SOFT_CODE_RE  # обратная совместимость
-  EMAIL_PATTERN = re.compile(
+# В реальных DSN 5xx-код и текст причины на разных строках.
+HARD_CODE_RE = re.compile(r"\b5[0-9]{2}\b")
+HARD_TEXT_RE = re.compile(
+    r"(user.?unknown|no.?such.?user|invalid.?address|does.?not.?exist|"
+    r"mailbox.?not.?found|address.?rejected|bad.?destination|"
+    r"permanent.?failure|undeliverable|account.?does.?not.?exist|"
+    r"recipient.?rejected|inactive.?user)",
+    re.IGNORECASE,
+)
+SOFT_CODE_RE = re.compile(r"\b4[0-9]{2}\b")
+SOFT_TEXT_RE = re.compile(
+    r"(temporarily|try.?again|over.?quota|mailbox.?full|"
+    r"service.?unavailable|deferred|too.?many|greylisted|rate.?limit)",
+    re.IGNORECASE,
+)
+HARD_BOUNCE_CODES = HARD_CODE_RE  # обратная совместимость
+SOFT_BOUNCE_CODES = SOFT_CODE_RE  # обратная совместимость
+EMAIL_PATTERN = re.compile(
     r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"
 )
 
