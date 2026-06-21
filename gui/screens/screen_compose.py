@@ -810,6 +810,121 @@ class ComposeScreen(QWidget):
         email_row.addWidget(copy_btn)
         lay.addLayout(email_row)
 
+        # ── Реальный тест размещения (Входящие vs Спам) ─────
+        from core.inbox_tester import run_delivery_test as _run_delivery
+        real_frame = QFrame()
+        real_frame.setObjectName("card")
+        rfl = QVBoxLayout(real_frame)
+        rfl.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
+        rfl.setSpacing(Spacing.XS)
+        rhdr = QLabel("<b>Реальный тест: Входящие vs Спам</b>")
+        rhdr.setTextFormat(Qt.TextFormat.RichText)
+        rfl.addWidget(rhdr)
+        rinfo = QLabel(
+            "Отправляет помеченное письмо между вашими аккаунтами и определяет "
+            "папку (Входящие/Спам) через IMAP по каждому получателю."
+        )
+        rinfo.setWordWrap(True)
+        rinfo.setObjectName("label_muted")
+        rfl.addWidget(rinfo)
+        real_status = QLabel("")
+        real_status.setWordWrap(True)
+        real_status.setStyleSheet("font-size:12px;")
+        real_results = QLabel("")
+        real_results.setTextFormat(Qt.TextFormat.RichText)
+        real_results.setWordWrap(True)
+
+        if len(self._accounts) >= 2:
+            from PyQt6.QtWidgets import QComboBox as _QCB3
+            srow = QHBoxLayout()
+            srow.addWidget(QLabel("Отправитель:"))
+            sender_combo = _QCB3()
+            for a in self._accounts:
+                sender_combo.addItem(getattr(a, "email", str(a)))
+            srow.addWidget(sender_combo, 1)
+            rfl.addLayout(srow)
+
+            run_real_btn = QPushButton("Запустить реальный тест")
+            run_real_btn.setObjectName("btn_primary")
+            run_real_btn.setIcon(icons.make_icon(icons.ZAP, 16))
+            run_real_btn.setIconSize(QSize(16, 16))
+            rfl.addWidget(run_real_btn)
+            rfl.addWidget(real_status)
+            rfl.addWidget(real_results)
+
+            def _run_real():
+                si = sender_combo.currentIndex()
+                sender = self._accounts[si]
+                seeds = [a for i, a in enumerate(self._accounts) if i != si]
+                subj = self.subject_input.text() or "Тест доставки"
+                html_body = self.html_editor.toPlainText().strip() or self.rich_editor.toHtml()
+                run_real_btn.setEnabled(False)
+                run_real_btn.setText("Идёт тест…")
+                real_results.setText("")
+                real_status.setText(
+                    "Отправка и опрос IMAP… это может занять до 2 минут."
+                )
+                res_ref: list = [None]
+
+                def _real_worker():
+                    try:
+                        res_ref[0] = _run_delivery(
+                            sender, seeds, subj, html_body, timeout=120
+                        )
+                    except Exception as exc:
+                        res_ref[0] = {"error": str(exc)}
+
+                tt = threading.Thread(target=_real_worker, daemon=True)
+                tt.start()
+
+                _labels = {
+                    "inbox": "<span style='color:#10B981'>Входящие</span>",
+                    "spam": "<span style='color:#EF4444'>Спам</span>",
+                    "not_found": "<span style='color:#F59E0B'>Не найдено</span>",
+                    "pending": "…",
+                }
+
+                def _poll_real():
+                    if tt.is_alive():
+                        QTimer.singleShot(500, _poll_real)
+                        return
+                    run_real_btn.setEnabled(True)
+                    run_real_btn.setText("Запустить снова")
+                    data = res_ref[0] or {}
+                    if data.get("error"):
+                        real_status.setText(
+                            f"<span style='color:#EF4444'>Ошибка:</span> {data['error']}"
+                        )
+                        return
+                    rows = []
+                    for addr, info in (data.get("results") or {}).items():
+                        pl = info.get("placement", "")
+                        if not info.get("sent"):
+                            cell = (
+                                "<span style='color:#EF4444'>Не отправлено</span>"
+                                + (f" ({info.get('send_error','')})" if info.get("send_error") else "")
+                            )
+                        elif isinstance(pl, str) and pl.startswith("error:"):
+                            cell = f"<span style='color:#EF4444'>Ошибка IMAP</span> ({pl[6:]})"
+                        else:
+                            cell = _labels.get(pl, pl)
+                        rows.append(f"<code>{addr}</code> — {cell}")
+                    real_status.setText("Готово.")
+                    real_results.setText("<br>".join(rows) or "Нет seed-аккаунтов.")
+
+                QTimer.singleShot(500, _poll_real)
+
+            run_real_btn.clicked.connect(_run_real)
+        else:
+            need_lbl = QLabel(
+                "Для реального теста нужно ≥2 аккаунта (отправитель + получатель-seed). "
+                "Ниже — оценка балла через mail-tester.com."
+            )
+            need_lbl.setWordWrap(True)
+            need_lbl.setObjectName("label_muted")
+            rfl.addWidget(need_lbl)
+        lay.addWidget(real_frame)
+
         # ── Автоотправка (если есть аккаунты) ───────────────
         if self._accounts:
             acc = self._accounts[0]
