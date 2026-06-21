@@ -961,67 +961,102 @@ class AccountsScreen(QWidget):
         # Не держим ссылку — QThread удалится сам после finished
 
     def _test_all(self) -> None:
+        """Проверяет все аккаунты батчами (MAX_CONCURRENT=4).
+
+        ИСПРАВЛЕНО:
+        - Колонка статуса = 1 (не 5/7, которых не существует в 3-колоночной таблице)
+        - Не все потоки сразу: GMX/Rambler блокируют массовые подключения → ложные ❌
+        - ok_cnt из last_test_ok, не из несуществующей колонки 5
+        """
         if not self._accounts:
             return
+
+        MAX_CONCURRENT = 4  # одновременных проверок — не слишком много для rate-limit
+
         self._test_cancel_event.clear()
         self.cancel_test_btn.setVisible(True)
         self.test_all_btn.setEnabled(False)
-        self.test_all_btn.setText("\u23f3 Проверяю...")
+        self.test_all_btn.setText("⏳ Проверяю...")
+
+        # Пометить все как «в очереди» — колонка 1 (Статус)
         for row in range(self.table.rowCount()):
-            item = self.table.item(row, 5)
+            item = self.table.item(row, 1)
             if item:
-                item.setText("⏳ Проверка...")
+                item.setText("⏳ В очереди...")
                 item.setForeground(QColor(Colors.TEXT_MUTED))
 
         total = len(self._accounts)
         completed = [0]
+        running = [0]
+        queue = list(range(total))
 
-        for row, acc in enumerate(self._accounts):
-            w = TestWorker(acc, parent=self)
-            final_row = row
+        def _start_next():
+            """Стартует следующий воркер если есть свободный слот и аккаунты в очереди."""
+            while queue and running[0] < MAX_CONCURRENT:
+                if self._test_cancel_event.is_set():
+                    break
+                row = queue.pop(0)
+                if row >= len(self._accounts):
+                    continue
+                acc = self._accounts[row]
 
-            @pyqtSlot(bool, str)
-            def on_result(ok, msg, r=final_row):
-                item = self.table.item(r, 5)
-                if item:
-                    item.setText("✓ OK" if ok else "✗ Ошибка")
-                    item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
-                    item.setToolTip(msg)
-                if 0 <= r < len(self._accounts):
-                    self._accounts[r].last_test_ok = ok
-                    # FIX: автоматически деактивируем аккаунт при ошибке, активируем при успехе
-                    self._accounts[r].is_active = ok
-                    save_accounts(self._accounts)
-                    active_item = self.table.item(r, 7)
-                    if active_item:
-                        active_item.setText("✓" if ok else "✗")
-                        active_item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
-                completed[0] += 1
-                if completed[0] >= total:
-                    self.test_all_btn.setEnabled(True)
-                    self.test_all_btn.setText("Проверить все")
-                    self.cancel_test_btn.setVisible(False)
-                    ok_cnt = sum(
-                        1 for i in range(self.table.rowCount())
-                        if self.table.item(i, 5) and "✓" in (self.table.item(i, 5).text() or "")
-                    )
+                status_item = self.table.item(row, 1)
+                if status_item:
+                    status_item.setText("⏳ Проверка...")
+                    status_item.setForeground(QColor(Colors.TEXT_MUTED))
+
+                w = TestWorker(acc, parent=self)
+                running[0] += 1
+
+                @pyqtSlot(bool, str)
+                def on_result(ok, msg, r=row):
+                    running[0] -= 1
+
+                    # Обновить статус — колонка 1 (единственная колонка статуса)
+                    si = self.table.item(r, 1)
+                    if si:
+                        si.setText("✅ Валидный" if ok else "❌ Ошибка")
+                        si.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
+                        si.setToolTip(msg)
+
+                    if 0 <= r < len(self._accounts):
+                        self._accounts[r].last_test_ok = ok
+                        self._accounts[r].last_test_msg = msg
+                        self._accounts[r].is_active = ok
+
+                    completed[0] += 1
+                    done = completed[0]
+                    ok_so_far = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is True)
                     self.status_label.setText(
-                        f"Аккаунтов: {len(self._accounts)} | "
-                        f"✓ {ok_cnt} рабочих | "
-                        f"✗ {total - ok_cnt} с ошибками"
+                        f"Проверено: {done}/{total} | ✅ {ok_so_far} | ❌ {done - ok_so_far}"
                     )
-                    # Сортировка: валидные аккаунты наверх, невалидные вниз
-                    self._accounts.sort(
-                        key=lambda a: (0 if getattr(a, 'last_test_ok', None) is True else 1,
-                                       a.email)
-                    )
-                    save_accounts(self._accounts)
-                    self._refresh_table()
 
+                    if done >= total or self._test_cancel_event.is_set():
+                        # Всё завершено — сохранить, отсортировать, обновить таблицу
+                        self._accounts.sort(
+                            key=lambda a: (0 if getattr(a, "last_test_ok", None) is True else 1, a.email)
+                        )
+                        save_accounts(self._accounts)
+                        self._refresh_table()
+                        self.test_all_btn.setEnabled(True)
+                        self.test_all_btn.setText("Проверить все")
+                        self.cancel_test_btn.setVisible(False)
+                        ok_final = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is True)
+                        self.status_label.setText(
+                            f"Аккаунтов: {len(self._accounts)} | "
+                            f"✅ Валидных: {ok_final} | "
+                            f"❌ Невалидных: {total - ok_final} | "
+                            f"Активных: {ok_final}"
+                        )
+                    else:
+                        # Освободился слот — запускаем следующий
+                        _start_next()
 
-            w.result_ready.connect(on_result)
-            self._test_workers.append(w)
-            w.start()
+                w.result_ready.connect(on_result)
+                self._test_workers.append(w)
+                w.start()
+
+        _start_next()
 
     def _run_proxy_check_dialog(self, proxies: list[str]):
         """Диалог проверки прокси с отображением страны и статуса."""
