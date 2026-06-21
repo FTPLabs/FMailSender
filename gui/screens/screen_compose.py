@@ -573,11 +573,11 @@ a {{ color: #6366F1; }}
 
         if self.preview is not None:
             if _HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-                  # setHtml с https base URL → браузер загружает внешние ресурсы (картинки с CDN, шрифты).
-                  # Это надёжнее temp-файла: нет race-condition при удалении и нет ограничений file://
-                  self.preview.setHtml(html, QUrl("https://mail.preview.local/"))
-              else:
-                  self.preview.setHtml(html)
+                # setHtml с https base URL → браузер загружает внешние ресурсы (картинки с CDN, шрифты).
+                # Это надёжнее temp-файла: нет race-condition при удалении и нет ограничений file://
+                self.preview.setHtml(html, QUrl("https://mail.preview.local/"))
+            else:
+                self.preview.setHtml(html)
     def _add_attachment(self):
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Добавить вложение", "", "Все файлы (*.*)"
