@@ -62,7 +62,7 @@ def main():
         hwid_ready.set()
 
     threading.Thread(target=_hwid_init, daemon=True).start()
-    threading.Thread(target=security_check, daemon=True).start()
+    security_check()  # БАГ-4 FIX: синхронно до QApplication — нет race condition с os.abort()
 
     # Ждём HWID не более 10 сек, чтобы check_license получил актуальный кэш
     hwid_ready.wait(timeout=10.0)
