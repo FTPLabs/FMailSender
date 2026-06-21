@@ -20,7 +20,8 @@ jobs:
             set -e
             cd /opt/fmailsender
             git fetch origin main
-            git merge --ff-only origin/main || (git stash && git merge --ff-only origin/main)
+            git fetch origin main
+            git reset --hard origin/main
             if [ ! -f venv/bin/pip ]; then python3 -m venv venv; fi
             venv/bin/pip install -q --upgrade pip
             venv/bin/pip install -q -r server/requirements.txt
