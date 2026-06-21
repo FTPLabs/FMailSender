@@ -1,4 +1,12 @@
+## [3.7.8] — 2026-06-21
 
+    ### Исправлено (критические баги)
+    - **gui/screens/screen_compose.py** стр.1035: IndentationError (`_on_spam_error`) — 6 пробелов → 4 (разблокирует Python Syntax Check CI и сборку EXE)
+    - **core/license.py** `_get_fernet_key()`: race condition — `_hwid_cache` мог быть None при первом обращении → Fernet использовал fallback-ключ вместо машинного HWID → license.dat несовместим между запусками
+    - **.github/workflows/auto-deploy.yml**: `git stash` без `git stash pop` → stash накапливался на сервере при каждом деплое → заменён на `git reset --hard origin/main`
+    - **.github/workflows/build-release.yml**: `generate_release_notes: true` возвращал 403 → убран (GitHub Fine-grained токен не имеет доступа к /generate-release-notes)
+
+  
 ## [3.7.6] — 2026-06-21
 
   ### Исправлено
