@@ -267,7 +267,7 @@ QCheckBox::indicator:unchecked:hover {{ border-color: {c.ACCENT}; }}
       background-color: {c.BG_BASE};
   }}
   QDialog QFrame[objectName="card"] {{
-      background: {c.BG_SURFACE};
+      background: {c.BG_SURFACE2};
       border: 1px solid {c.BORDER};
       border-radius: {r.CARD};
   }}
@@ -303,7 +303,7 @@ QCheckBox::indicator:unchecked:hover {{ border-color: {c.ACCENT}; }}
   }}
   /* ScrollArea в диалогах */
   QDialog QScrollArea {{
-      background: {c.BG_SURFACE};
+      background: {c.BG_SURFACE2};
       border: 1px solid {c.BORDER};
       border-radius: {r.CARD};
   }}
