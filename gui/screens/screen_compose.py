@@ -386,6 +386,8 @@ class ComposeScreen(QWidget):
         self._preview_timer.setInterval(800)
         self._preview_timer.timeout.connect(self._update_preview)
         self._spam_worker = None  # Keep reference to prevent GC
+        self._syncing = False      # защита от рекурсивных сигналов (crash-guard)
+        self._accounts: list = []  # SMTP-аккаунты для автоматического теста доставки
         self._setup_ui()
 
     def _setup_ui(self):
@@ -540,8 +542,9 @@ class ComposeScreen(QWidget):
         self._preview_timer.start()
 
     def _on_html_changed(self):
-        """Синхронизирует HTML-редактор с rich редактором."""
-        html = self.html_editor.toPlainText()
+        """Запускает таймер обновления превью; игнорирует программные setPlainText."""
+        if self._syncing:
+            return
         self._preview_timer.start()
 
 
@@ -575,7 +578,7 @@ a {{ color: #6366F1; }}
             if _HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
                 # setHtml с https base URL → браузер загружает внешние ресурсы (картинки с CDN, шрифты).
                 # Это надёжнее temp-файла: нет race-condition при удалении и нет ограничений file://
-                self.preview.setHtml(html, QUrl("https://mail.preview.local/"))
+                self.preview.setHtml(html, QUrl("about:blank"))
             else:
                 self.preview.setHtml(html)
     def _add_attachment(self):
@@ -782,6 +785,11 @@ a {{ color: #6366F1; }}
         dlg.setWindowTitle("Уникализация письма")
         dlg.setMinimumWidth(540)
         dlg.setMinimumHeight(580)
+        # Явно применяем тему — QDialog на Windows не всегда наследует app stylesheet
+        from PyQt6.QtWidgets import QApplication as _QAppRef
+        _qapp = _QAppRef.instance()
+        if _qapp:
+            dlg.setStyleSheet(_qapp.styleSheet())
         lay = QVBoxLayout(dlg)
         lay.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
         lay.setSpacing(Spacing.MD)
@@ -908,7 +916,11 @@ a {{ color: #6366F1; }}
 
         if result_holder[0] is not None:
             new_html, new_subj = result_holder[0]
-            self.html_editor.setPlainText(new_html)
+            self._syncing = True
+            try:
+                self.html_editor.setPlainText(new_html)
+            finally:
+                self._syncing = False
             if new_subj:
                 self.subject_input.setText(new_subj)
             self.editor_tabs.setCurrentIndex(1)
@@ -919,60 +931,174 @@ a {{ color: #6366F1; }}
                 f"Применено техник: {cnt}\nКаждое письмо теперь уникально!"
             )
 
+    def set_accounts(self, accounts: list) -> None:
+        """Получает список SMTP-аккаунтов от AccountsScreen для автоотправки теста."""
+        self._accounts = list(accounts)
+
     def _test_delivery(self):
-        """Тест доставляемости через mail-tester.com (бесплатно, без регистрации)."""
+        """Тест доставляемости через mail-tester.com — с автоматической отправкой."""
         from core.inbox_tester import generate_test_address, fetch_result, open_result_browser
+        import threading
 
         test_email, result_url, uid = generate_test_address()
 
         dlg = QDialog(self)
         dlg.setWindowTitle("Тест доставки — inbox vs spam")
-        dlg.setMinimumWidth(520)
+        dlg.setMinimumWidth(540)
+        # Явно применяем тему
+        from PyQt6.QtWidgets import QApplication as _QAppD
+        _qappd = _QAppD.instance()
+        if _qappd:
+            dlg.setStyleSheet(_qappd.styleSheet())
         lay = QVBoxLayout(dlg)
         lay.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
         lay.setSpacing(Spacing.MD)
 
-        lay.addWidget(QLabel("<b>Шаг 1.</b> Отправьте ОДНО тестовое письмо на этот адрес:"))
+        # ── Тестовый адрес ──────────────────────────────────
+        addr_lbl = QLabel("<b>Тестовый адрес mail-tester.com:</b>")
+        addr_lbl.setTextFormat(Qt.TextFormat.RichText)
+        lay.addWidget(addr_lbl)
 
+        email_row = QHBoxLayout()
         email_input = QLineEdit(test_email)
         email_input.setReadOnly(True)
         email_input.setStyleSheet("font-weight:bold;font-size:13px;")
-        lay.addWidget(email_input)
-
-        copy_btn = QPushButton("Копировать адрес")
+        email_row.addWidget(email_input, 1)
+        copy_btn = QPushButton("Копировать")
         copy_btn.setObjectName("btn_secondary")
+        copy_btn.setFixedWidth(90)
         def _copy():
-            from PyQt6.QtWidgets import QApplication
-            QApplication.clipboard().setText(test_email)
-            copy_btn.setText("Скопировано!")
-            QTimer.singleShot(2000, lambda: copy_btn.setText("Копировать адрес"))
+            from PyQt6.QtWidgets import QApplication as _QA
+            _QA.clipboard().setText(test_email)
+            copy_btn.setText("✓")
+            QTimer.singleShot(1800, lambda: copy_btn.setText("Копировать"))
         copy_btn.clicked.connect(_copy)
-        lay.addWidget(copy_btn)
+        email_row.addWidget(copy_btn)
+        lay.addLayout(email_row)
 
-        step2 = QLabel(
-            "<b>Шаг 2.</b> После отправки нажмите <b>Проверить результат</b>.<br>"
-            "<small>Подождите 30-60 секунд после отправки.</small>"
-        )
-        step2.setTextFormat(Qt.TextFormat.RichText)
-        step2.setWordWrap(True)
-        lay.addWidget(step2)
+        # ── Автоотправка (если есть аккаунты) ───────────────
+        if self._accounts:
+            acc = self._accounts[0]
+            host = getattr(acc, "smtp_host", getattr(acc, "host", "?"))
+            login = getattr(acc, "username", getattr(acc, "email", "?"))
+            auto_frame = QFrame()
+            auto_frame.setObjectName("card")
+            auto_fl = QVBoxLayout(auto_frame)
+            auto_fl.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
+            auto_fl.setSpacing(Spacing.XS)
+            auto_hdr = QLabel(f"<b>Автоматическая отправка</b> через <code>{host}</code> ({login})")
+            auto_hdr.setTextFormat(Qt.TextFormat.RichText)
+            auto_fl.addWidget(auto_hdr)
 
+            # Выбор аккаунта если их несколько
+            acc_combo = None
+            if len(self._accounts) > 1:
+                from PyQt6.QtWidgets import QComboBox as _QCB2
+                acc_row = QHBoxLayout()
+                acc_row.addWidget(QLabel("Аккаунт:"))
+                acc_combo = _QCB2()
+                for a in self._accounts:
+                    lbl = getattr(a, "username", getattr(a, "email", str(a)))
+                    acc_combo.addItem(lbl)
+                acc_row.addWidget(acc_combo, 1)
+                auto_fl.addLayout(acc_row)
+
+            send_btn = QPushButton("⚡ Отправить тест автоматически")
+            send_btn.setObjectName("btn_primary")
+            auto_fl.addWidget(send_btn)
+            lay.addWidget(auto_frame)
+
+            def _auto_send():
+                idx = acc_combo.currentIndex() if acc_combo else 0
+                sel = self._accounts[idx]
+                s_host = getattr(sel, "smtp_host", getattr(sel, "host", ""))
+                s_port = int(getattr(sel, "smtp_port", getattr(sel, "port", 587)))
+                s_user = getattr(sel, "username", getattr(sel, "email", ""))
+                s_pass = getattr(sel, "password", "")
+                s_tls  = getattr(sel, "use_tls", getattr(sel, "tls", True))
+                s_from = getattr(sel, "from_email", s_user)
+
+                send_btn.setEnabled(False)
+                send_btn.setText("Отправляю...")
+                status_lbl.setText("📤 Соединение с SMTP-сервером...")
+                send_result: list = [None]
+
+                def _send_worker():
+                    try:
+                        import smtplib, ssl as _ssl
+                        from email.mime.multipart import MIMEMultipart
+                        from email.mime.text import MIMEText as _MIMEText
+                        msg = MIMEMultipart("alternative")
+                        msg["Subject"] = self.subject_input.text() or "Тест доставки"
+                        msg["From"] = s_from
+                        msg["To"] = test_email
+                        html_body = self.html_editor.toPlainText().strip() or self.rich_editor.toHtml()
+                        msg.attach(_MIMEText(html_body, "html", "utf-8"))
+                        ctx = _ssl.create_default_context()
+                        if s_port == 465:
+                            with smtplib.SMTP_SSL(s_host, s_port, context=ctx, timeout=20) as srv:
+                                srv.login(s_user, s_pass)
+                                srv.sendmail(s_from, [test_email], msg.as_string())
+                        else:
+                            with smtplib.SMTP(s_host, s_port, timeout=20) as srv:
+                                if s_tls:
+                                    srv.starttls(context=ctx)
+                                srv.login(s_user, s_pass)
+                                srv.sendmail(s_from, [test_email], msg.as_string())
+                        send_result[0] = True
+                    except Exception as exc:
+                        send_result[0] = str(exc)
+
+                t = threading.Thread(target=_send_worker, daemon=True)
+                t.start()
+
+                def _poll_send():
+                    if t.is_alive():
+                        QTimer.singleShot(300, _poll_send)
+                    else:
+                        send_btn.setEnabled(True)
+                        send_btn.setText("⚡ Отправить тест автоматически")
+                        if send_result[0] is True:
+                            status_lbl.setText(
+                                "✅ Письмо отправлено! Подождите 30–60 сек и нажмите «Проверить»."
+                            )
+                            check_btn.setEnabled(True)
+                        else:
+                            status_lbl.setText(f"❌ Ошибка отправки: {send_result[0]}")
+
+                QTimer.singleShot(300, _poll_send)
+
+            send_btn.clicked.connect(_auto_send)
+        else:
+            # Нет аккаунтов — ручная инструкция
+            hint = QLabel(
+                "ℹ️ Добавьте SMTP-аккаунт во вкладке <b>Аккаунты</b> для автоматической отправки.<br>"
+                "Пока можно скопировать адрес и отправить письмо вручную."
+            )
+            hint.setTextFormat(Qt.TextFormat.RichText)
+            hint.setWordWrap(True)
+            hint.setObjectName("label_muted")
+            lay.addWidget(hint)
+
+        # ── Статус и прогресс ────────────────────────────────
         status_lbl = QLabel("Ожидание отправки...")
         status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_lbl.setWordWrap(True)
-        status_lbl.setStyleSheet("font-size:14px;padding:12px;")
+        status_lbl.setStyleSheet("font-size:13px;padding:10px;")
         lay.addWidget(status_lbl)
 
         bar = QProgressBar()
         bar.setRange(0, 10)
         bar.setValue(0)
-        bar.setFixedHeight(12)
+        bar.setFixedHeight(10)
         bar.setVisible(False)
         lay.addWidget(bar)
 
+        # ── Кнопки ──────────────────────────────────────────
         btn_row = QHBoxLayout()
-        check_btn = QPushButton("Проверить результат")
+        check_btn = QPushButton("🔍 Проверить результат")
         check_btn.setObjectName("btn_primary")
+        check_btn.setEnabled(not bool(self._accounts))  # если нет аккаунтов — доступна сразу
         browser_btn = QPushButton("Открыть в браузере")
         browser_btn.setObjectName("btn_secondary")
         close_btn = QPushButton("Закрыть")
@@ -987,25 +1113,24 @@ a {{ color: #6366F1; }}
         def _check():
             check_btn.setEnabled(False)
             check_btn.setText("Проверяю...")
-            status_lbl.setText("Запрашиваем результат mail-tester.com...")
-            import threading
-            result_ref = [None]
+            status_lbl.setText("🌐 Запрашиваем результат mail-tester.com...")
+            result_ref: list = [None]
 
-            def _worker():
-                result_ref[0] = fetch_result(uid, timeout=20)
+            def _fetch_worker():
+                result_ref[0] = fetch_result(uid, timeout=25)
 
-            t = threading.Thread(target=_worker, daemon=True)
-            t.start()
+            t2 = threading.Thread(target=_fetch_worker, daemon=True)
+            t2.start()
 
             def _poll():
-                if t.is_alive():
+                if t2.is_alive():
                     QTimer.singleShot(500, _poll)
                 else:
                     r = result_ref[0] or {}
                     check_btn.setEnabled(True)
-                    check_btn.setText("Проверить снова")
+                    check_btn.setText("🔍 Проверить снова")
                     if r.get("error"):
-                        status_lbl.setText(f"Ошибка: {r['error']}")
+                        status_lbl.setText(f"❌ Ошибка: {r['error']}")
                         bar.setVisible(False)
                     else:
                         status_lbl.setText(r.get("inbox_status", "Нет данных"))
