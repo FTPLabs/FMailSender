@@ -379,6 +379,7 @@ class SmtpAccount:
     imap_port: int = 993
     imap_ssl: bool = True
     last_test_ok: Optional[bool] = field(default=None)
+      last_test_msg: str = field(default="")
 
     def __post_init__(self):
         self._lock = threading.Lock()
@@ -497,6 +498,72 @@ def _build_message(
 
     return outer
 
+  def _parse_auth_error(host: str, smtp_code: int, detail: str) -> str:
+      """Возвращает понятное пользователю описание ошибки SMTP-аутентификации."""
+      d = detail.lower()
+      h = host.lower()
+
+      # Rambler / Lenta / Championat
+      if "rambler" in h or "lenta" in h or "championat" in h:
+          if "invalid login" in d or "invalid password" in d or "535" in str(smtp_code) or "535" in d:
+              return ("Неверный логин/пароль Rambler.\n"
+                      "Причина: пароль устарел или аккаунт заблокирован.\n"
+                      "Решение: зайдите на rambler.ru → Настройки → Безопасность → смените пароль.")
+          if "too many" in d or "rate" in d:
+              return "Rambler: слишком много попыток. Подождите 5-10 минут."
+
+      # GMX / WEB.DE / T-Online
+      if any(s in h for s in ["gmx", "web.de", "t-online"]):
+          if "535" in d or "authentication" in d or "incorrect" in d:
+              return ("Неверный логин/пароль GMX.\n"
+                      "Возможная причина: SMTP отключён в настройках.\n"
+                      "Решение: gmx.com → Настройки → POP3 & IMAP → Разрешить SMTP.")
+          if "550" in d and "blocked" in d:
+              return "GMX: аккаунт заблокирован. Войдите на gmx.com и разблокируйте."
+
+      # Google / Gmail
+      if "gmail" in h or "google" in h or "googlemail" in h:
+          if "534" in d or "application-specific" in d:
+              return ("Google: требуется App Password.\n"
+                      "Решение: myaccount.google.com → Безопасность → Пароли приложений.")
+          if "535" in d or "username and password" in d:
+              return ("Google: неверный пароль или требуется App Password.\n"
+                      "Решение: включите 2FA и создайте пароль приложения на myaccount.google.com.")
+
+      # Microsoft / Outlook / Hotmail
+      if any(s in h for s in ["outlook", "hotmail", "live.com", "office365", "microsoft"]):
+          if "5.7.139" in d or "basic authentication is disabled" in d:
+              return ("Microsoft: базовая аутентификация отключена.\n"
+                      "Решение: account.microsoft.com → Безопасность → App Password.")
+          if "535" in d or "5.7.3" in d:
+              return ("Microsoft: неверный пароль или нужен App Password.\n"
+                      "Решение: создайте App Password на account.microsoft.com.")
+
+      # Yahoo / AOL
+      if any(s in h for s in ["yahoo", "aol", "ymail"]):
+          if "535" in d:
+              return ("Yahoo/AOL: неверный пароль или нужен App Password.\n"
+                      "Решение: security.yahoo.com → Manage App Passwords.")
+
+      # Универсальные коды
+      if "too many" in d or "rate limit" in d or "421" in d:
+          return f"Слишком много попыток входа. Подождите 10-15 минут. ({detail[:60]})"
+      if any(w in d for w in ["suspend", "disabled", "inactive", "locked", "deactiv"]):
+          return f"Аккаунт заблокирован или деактивирован. Зайдите на сайт почты и разблокируйте. ({detail[:60]})"
+      if any(w in d for w in ["blacklist", "banned", "blocked"]):
+          return f"IP-адрес заблокирован провайдером. Используйте прокси. ({detail[:60]})"
+      if "captcha" in d or "verify" in d:
+          return f"Требуется подтверждение через браузер. Зайдите на сайт почты. ({detail[:60]})"
+      if "2fa" in d or "two-factor" in d or "two factor" in d:
+          return f"Включена двухфакторная аутентификация. Используйте App Password. ({detail[:60]})"
+      if "password" in d and ("expired" in d or "must be changed" in d):
+          return f"Пароль устарел. Зайдите на сайт почты и смените пароль. ({detail[:60]})"
+      if "quota" in d or "storage" in d or "full" in d:
+          return f"Почтовый ящик переполнен. Освободите место. ({detail[:60]})"
+
+      return f"Неверный логин или пароль ({smtp_code}): {detail[:120]}"
+
+  
 
 def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       """
