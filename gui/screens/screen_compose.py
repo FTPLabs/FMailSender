@@ -483,15 +483,15 @@ class ComposeScreen(QWidget):
 
           if _HAS_WEBENGINE:
               self.preview = QWebEngineView()
-                try:
-                    from PyQt6.QtWebEngineCore import QWebEngineSettings
-                    _ws = self.preview.settings()
-                    _ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-                    _ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
-                    _ws.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
-                except Exception:
-                    pass
-            else:
+              try:
+                  from PyQt6.QtWebEngineCore import QWebEngineSettings
+                  _ws = self.preview.settings()
+                  _ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+                  _ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
+                  _ws.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+              except Exception:
+                  pass
+          else:
               from PyQt6.QtWidgets import QTextBrowser
               self.preview = QTextBrowser()
               self.preview.setOpenExternalLinks(True)
