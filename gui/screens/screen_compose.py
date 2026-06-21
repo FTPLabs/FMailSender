@@ -483,15 +483,15 @@ class ComposeScreen(QWidget):
 
           if _HAS_WEBENGINE:
               self.preview = QWebEngineView()
-              try:
-                  from PyQt6.QtWebEngineCore import QWebEngineSettings
-                  _ws = self.preview.settings()
-                  _ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-                  _ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
-                  _ws.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
-              except Exception:
-                  pass
-          else:
+                try:
+                    from PyQt6.QtWebEngineCore import QWebEngineSettings
+                    _ws = self.preview.settings()
+                    _ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+                    _ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
+                    _ws.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+                except Exception:
+                    pass
+            else:
               from PyQt6.QtWidgets import QTextBrowser
               self.preview = QTextBrowser()
               self.preview.setOpenExternalLinks(True)
@@ -561,12 +561,12 @@ a {{ color: #6366F1; }}
 
         if self.preview is not None:
             if _HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-                  # Base URL http/https позволяет загружать внешние ресурсы (изображения, шрифты)
-                  self.preview.setHtml(html, QUrl("https://fmail.shop/"))
-              else:
-                  self.preview.setHtml(html)
+                # Base URL http/https позволяет загружать внешние ресурсы (изображения, шрифты)
+                self.preview.setHtml(html, QUrl("https://fmail.shop/"))
+            else:
+                self.preview.setHtml(html)
 
-      def _add_attachment(self):
+    def _add_attachment(self):
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Добавить вложение", "", "Все файлы (*.*)"
         )
