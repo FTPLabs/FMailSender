@@ -8,6 +8,7 @@ v2.9.4: добавлено логирование во все silent except-бл
 from __future__ import annotations
 
 import asyncio
+import logging
 import base64
 import mimetypes
 import urllib.parse
@@ -220,7 +221,7 @@ try:
     from core.smtp_configs_extra import load_extra_configs as _load_extra
     _SMTP_CONFIGS.update(_load_extra())
 except Exception as _exc:
-    import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
+    logging.getLogger("sender").debug("Пропущено исключение: %s", _exc)
 
 # Pattern-based fallback: outline/hotmail/live/* → office365; yahoo.* → yahoo; gmx.* → gmx.net
 _O365 = {"host": "smtp.office365.com", "port": 587, "use_ssl": False, "use_tls": True}
@@ -709,7 +710,7 @@ class SendingEngine:
             try:
                 task.cancel()
             except Exception as _exc:
-                import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
+                logging.getLogger("sender").debug("Пропущено исключение: %s", _exc)
 
     def run(self) -> None:
         loop = asyncio.new_event_loop()
@@ -937,12 +938,12 @@ class SendingEngine:
                     try:
                         await smtp.ehlo()
                     except Exception as _exc:
-                        import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
+                        logging.getLogger("sender").debug("Пропущено исключение: %s", _exc)
                     await smtp.starttls()
                     try:
                         await smtp.ehlo()  # повторный EHLO после STARTTLS — обязателен по RFC 3207
                     except Exception as _exc:
-                        import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
+                        logging.getLogger("sender").debug("Пропущено исключение: %s", _exc)
                 await smtp.login(account.email, account.password)
                 await smtp.send_message(msg)
                 return SendResult(
@@ -955,7 +956,7 @@ class SendingEngine:
                 try:
                     await smtp.quit()
                 except Exception as _exc:
-                    import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
+                    logging.getLogger("sender").debug("Пропущено исключение: %s", _exc)
         except (socket.timeout, TimeoutError, ConnectionRefusedError, OSError) as _conn_err:
             # Port fallback: try alternate port before giving up (465<->587)
             _fallback_map = {
@@ -986,7 +987,7 @@ class SendingEngine:
                         message_id=msg.get("Message-ID", ""),
                     )
                 except Exception as _exc:
-                    import logging as _lg; _lg.getLogger("sender").debug("Пропущено исключение: %s", _exc)
+                    logging.getLogger("sender").debug("Пропущено исключение: %s", _exc)
             return SendResult(
                 recipient_email=recipient.email,
                 success=False,
@@ -1008,18 +1009,33 @@ class SendingEngine:
           template: EmailTemplate,
       ) -> SendResult:
           import ssl as _ssl_mod
-          # PROXY ENFORCEMENT: письма отправляются ТОЛЬКО через прокси
-          if not account.proxy.strip():
-              return SendResult(
-                  recipient_email=recipient.email,
-                  success=False,
-                  error="[PROXY_REQUIRED] Прокси не настроен. Отправка без прокси запрещена.",
-                  account_used=account.email,
-              )
+          # БАГ-2 FIX: прокси опционален — при отсутствии прокси используем прямое SMTP-соединение
           msg = _build_message(account, recipient, template)
           try:
               ctx = _ssl_mod.create_default_context()
-              proxy_url = account.proxy.strip()
+              proxy_url = account.proxy.strip() if account.proxy else ""
+              if not proxy_url:
+                  # Прямое подключение без прокси
+                  if account.use_ssl:
+                      _direct = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=30)
+                  else:
+                      _direct = smtplib.SMTP(account.host, account.port, timeout=30)
+                      _direct.ehlo()
+                      if account.use_tls:
+                          _direct.starttls(context=ctx)
+                          _direct.ehlo()
+                  _direct.login(account.email, account.password)
+                  _direct.send_message(msg)
+                  try:
+                      _direct.quit()
+                  except Exception:
+                      pass
+                  return SendResult(
+                      recipient_email=recipient.email,
+                      success=True,
+                      account_used=account.email,
+                      message_id=msg.get("Message-ID", ""),
+                  )
               if "://" not in proxy_url:
                   proxy_url = "socks5://" + proxy_url
               import urllib.parse as _urlparse
