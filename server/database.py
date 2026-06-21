@@ -145,9 +145,9 @@ async def _migrate_db() -> None:
 
 
 async def set_terms_accepted(telegram_id: int) -> None:
-  """Сохраняет факт принятия условий — переживает перезапуск бота."""
+  """Сохраняет факт принятия условий - переживает перезапуск бота."""
   async with _db() as conn:
-      # FIX C-3: UPSERT — создаёт строку если пользователь не зарегистрирован
+      # FIX C-3: UPSERT - создаёт строку если пользователь не зарегистрирован
       await conn.execute(
           """INSERT INTO users (telegram_id, username, first_name, registered_at, last_seen, terms_accepted)
              VALUES (?, '', '', datetime('now'), datetime('now'), 1)
@@ -169,9 +169,9 @@ async def get_terms_accepted(telegram_id: int) -> bool:
 
 
 async def set_captcha_passed(telegram_id: int) -> None:
-  """Сохраняет факт прохождения капчи — переживает перезапуск бота."""
+  """Сохраняет факт прохождения капчи - переживает перезапуск бота."""
   async with _db() as conn:
-      # FIX C-3: UPSERT — создаёт строку если пользователь не зарегистрирован
+      # FIX C-3: UPSERT - создаёт строку если пользователь не зарегистрирован
       await conn.execute(
           """INSERT INTO users (telegram_id, username, first_name, registered_at, last_seen, captcha_passed)
              VALUES (?, '', '', datetime('now'), datetime('now'), 1)
@@ -267,9 +267,9 @@ async def reset_user_hwid(telegram_id: int) -> bool:
 async def init_db() -> None:
   # FIX БАГ-7: исправлены отступы (было 2 пробела, PEP 8 требует 4)
   # PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL
-  # уже применяются в _db() context manager — не дублируем.
+  # уже применяются в _db() context manager - не дублируем.
   async with _db() as db:
-      # FIX: executescript() auto-commits — заменён на отдельные execute() для корректной транзакции
+      # FIX: executescript() auto-commits - заменён на отдельные execute() для корректной транзакции
       for _stmt in [s.strip() for s in CREATE_SQL.split(";") if s.strip()]:
           await db.execute(_stmt)
       for plan_id, plan in PLANS.items():
@@ -324,7 +324,7 @@ async def save_payment(
   currency: str = "USDT",
 ) -> int:
   async with _db() as db:
-      # Check for existing — INSERT OR IGNORE returns lastrowid=0 on conflict
+      # Check for existing - INSERT OR IGNORE returns lastrowid=0 on conflict
       async with db.execute(
           "SELECT id FROM payments WHERE invoice_id = ?", (invoice_id,)
       ) as _chk:
@@ -400,14 +400,14 @@ async def create_license_for_payment(
       ) as cur:
           row = await cur.fetchone()
       if row and row["license_key"]:
-          # Already processed — return existing key
+          # Already processed - return existing key
           async with db.execute(
               "SELECT * FROM licenses WHERE key=?", (row["license_key"],)
           ) as cur2:
               lic = await cur2.fetchone()
           return dict(lic) if lic else {"key": row["license_key"]}
 
-      # Not yet processed — create license and mark paid atomically
+      # Not yet processed - create license and mark paid atomically
       plan_data = PLANS.get(plan, list(PLANS.values())[1])
       hours = plan_data.get("hours", 0)
       days = plan_data.get("days", 30)
@@ -440,7 +440,7 @@ async def create_license_for_payment(
           )
           await db.commit()
       except Exception as _orig_exc:
-          # FIX БАГ-8: rollback в отдельном try — не маскирует оригинальную ошибку
+          # FIX БАГ-8: rollback в отдельном try - не маскирует оригинальную ошибку
           try:
               await db.rollback()
           except Exception as _rb_exc:
@@ -543,10 +543,10 @@ async def revoke_license(key: str) -> bool:
 async def delete_all_licenses() -> int:
   """
   Deletes ALL licenses and payments inside a single transaction.
-  WARNING: irreversible — admin confirmation is required before calling.
+  WARNING: irreversible - admin confirmation is required before calling.
   """
   async with _db() as db:
-      # PRAGMA journal_mode=WAL уже применяется в _db() — дублирование удалено
+      # PRAGMA journal_mode=WAL уже применяется в _db() - дублирование удалено
       try:
           cur = await db.execute("SELECT COUNT(*) FROM licenses")
           count = (await cur.fetchone())[0]
@@ -554,7 +554,7 @@ async def delete_all_licenses() -> int:
           await db.execute("DELETE FROM payments")
           await db.commit()
       except Exception as _orig_exc:
-          # FIX БАГ-8: rollback в отдельном try — не маскирует оригинальную ошибку
+          # FIX БАГ-8: rollback в отдельном try - не маскирует оригинальную ошибку
           try:
               await db.rollback()
           except Exception as _rb_exc:
@@ -578,7 +578,7 @@ async def get_all_licenses(limit: int = 50, offset: int = 0) -> list:
 
 async def get_distinct_user_ids() -> list:
   """Returns list of ALL registered user telegram_ids (from users table).
-  FIX ERR-1: was querying licenses only — excluded users who haven't bought yet.
+  FIX ERR-1: was querying licenses only - excluded users who haven't bought yet.
   """
   async with _db() as db:
       async with db.execute(
