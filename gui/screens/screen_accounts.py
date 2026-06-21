@@ -844,15 +844,15 @@ class AccountsScreen(QWidget):
                 QColor(Colors.SUCCESS) if acc.is_active else QColor(Colors.ERROR)
             )
             self.table.setItem(row, 7, active_item)
-              # Колонка 8: статистика отправленных писем
-              _sent = getattr(acc, 'daily_sent', None)
-              if _sent is None:
-                  _sent = getattr(acc, 'sent_today', 0)
-              _sent_txt = f"{_sent or 0}/{acc.daily_limit}"
-              sent_item = QTableWidgetItem(_sent_txt)
-              sent_item.setForeground(QColor(Colors.TEXT_MUTED))
-              sent_item.setToolTip(f"Отправлено сегодня: {_sent or 0} из {acc.daily_limit}")
-              self.table.setItem(row, 8, sent_item)
+            # Колонка 8: статистика отправленных писем
+            _sent = getattr(acc, 'daily_sent', None)
+            if _sent is None:
+                _sent = getattr(acc, 'sent_today', 0)
+            _sent_txt = f"{_sent or 0}/{acc.daily_limit}"
+            sent_item = QTableWidgetItem(_sent_txt)
+            sent_item.setForeground(QColor(Colors.TEXT_MUTED))
+            sent_item.setToolTip(f"Отправлено сегодня: {_sent or 0} из {acc.daily_limit}")
+            self.table.setItem(row, 8, sent_item)
         active_count = sum(1 for a in self._accounts if a.is_active)
         self.status_label.setText(f"Аккаунтов: {len(self._accounts)} (активных: {active_count})")
 
