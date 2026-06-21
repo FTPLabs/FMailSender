@@ -517,10 +517,22 @@ class ComposeScreen(QWidget):
           bottom_row.addStretch()
 
           self.spam_check_btn = QPushButton("Проверить спам-балл")
-          self.spam_check_btn.clicked.connect(self._check_spam)
-          bottom_row.addWidget(self.spam_check_btn)
+            self.spam_check_btn.clicked.connect(self._check_spam)
+            bottom_row.addWidget(self.spam_check_btn)
 
-          layout.addLayout(bottom_row)
+            self.uniqueize_btn = QPushButton("\U0001f500 Уникализировать")
+            self.uniqueize_btn.setObjectName("btn_secondary")
+            self.uniqueize_btn.setToolTip("16 техник уникализации для обхода спам-фильтров")
+            self.uniqueize_btn.clicked.connect(self._uniqueize)
+            bottom_row.addWidget(self.uniqueize_btn)
+
+            self.delivery_test_btn = QPushButton("\U0001f4ec Тест доставки")
+            self.delivery_test_btn.setObjectName("btn_secondary")
+            self.delivery_test_btn.setToolTip("Проверить: письмо попадёт во Входящие или Спам?")
+            self.delivery_test_btn.clicked.connect(self._test_delivery)
+            bottom_row.addWidget(self.delivery_test_btn)
+
+            layout.addLayout(bottom_row)
 
   
     def _on_content_changed(self):
@@ -561,10 +573,22 @@ a {{ color: #6366F1; }}
 
         if self.preview is not None:
             if _HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-                # Base URL http/https позволяет загружать внешние ресурсы (изображения, шрифты)
-                self.preview.setHtml(html, QUrl("https://fmail.shop/"))
-            else:
-                self.preview.setHtml(html)
+                # Временный файл → QWebEngineView загружает внешние ресурсы (картинки, шрифты)
+                  try:
+                      with tempfile.NamedTemporaryFile(
+                          mode="w", suffix=".html", delete=False, encoding="utf-8"
+                      ) as tmp:
+                          tmp.write(html)
+                          tmp_path = tmp.name
+                      self.preview.load(QUrl.fromLocalFile(tmp_path))
+                      QTimer.singleShot(
+                          10000,
+                          lambda p=tmp_path: os.unlink(p) if os.path.exists(p) else None
+                      )
+                  except Exception:
+                      self.preview.setHtml(html, QUrl("https://fmail.shop/"))
+              else:
+                  self.preview.setHtml(html)
 
     def _add_attachment(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -755,7 +779,261 @@ a {{ color: #6366F1; }}
 
         ai_btn.clicked.connect(_run_ai_fix)
         dlg.exec()
-    def _on_spam_error(self, error: str):
+    def _uniqueize(self):
+          """Диалог выбора техник уникализации + применение."""
+          from core.uniqueizer import ALL_TECHNIQUES, TECHNIQUE_LABELS, DEFAULT_TECHNIQUES, apply_all, ai_rephrase
+
+          html = self.html_editor.toPlainText().strip()
+          if not html:
+              html = self.rich_editor.toHtml()
+          if not html.strip():
+              QMessageBox.warning(self, "Уникализация", "Сначала напишите письмо в редакторе.")
+              return
+
+          dlg = QDialog(self)
+          dlg.setWindowTitle("Уникализация письма")
+          dlg.setMinimumWidth(540)
+          dlg.setMinimumHeight(580)
+          lay = QVBoxLayout(dlg)
+          lay.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+          lay.setSpacing(Spacing.MD)
+
+          title_lbl = QLabel("<b>Выберите техники уникализации</b>")
+          title_lbl.setTextFormat(Qt.TextFormat.RichText)
+          lay.addWidget(title_lbl)
+
+          info_lbl = QLabel(
+              "Каждое письмо получит уникальный fingerprint — спам-фильтры не смогут\n"
+              "определить, что отправляется одно и то же письмо всем получателям."
+          )
+          info_lbl.setObjectName("label_muted")
+          info_lbl.setWordWrap(True)
+          lay.addWidget(info_lbl)
+
+          from PyQt6.QtWidgets import QCheckBox
+          scroll = QScrollArea()
+          scroll.setWidgetResizable(True)
+          scroll.setFixedHeight(260)
+          inner = QWidget()
+          inner_lay = QVBoxLayout(inner)
+          inner_lay.setSpacing(4)
+
+          checkboxes = {}
+          for tech in ALL_TECHNIQUES:
+              label = TECHNIQUE_LABELS.get(tech, tech)
+              cb = QCheckBox(label)
+              cb.setChecked(tech in DEFAULT_TECHNIQUES)
+              checkboxes[tech] = cb
+              inner_lay.addWidget(cb)
+
+          sel_row = QHBoxLayout()
+          sel_all = QPushButton("Выбрать все")
+          sel_all.setObjectName("btn_secondary")
+          sel_none = QPushButton("Снять все")
+          sel_none.setObjectName("btn_secondary")
+          sel_all.clicked.connect(lambda: [cb.setChecked(True) for cb in checkboxes.values()])
+          sel_none.clicked.connect(lambda: [cb.setChecked(False) for cb in checkboxes.values()])
+          sel_row.addWidget(sel_all)
+          sel_row.addWidget(sel_none)
+          sel_row.addStretch()
+          inner_lay.addLayout(sel_row)
+          inner_lay.addStretch()
+          scroll.setWidget(inner)
+          lay.addWidget(scroll)
+
+          # AI секция
+          ai_frame = QFrame()
+          ai_frame.setObjectName("card")
+          ai_fl = QVBoxLayout(ai_frame)
+          ai_fl.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
+          ai_fl.setSpacing(Spacing.XS)
+          ai_fl.addWidget(QLabel("<b>AI-перефразировка (бесплатно)</b>"))
+          ai_note = QLabel(
+              "Groq llama3 (14400 req/день): console.groq.com\n"
+              "Together.ai ($25 бесплатно): api.together.ai\n"
+              "OpenRouter (free models): openrouter.ai"
+          )
+          ai_note.setObjectName("label_muted")
+          ai_note.setWordWrap(True)
+          ai_fl.addWidget(ai_note)
+          ai_row = QHBoxLayout()
+          from PyQt6.QtWidgets import QComboBox as _QCB
+          ai_prov = _QCB()
+          ai_prov.addItems(["groq", "together", "openrouter"])
+          ai_prov.setFixedWidth(120)
+          ai_row.addWidget(QLabel("Провайдер:"))
+          ai_row.addWidget(ai_prov)
+          ai_key = QLineEdit()
+          ai_key.setPlaceholderText("API ключ (gsk_... / sk-or-...)")
+          ai_key.setEchoMode(QLineEdit.EchoMode.Password)
+          ai_row.addWidget(ai_key, 1)
+          ai_fl.addLayout(ai_row)
+          from PyQt6.QtWidgets import QCheckBox as _QCBx
+          ai_cb = _QCBx("Применить AI-перефразировку")
+          ai_cb.setChecked(False)
+          ai_fl.addWidget(ai_cb)
+          lay.addWidget(ai_frame)
+
+          btn_row = QHBoxLayout()
+          apply_btn = QPushButton("Применить")
+          apply_btn.setObjectName("btn_primary")
+          cancel_btn = QPushButton("Отмена")
+          cancel_btn.setObjectName("btn_secondary")
+          cancel_btn.clicked.connect(dlg.reject)
+          btn_row.addWidget(apply_btn)
+          btn_row.addWidget(cancel_btn)
+          lay.addLayout(btn_row)
+
+          result_holder = [None]
+
+          def _do_apply():
+              selected = [t for t, cb in checkboxes.items() if cb.isChecked()]
+              if not selected and not ai_cb.isChecked():
+                  QMessageBox.warning(dlg, "Уникализация", "Выберите хотя бы одну технику.")
+                  return
+              apply_btn.setEnabled(False)
+              apply_btn.setText("Применяю...")
+              dlg.setEnabled(False)
+              subject = self.subject_input.text()
+              import threading
+
+              def _worker():
+                  new_html, new_subj = apply_all(html, subject, selected or None)
+                  if ai_cb.isChecked():
+                      key = ai_key.text().strip()
+                      prov = ai_prov.currentText()
+                      if key:
+                          new_html, _ = ai_rephrase(new_html, key, prov)
+                  result_holder[0] = (new_html, new_subj)
+
+              t = threading.Thread(target=_worker, daemon=True)
+              t.start()
+
+              def _poll():
+                  if t.is_alive():
+                      QTimer.singleShot(300, _poll)
+                  else:
+                      dlg.accept()
+              QTimer.singleShot(300, _poll)
+
+          apply_btn.clicked.connect(_do_apply)
+          dlg.exec()
+
+          if result_holder[0] is not None:
+              new_html, new_subj = result_holder[0]
+              self.html_editor.setPlainText(new_html)
+              if new_subj:
+                  self.subject_input.setText(new_subj)
+              self.editor_tabs.setCurrentIndex(1)
+              self._update_preview()
+              cnt = len([t for t, cb in checkboxes.items() if cb.isChecked()])
+              QMessageBox.information(
+                  self, "Готово",
+                  f"Применено техник: {cnt}\nКаждое письмо теперь уникально!"
+              )
+
+      def _test_delivery(self):
+          """Тест доставляемости через mail-tester.com (бесплатно, без регистрации)."""
+          from core.inbox_tester import generate_test_address, fetch_result, open_result_browser
+
+          test_email, result_url, uid = generate_test_address()
+
+          dlg = QDialog(self)
+          dlg.setWindowTitle("Тест доставки — inbox vs spam")
+          dlg.setMinimumWidth(520)
+          lay = QVBoxLayout(dlg)
+          lay.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+          lay.setSpacing(Spacing.MD)
+
+          lay.addWidget(QLabel("<b>Шаг 1.</b> Отправьте ОДНО тестовое письмо на этот адрес:"))
+
+          email_input = QLineEdit(test_email)
+          email_input.setReadOnly(True)
+          email_input.setStyleSheet("font-weight:bold;font-size:13px;")
+          lay.addWidget(email_input)
+
+          copy_btn = QPushButton("Копировать адрес")
+          copy_btn.setObjectName("btn_secondary")
+          def _copy():
+              from PyQt6.QtWidgets import QApplication
+              QApplication.clipboard().setText(test_email)
+              copy_btn.setText("Скопировано!")
+              QTimer.singleShot(2000, lambda: copy_btn.setText("Копировать адрес"))
+          copy_btn.clicked.connect(_copy)
+          lay.addWidget(copy_btn)
+
+          step2 = QLabel(
+              "<b>Шаг 2.</b> После отправки нажмите <b>Проверить результат</b>.<br>"
+              "<small>Подождите 30-60 секунд после отправки.</small>"
+          )
+          step2.setTextFormat(Qt.TextFormat.RichText)
+          step2.setWordWrap(True)
+          lay.addWidget(step2)
+
+          status_lbl = QLabel("Ожидание отправки...")
+          status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+          status_lbl.setWordWrap(True)
+          status_lbl.setStyleSheet("font-size:14px;padding:12px;")
+          lay.addWidget(status_lbl)
+
+          bar = QProgressBar()
+          bar.setRange(0, 10)
+          bar.setValue(0)
+          bar.setFixedHeight(12)
+          bar.setVisible(False)
+          lay.addWidget(bar)
+
+          btn_row = QHBoxLayout()
+          check_btn = QPushButton("Проверить результат")
+          check_btn.setObjectName("btn_primary")
+          browser_btn = QPushButton("Открыть в браузере")
+          browser_btn.setObjectName("btn_secondary")
+          close_btn = QPushButton("Закрыть")
+          close_btn.setObjectName("btn_secondary")
+          close_btn.clicked.connect(dlg.accept)
+          browser_btn.clicked.connect(lambda: open_result_browser(uid))
+          btn_row.addWidget(check_btn)
+          btn_row.addWidget(browser_btn)
+          btn_row.addWidget(close_btn)
+          lay.addLayout(btn_row)
+
+          def _check():
+              check_btn.setEnabled(False)
+              check_btn.setText("Проверяю...")
+              status_lbl.setText("Запрашиваем результат mail-tester.com...")
+              import threading
+              result_ref = [None]
+
+              def _worker():
+                  result_ref[0] = fetch_result(uid, timeout=20)
+
+              t = threading.Thread(target=_worker, daemon=True)
+              t.start()
+
+              def _poll():
+                  if t.is_alive():
+                      QTimer.singleShot(500, _poll)
+                  else:
+                      r = result_ref[0] or {}
+                      check_btn.setEnabled(True)
+                      check_btn.setText("Проверить снова")
+                      if r.get("error"):
+                          status_lbl.setText(f"Ошибка: {r['error']}")
+                          bar.setVisible(False)
+                      else:
+                          status_lbl.setText(r.get("inbox_status", "Нет данных"))
+                          score = r.get("score")
+                          if score is not None:
+                              bar.setValue(int(round(score)))
+                              bar.setVisible(True)
+                          else:
+                              bar.setVisible(False)
+              QTimer.singleShot(500, _poll)
+
+          check_btn.clicked.connect(_check)
+          dlg.exec()
+
+      def _on_spam_error(self, error: str):
         self.spam_check_btn.setEnabled(True)
         self.spam_check_btn.setText("Проверить спам-балл")
         QMessageBox.warning(self, "Ошибка проверки", f"Не удалось проверить:\n{error}")
