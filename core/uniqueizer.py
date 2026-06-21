@@ -272,14 +272,17 @@ def technique_nbsp(html: str, ratio: float = 0.25) -> str:
 # Technique 11: Soft hyphens in long words
 # ============================================================
 def technique_soft_hyphens(html: str, ratio: float = 0.06) -> str:
-    """Вставляет мягкие переносы (U+00AD) в длинные слова."""
+    """Вставляет мягкие переносы (U+00AD) в длинные слова.
+    FIX: пропускает URL-подобные строки чтобы не ломать ссылки в тексте.
+    """
     SHY = "\u00ad"
+    _URL_RE = re.compile(r"https?://|www\\.|@[a-zA-Z0-9]|\\.(?:com|net|org|ru|uk|de|fr|io|co|tv)\\b", re.IGNORECASE)
 
     def _inject(m: re.Match) -> str:
         parts = re.split(r"(\s+)", m.group(0))
         out = []
         for w in parts:
-            if len(w) > 9 and random.random() < ratio:
+            if len(w) > 9 and random.random() < ratio and not _URL_RE.search(w):
                 mid = len(w) // 2
                 w = w[:mid] + SHY + w[mid:]
             out.append(w)
