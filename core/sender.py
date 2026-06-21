@@ -8,7 +8,9 @@ v2.9.4: добавлено логирование во все silent except-бл
 from __future__ import annotations
 
 import asyncio
+import base64
 import mimetypes
+import urllib.parse
 import queue
 import random
 import re
@@ -372,6 +374,7 @@ class SmtpAccount:
     hourly_limit: int = 50
     is_active: bool = True
     proxy: str = ""
+    oauth_token: str = ""
     imap_host: str = ""
     imap_port: int = 993
     imap_ssl: bool = True
@@ -921,36 +924,85 @@ class SendingEngine:
             )
 
     def _send_sync(
-        self,
-        account: SmtpAccount,
-        recipient: Recipient,
-        template: EmailTemplate,
-    ) -> SendResult:
-        import ssl
-        msg = _build_message(account, recipient, template)
-        try:
-            ctx = ssl.create_default_context()
-            if account.use_ssl:
-                s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=30)
-            else:
-                s = smtplib.SMTP(account.host, account.port, timeout=30)
-                s.ehlo()  # FIX: явный EHLO до STARTTLS — Exchange/корп. серверы требуют явного EHLO
-                if account.use_tls:
-                    s.starttls(context=ctx)
-                    s.ehlo()  # RFC 3207: повторный EHLO обязателен после STARTTLS
-            s.login(account.email, account.password)
-            s.send_message(msg)
-            s.quit()
-            return SendResult(
-                recipient_email=recipient.email,
-                success=True,
-                account_used=account.email,
-                message_id=msg.get("Message-ID", ""),
-            )
-        except Exception as e:
-            return SendResult(
-                recipient_email=recipient.email,
-                success=False,
-                error=str(e),
-                account_used=account.email,
-            )
+          self,
+          account: SmtpAccount,
+          recipient: Recipient,
+          template: EmailTemplate,
+      ) -> SendResult:
+          import ssl as _ssl_mod
+          # PROXY ENFORCEMENT: письма отправляются ТОЛЬКО через прокси
+          if not account.proxy.strip():
+              return SendResult(
+                  recipient_email=recipient.email,
+                  success=False,
+                  error="[PROXY_REQUIRED] Прокси не настроен. Отправка без прокси запрещена.",
+                  account_used=account.email,
+              )
+          msg = _build_message(account, recipient, template)
+          try:
+              ctx = _ssl_mod.create_default_context()
+              proxy_url = account.proxy.strip()
+              if "://" not in proxy_url:
+                  proxy_url = "socks5://" + proxy_url
+              import urllib.parse as _urlparse
+              _p = _urlparse.urlparse(proxy_url)
+              _scheme = _p.scheme.lower()
+              try:
+                  import socks as _socks_lib
+              except ImportError:
+                  return SendResult(
+                      recipient_email=recipient.email, success=False,
+                      error="PySocks не установлен. Выполните: pip install PySocks",
+                      account_used=account.email,
+                  )
+              _proxy_type = _socks_lib.SOCKS5 if "socks5" in _scheme else (
+                  _socks_lib.SOCKS4 if "socks4" in _scheme else _socks_lib.HTTP)
+              _raw = _socks_lib.socksocket()
+              _raw.set_proxy(_proxy_type, _p.hostname, _p.port or 1080,
+                             True, _p.username, _p.password)
+              _raw.settimeout(30)
+              _raw.connect((account.host, account.port))
+              if account.use_ssl:
+                  _raw = ctx.wrap_socket(_raw, server_hostname=account.host)
+              smtp_conn = smtplib.SMTP.__new__(smtplib.SMTP)
+              smtp_conn._host = account.host
+              smtp_conn.sock = _raw
+              smtp_conn.file = _raw.makefile("rb")
+              smtp_conn.ehlo_or_helo_if_needed()
+              if not account.use_ssl and account.use_tls:
+                  smtp_conn.starttls(context=ctx)
+                  smtp_conn.ehlo()
+              # OAuth2/XOAUTH2 для Microsoft или обычный LOGIN
+              _domain = account.email.split("@")[-1].lower() if "@" in account.email else ""
+              _ms_domains = frozenset({
+                  "outlook.com","hotmail.com","live.com","msn.com","windowslive.com",
+                  "outlook.de","hotmail.de","live.de","outlook.fr","hotmail.fr","live.fr",
+                  "outlook.ru","hotmail.ru","live.ru","outlook.co.uk","hotmail.co.uk",
+                  "outlook.es","hotmail.es","outlook.it","hotmail.it","outlook.nl",
+              })
+              if getattr(account, "oauth_token", "") and _domain in _ms_domains:
+                  _xoauth2 = base64.b64encode(
+                      ("user=" + account.email + "\x01auth=Bearer " +
+                       account.oauth_token + "\x01\x01").encode()
+                  ).decode()
+                  smtp_conn.docmd("AUTH", "XOAUTH2 " + _xoauth2)
+              else:
+                  smtp_conn.login(account.email, account.password)
+              smtp_conn.send_message(msg)
+              try:
+                  smtp_conn.quit()
+              except Exception:
+                  pass
+              return SendResult(
+                  recipient_email=recipient.email,
+                  success=True,
+                  account_used=account.email,
+                  message_id=msg.get("Message-ID", ""),
+              )
+          except Exception as e:
+              return SendResult(
+                  recipient_email=recipient.email,
+                  success=False,
+                  error=str(e),
+                  account_used=account.email,
+              )
