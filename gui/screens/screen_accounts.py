@@ -816,16 +816,16 @@ class AccountsScreen(QWidget):
             self.table.setItem(row, 3, QTableWidgetItem(str(acc.daily_limit)))
             self.table.setItem(row, 4, QTableWidgetItem(str(acc.hourly_limit)))
             # Статус: last_test_ok если проверяли, иначе «Не проверено»
-              _ltok = getattr(acc, 'last_test_ok', None)
-              if _ltok is True:
-                  status_item = QTableWidgetItem("✓ OK")
-                  status_item.setForeground(QColor(Colors.SUCCESS))
-              elif _ltok is False:
-                  status_item = QTableWidgetItem("✗ Ошибка")
-                  status_item.setForeground(QColor(Colors.ERROR))
-              else:
-                  status_item = QTableWidgetItem("❓ Не проверено")
-                  status_item.setForeground(QColor(Colors.TEXT_MUTED))
+            _ltok = getattr(acc, 'last_test_ok', None)
+            if _ltok is True:
+                status_item = QTableWidgetItem("✓ OK")
+                status_item.setForeground(QColor(Colors.SUCCESS))
+            elif _ltok is False:
+                status_item = QTableWidgetItem("✗ Ошибка")
+                status_item.setForeground(QColor(Colors.ERROR))
+            else:
+                status_item = QTableWidgetItem("❓ Не проверено")
+                status_item.setForeground(QColor(Colors.TEXT_MUTED))
             # (setForeground already set above)
             self.table.setItem(row, 5, status_item)
 
