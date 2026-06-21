@@ -917,28 +917,28 @@ class AccountsScreen(QWidget):
     def _test_single(self, row: int):
         """Проверяет один аккаунт по индексу."""
         if row < 0 or row >= len(self._accounts):
-            return
+          return
         # Статус теперь в колонке 1
-          item = self.table.item(row, 1)
-          if item:
-              item.setText("⏳ Проверка...")
-              item.setForeground(QColor(Colors.TEXT_MUTED))
-          acc = self._accounts[row]
-          w = TestWorker(acc, parent=self)
+        item = self.table.item(row, 1)
+        if item:
+            item.setText("⏳ Проверка...")
+            item.setForeground(QColor(Colors.TEXT_MUTED))
+        acc = self._accounts[row]
+        w = TestWorker(acc, parent=self)
 
-          @pyqtSlot(bool, str)
-          def on_result(ok, msg, r=row):
-              if 0 <= r < len(self._accounts):
-                  self._accounts[r].last_test_ok = ok
-                  self._accounts[r].last_test_msg = msg  # сохраняем полный текст ошибки
-                  self._accounts[r].is_active = ok
-                  save_accounts(self._accounts)
-              # Обновляем ячейку статуса (колонка 1)
-              self._refresh_table()
-              # FIX: прокси-детект всегда
-              _px = (self._accounts[r].proxy or "") if 0 <= r < len(self._accounts) else ""
-              if _px.strip():
-                  self._fetch_proxy_country(r, _px.strip())
+        @pyqtSlot(bool, str)
+        def on_result(ok, msg, r=row):
+            if 0 <= r < len(self._accounts):
+                self._accounts[r].last_test_ok = ok
+                self._accounts[r].last_test_msg = msg  # сохраняем полный текст ошибки
+                self._accounts[r].is_active = ok
+                save_accounts(self._accounts)
+            # Обновляем ячейку статуса (колонка 1)
+            self._refresh_table()
+            # FIX: прокси-детект всегда
+            _px = (self._accounts[r].proxy or "") if 0 <= r < len(self._accounts) else ""
+            if _px.strip():
+                self._fetch_proxy_country(r, _px.strip())
 
         w.result_ready.connect(on_result)
         self._test_workers.append(w)
