@@ -379,7 +379,7 @@ class SmtpAccount:
     imap_port: int = 993
     imap_ssl: bool = True
     last_test_ok: Optional[bool] = field(default=None)
-      last_test_msg: str = field(default="")
+    last_test_msg: str = field(default="")
 
     def __post_init__(self):
         self._lock = threading.Lock()
