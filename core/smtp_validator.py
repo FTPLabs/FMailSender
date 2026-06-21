@@ -539,11 +539,37 @@ class SmtpValidator:
                                   "Подключение успешно",
                                   spf_ok, dkim_ok, dmarc_ok, mx_ok)
         except smtplib.SMTPAuthenticationError as e:
+            err_str = str(e)
+            if "535" in err_str:
+                detail = "Неверный пароль или отключена SMTP-авторизация в настройках почты"
+            elif "534" in err_str:
+                detail = "Требуется App Password (включена двухфакторная аутентификация)"
+            elif "username" in err_str.lower() or "user" in err_str.lower():
+                detail = "Пользователь не найден или неверный формат email"
+            elif "oauth" in err_str.lower() or "xoauth" in err_str.lower():
+                detail = "Ошибка OAuth2 — используйте App Password вместо основного пароля"
+            else:
+                detail = f"Ошибка авторизации [{err_str[:120]}]"
             return ValidateResult(email, host, port, False, "AUTH_FAIL",
-                                  str(e)[:200], spf_ok, dkim_ok, dmarc_ok, mx_ok)
+                                  detail, spf_ok, dkim_ok, dmarc_ok, mx_ok)
         except ssl.SSLError as e:
+            import logging as _lg
+            _lg.getLogger("smtp_validator").warning("SSL error %s:%s — %s", host, port, str(e)[:60])
             pass  # Try fallback below
-        except (socket.timeout, TimeoutError, ConnectionRefusedError, OSError) as e:
+        except socket.timeout:
+            import logging as _lg
+            _lg.getLogger("smtp_validator").warning("Timeout %s:%s", host, port)
+            pass  # Try fallback below
+        except ConnectionRefusedError:
+            import logging as _lg
+            _lg.getLogger("smtp_validator").warning("Refused %s:%s", host, port)
+            pass  # Try fallback below
+        except OSError as e:
+            _oe = str(e)
+            if any(x in _oe for x in ("11001", "getaddrinfo", "Name or service", "nodename")):
+                return ValidateResult(email, host, port, False, "DNS_ERROR",
+                                      f"Не удалось разрешить хост {host} — проверьте SMTP-сервер",
+                                      spf_ok, dkim_ok, dmarc_ok, mx_ok)
             pass  # Try fallback below
         except Exception as e:
             err = str(e)[:200]
@@ -551,6 +577,7 @@ class SmtpValidator:
                 return ValidateResult(email, host, port, False, "AUTH_FAIL",
                                       err, spf_ok, dkim_ok, dmarc_ok, mx_ok)
             pass  # Try fallback below
+
 
         # ── Port fallback ─────────────────────────────────────────────────────
         cfg = get_smtp_config(domain)
@@ -575,8 +602,28 @@ class SmtpValidator:
             except Exception:
                 continue
 
+        # MX autodiscovery: если все порты не сработали — пробуем MX-запись домена
+        mx_host = _get_mx_host(domain)
+        if mx_host and mx_host.lower() != host.lower():
+            for _mx_port, _mx_ssl, _mx_tls in [(465, True, False), (587, False, True)]:
+                try:
+                    _try_smtp_connect(mx_host, _mx_port, _mx_ssl, _mx_tls,
+                                      email, password, timeout, proxy_url, oauth_token)
+                    return ValidateResult(email, mx_host, _mx_port, True, "OK",
+                                          f"Подключено через MX: {mx_host}:{_mx_port}",
+                                          spf_ok, dkim_ok, dmarc_ok, mx_ok)
+                except smtplib.SMTPAuthenticationError as _e:
+                    _es = str(_e)
+                    return ValidateResult(email, mx_host, _mx_port, False, "AUTH_FAIL",
+                                          "Неверный пароль" if "535" in _es else f"AUTH: {_es[:80]}",
+                                          spf_ok, dkim_ok, dmarc_ok, mx_ok)
+                except Exception:
+                    continue
         return ValidateResult(email, host, port, False, "CONN_ERROR",
-                              "Не удалось подключиться ни через один порт",
+                              f"Не удалось подключиться к {host} ни через один порт (465/587/25/2525). "
+                              f"Проверьте: 1) SMTP включён в настройках; "
+                              f"2) Используйте App Password; 3) Прокси не блокирует порт; "
+                              f"4) Хост {host} корректен.",
                               spf_ok, dkim_ok, dmarc_ok, mx_ok)
 
     def validate_all(
