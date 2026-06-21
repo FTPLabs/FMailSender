@@ -924,22 +924,22 @@ class SendingEngine:
                     except Exception as _exc:
                         logging.getLogger("sender").debug("Пропущено исключение: %s", _exc)
                 # OAuth2/XOAUTH2 для Microsoft (Outlook/Hotmail/Live)
-                  _domain_async = account.email.split("@")[-1].lower() if "@" in account.email else ""
-                  _ms_domains_async = frozenset({
-                      "outlook.com", "hotmail.com", "live.com", "msn.com", "windowslive.com",
-                      "outlook.de", "hotmail.de", "live.de", "outlook.fr", "hotmail.fr",
-                      "live.fr", "outlook.ru", "hotmail.ru", "live.ru", "outlook.co.uk",
-                      "hotmail.co.uk", "outlook.es", "hotmail.es", "outlook.it", "hotmail.it",
-                  })
-                  # Авто-обновление OAuth2 токена через refresh_token
-                  _oauth = _get_oauth_token(account) if _HAS_OAUTH2 else getattr(account, "oauth_token", "")
-                  if _oauth and _domain_async in _ms_domains_async:
-                      # Для Outlook OAuth2: используем токен как пароль через LOGIN
-                      await smtp.login(account.email, _oauth)
-                  else:
-                      await smtp.login(account.email, account.password)
-                  await smtp.send_message(msg)
-                  return SendResult(
+                _domain_async = account.email.split("@")[-1].lower() if "@" in account.email else ""
+                _ms_domains_async = frozenset({
+                    "outlook.com", "hotmail.com", "live.com", "msn.com", "windowslive.com",
+                    "outlook.de", "hotmail.de", "live.de", "outlook.fr", "hotmail.fr",
+                    "live.fr", "outlook.ru", "hotmail.ru", "live.ru", "outlook.co.uk",
+                    "hotmail.co.uk", "outlook.es", "hotmail.es", "outlook.it", "hotmail.it",
+                })
+                # Авто-обновление OAuth2 токена через refresh_token
+                _oauth = _get_oauth_token(account) if _HAS_OAUTH2 else getattr(account, "oauth_token", "")
+                if _oauth and _domain_async in _ms_domains_async:
+                    # Для Outlook OAuth2: используем токен как пароль через LOGIN
+                    await smtp.login(account.email, _oauth)
+                else:
+                    await smtp.login(account.email, account.password)
+                await smtp.send_message(msg)
+                return SendResult(
                     recipient_email=recipient.email,
                     success=True,
                     account_used=account.email,
