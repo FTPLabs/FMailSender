@@ -1,3 +1,22 @@
+## [3.7.9] — 2026-06-21
+
+### Исправлено (все баги из анализа v3.7.8)
+
+- **[КРИТ] gui/theme.py**: `AttributeError: Colors has no attribute BG_SURFACE` — приложение не запускалось.
+  Заменено `c.BG_SURFACE` -> `c.BG_SURFACE2` (2 вхождения в стилях QDialog). **БАГ-1**.
+- **core/sender.py** `_send_sync()`: обязательный прокси блокировал отправку без proxy.
+  Теперь прокси опционален: при отсутствии — прямое SMTP-соединение. **БАГ-2**.
+- **gui/screens/screen_inbox.py**: IMAP без таймаута зависал навсегда.
+  Добавлен `socket.setdefaulttimeout(15)` и `M.socket.settimeout(15)`. **БАГ-3**.
+- **main.py** `security_check()`: race condition с `os.abort()` во время init QApplication.
+  Исправлено: `security_check()` синхронно до создания QApplication. **БАГ-4**.
+- **core/sender.py** `_send_aiosmtp()`: 6 дублированных `import logging as _lg`
+  заменены на один `import logging` в начале файла. **ДУБ-2**.
+
+### CI/CD
+
+- **syntax-check.yml**: добавлена проверка атрибутов класса `Colors`.
+  Теперь подобный AttributeError будет поймать CI до сборки EXE.
 ## [3.7.8] — 2026-06-21
 
     ### Исправлено (критические баги)
