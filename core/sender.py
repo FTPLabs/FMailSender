@@ -551,7 +551,7 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
               except Exception as _exc:
                   import logging as _lg; _lg.getLogger("sender").warning("Пропущен элемент: %s", _exc); continue
           return False, f"Не удалось подключиться к {account.host} ни на одном порту (465/587/25/2525)."
-          return False, f"Не удалось подключиться к {account.host}:{account.port}. Проверьте хост и порт."
+    # (dead code removed — fallback handles this above)
     except smtplib.SMTPNotSupportedError:
         return False, "Сервер не поддерживает SMTP AUTH. Outlook/Hotmail — требуется App Password. T-online — нужен пароль для внешних программ."
     except smtplib.SMTPException as _smtp_ex:
