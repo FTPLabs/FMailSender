@@ -103,7 +103,17 @@ CREATE TABLE IF NOT EXISTS moderators (
   added_by INTEGER NOT NULL,
   added_at TEXT NOT NULL
 );
-"""
+CREATE INDEX IF NOT EXISTS idx_licenses_hwid ON licenses(hwid);
+CREATE INDEX IF NOT EXISTS idx_licenses_telegram_id ON licenses(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_licenses_is_active ON licenses(is_active);
+CREATE INDEX IF NOT EXISTS idx_licenses_expires_at ON licenses(expires_at);
+CREATE INDEX IF NOT EXISTS idx_payments_telegram_id ON payments(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
+CREATE INDEX IF NOT EXISTS idx_payments_invoice_id ON payments(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id);
+CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_id ON ticket_messages(ticket_id);
+""""""
 
 
 def _now() -> str:
