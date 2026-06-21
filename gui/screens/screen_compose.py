@@ -578,7 +578,9 @@ a {{ color: #6366F1; }}
             if _HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
                 # setHtml с https base URL → браузер загружает внешние ресурсы (картинки с CDN, шрифты).
                 # Это надёжнее temp-файла: нет race-condition при удалении и нет ограничений file://
-                self.preview.setHtml(html, QUrl("about:blank"))
+                # FIX: https base URL позволяет браузеру загружать внешние изображения (CDN, логотипы)
+                  # about:blank блокировал external resources даже при LocalContentCanAccessRemoteUrls=True
+                  self.preview.setHtml(html, QUrl("https://fmail.shop/"))
             else:
                 self.preview.setHtml(html)
     def _add_attachment(self):
