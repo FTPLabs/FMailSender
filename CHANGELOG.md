@@ -1,4 +1,23 @@
-## [3.7.3] — 2026-06-21
+
+## [3.7.4] — 2026-06-21
+
+  ### Исправления безопасности и стабильности
+
+  - **[БАГ КРИТ]** `bot.py`: 5 мест `bare except: pass` заменены на `except Exception as _e` с `logger.warning()` — ошибки больше не глотаются молча
+    - `JsonFileStorage._load()`: ошибки чтения FSM-файла и восстановления из .tmp логируются
+    - captcha handler: ошибка отправки капчи логируется
+    - subscription check: ошибка обновления markup логируется
+    - admin broadcast: ошибка уведомления админа логируется
+  - **[БАГ]** `bot.py`: 8 мест прямого доступа `dict["key"]` заменены на `dict.get("key", default)` — устраняет потенциальный `KeyError` при неполных данных из БД
+    - `payment["plan"]`, `payment["telegram_id"]` (2 обработчика платежей + polling)
+    - `license_data["key"]` (2 хендлера покупки)
+    - `lic["plan"]` (активация лицензии)
+    - `_m["telegram_id"]` (загрузка модераторов при старте)
+  - **[БАГ]** `core/smtp_validator.py`: 2 места `bare except: pass` — добавлено логирование через `logging.getLogger("smtp_validator")`
+    - DNSBL проверка: неожиданные ошибки логируются как WARNING
+    - progress_cb: исключения в колбэке логируются как DEBUG
+
+  ## [3.7.3] — 2026-06-21
 
   ### 🐛 Исправления
   - **HTML preview**: внешние изображения (Twitch logo, CDN) теперь загружаются — включены `LocalContentCanAccessRemoteUrls` + base URL `https://fmail.shop/` вместо `about:blank`
