@@ -825,8 +825,12 @@ async def cb_claim_trial(query: CallbackQuery):
         )
         return
 
-    # Abuse-control: триал выдаётся один раз на Telegram-аккаунт
-    if any((lic.get("plan") == "trial") for lic in licenses):
+    # Abuse-control: триал выдаётся один раз на Telegram-аккаунт.
+    # Сначала legacy-проверка по уже выданным trial-лицензиям (short-circuit,
+    # чтобы не «потратить» атомарный флаг впустую), затем атомарный захват флага
+    # в users.trial_used_at — он же защищает от параллельных нажатий (гонки).
+    _already_trial = any((lic.get("plan") == "trial") for lic in licenses)
+    if _already_trial or not await db.try_claim_trial(user.id):
         await send_or_edit(
             query,
             "❌ <b>Триал уже использован</b>\n\n"
@@ -846,6 +850,11 @@ async def cb_claim_trial(query: CallbackQuery):
         )
     except Exception as e:
         logger.error("create trial error for %d: %s", user.id, e)
+        # Откатываем захват флага, чтобы пользователь мог повторить попытку
+        try:
+            await db.release_trial(user.id)
+        except Exception:
+            pass
         await query.answer("⚠️ Не удалось выдать триал. Попробуй позже.", show_alert=True)
         return
 

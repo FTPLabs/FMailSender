@@ -73,7 +73,8 @@ CREATE TABLE IF NOT EXISTS users (
   last_seen TEXT NOT NULL,
   terms_accepted INTEGER DEFAULT 0,
   captcha_passed INTEGER DEFAULT 0,
-  hwid_reset_at TEXT DEFAULT ''
+  hwid_reset_at TEXT DEFAULT '',
+  trial_used_at TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS tickets (
@@ -133,6 +134,7 @@ async def _migrate_db() -> None:
         "ALTER TABLE users ADD COLUMN terms_accepted INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN captcha_passed INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN hwid_reset_at TEXT DEFAULT ''",
+        "ALTER TABLE users ADD COLUMN trial_used_at TEXT DEFAULT ''",
     ]
   async with _db() as conn:
       for _sql in _migrations:
@@ -142,6 +144,39 @@ async def _migrate_db() -> None:
           except aiosqlite.OperationalError as _e:
               if "duplicate column name" not in str(_e).lower():
                   logger.warning("migrate_db: неожиданная ошибка при '%s': %s", _sql, _e)
+
+
+async def try_claim_trial(telegram_id: int) -> bool:
+  """Атомарно помечает триал использованным для Telegram-аккаунта.
+
+  True  — пользователь ещё не брал триал (можно выдавать),
+  False — триал уже был использован (защита от повторной выдачи и от гонок:
+          только один из параллельных вызовов получит rowcount>0).
+  """
+  ts = _now()
+  async with _db() as conn:
+      # Гарантируем наличие строки пользователя (онбординг мог не успеть)
+      await conn.execute(
+          "INSERT OR IGNORE INTO users (telegram_id, registered_at, last_seen) VALUES (?,?,?)",
+          (telegram_id, ts, ts),
+      )
+      cur = await conn.execute(
+          "UPDATE users SET trial_used_at=? "
+          "WHERE telegram_id=? AND (trial_used_at IS NULL OR trial_used_at='')",
+          (ts, telegram_id),
+      )
+      await conn.commit()
+      return cur.rowcount > 0
+
+
+async def release_trial(telegram_id: int) -> None:
+  """Откатывает отметку триала — на случай, если выдача лицензии не удалась."""
+  async with _db() as conn:
+      await conn.execute(
+          "UPDATE users SET trial_used_at='' WHERE telegram_id=?",
+          (telegram_id,),
+      )
+      await conn.commit()
 
 
 async def set_terms_accepted(telegram_id: int) -> None:
