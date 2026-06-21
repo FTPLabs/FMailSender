@@ -1,6 +1,18 @@
 # Changelog
 
-  ## v3.6.2 — GUI Python PyQt6 + Bugfixes (2025-06-19)
+  ## v3.7.2 — Bugfix Release (2025-06-21)
+
+  ### 🐛 Bugfixes
+  - **КРИТИЧЕСКИЙ** `gui/screens/screen_accounts.py` строка 841: исправлен `IndentationError` — метод `_update_contextual_buttons` имел отступ 4 пробела вместо 2. Приложение не запускалось.
+  - `server/crypto_pay.py`: лишние пробелы в блоке `except aiohttp.ClientError` (14→12sp). PEP 8 восстановлен.
+  - `main.py`: несоответствие комментария и кода (`timeout=10.0` сек, комментарий говорил «3 сек»).
+
+  ### ✅ Проверено скиллами
+  - python-syntax-guard, smtp-engine-guard, build-guard, changelog-guard
+
+  ---
+
+    ## v3.6.2 — GUI Python PyQt6 + Bugfixes (2025-06-19)
 
   ### ✨ New
   - **gui/**: Полный PyQt6 GUI-пакет v3.6.2 (CyberPro dark theme)
