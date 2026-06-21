@@ -713,88 +713,89 @@ class AccountsScreen(QWidget):
       self._load()
 
   def _setup_ui(self):
-      layout = QVBoxLayout(self)
-      layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
-      layout.setSpacing(Spacing.LG)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
+        layout.setSpacing(Spacing.MD)
 
-      title = QLabel("SMTP-аккаунты")
-      title.setObjectName("section_header")
-      layout.addWidget(title)
+        title = QLabel("SMTP-аккаунты")
+        title.setObjectName("section_header")
+        layout.addWidget(title)
 
-      toolbar = QHBoxLayout()
+        # ── Основная панель инструментов ──────────────────────────────────
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(Spacing.SM)
 
-      add_btn = QPushButton("+ Добавить аккаунт")
-      add_btn.setObjectName("btn_primary")
-      add_btn.clicked.connect(self._add_account)
-      toolbar.addWidget(add_btn)
+        add_btn = QPushButton("+ Добавить аккаунт")
+        add_btn.setObjectName("btn_primary")
+        add_btn.clicked.connect(self._add_account)
+        toolbar.addWidget(add_btn)
 
-      import_btn = QPushButton("Импорт (.txt)")
-      import_btn.setObjectName("btn_icon")
-      import_btn.clicked.connect(self._import_accounts)
-      toolbar.addWidget(import_btn)
+        import_btn = QPushButton("Импорт (.txt)")
+        import_btn.clicked.connect(self._import_accounts)
+        toolbar.addWidget(import_btn)
 
-      proxy_import_btn = QPushButton("Импорт прокси")
-      proxy_import_btn.setObjectName("btn_icon")
-      proxy_import_btn.setToolTip("Массовый импорт и проверка прокси (с определением страны)")
-      proxy_import_btn.clicked.connect(self._import_proxies)
-      toolbar.addWidget(proxy_import_btn)
+        proxy_import_btn = QPushButton("Импорт прокси")
+        proxy_import_btn.setToolTip("Массовый импорт и проверка прокси (с определением страны)")
+        proxy_import_btn.clicked.connect(self._import_proxies)
+        toolbar.addWidget(proxy_import_btn)
 
-      toolbar.addStretch()
+        toolbar.addStretch()
 
-      self.test_all_btn = QPushButton("Проверить все")
-      self.test_all_btn.setObjectName("btn_icon")
-      self.test_all_btn.clicked.connect(self._test_all)
-      toolbar.addWidget(self.test_all_btn)
+        self.test_all_btn = QPushButton("Проверить все")
+        self.test_all_btn.clicked.connect(self._test_all)
+        toolbar.addWidget(self.test_all_btn)
 
-      self.test_one_btn = QPushButton("Проверить выбранный")
-      self.test_one_btn.setObjectName("btn_icon")
-      self.test_one_btn.clicked.connect(self._test_selected)
-      toolbar.addWidget(self.test_one_btn)
+        self.cancel_test_btn = QPushButton("⏹ Отмена")
+        self.cancel_test_btn.setObjectName("btn_secondary")
+        self.cancel_test_btn.clicked.connect(self._cancel_test)
+        self.cancel_test_btn.setVisible(False)
+        toolbar.addWidget(self.cancel_test_btn)
 
-      self.cancel_test_btn = QPushButton("\u23f9 Отмена")
-      self.cancel_test_btn.setObjectName("btn_secondary")
-      self.cancel_test_btn.clicked.connect(self._cancel_test)
-      self.cancel_test_btn.setEnabled(False)
-      toolbar.addWidget(self.cancel_test_btn)
+        layout.addLayout(toolbar)
 
-      select_all_btn = QPushButton("Выделить всё")
-      select_all_btn.setObjectName("btn_icon")
-      select_all_btn.clicked.connect(lambda: self.table.selectAll())
-      toolbar.addWidget(select_all_btn)
+        # ── Контекстная панель (видна при выборе строк) ───────────────────
+        ctx_bar = QHBoxLayout()
+        ctx_bar.setSpacing(Spacing.SM)
 
-      del_btn = QPushButton("Удалить выбранный")
-      del_btn.setObjectName("btn_danger")
-      del_btn.clicked.connect(self._delete_selected)
-      toolbar.addWidget(del_btn)
-      layout.addLayout(toolbar)
+        self._ctx_select_all_btn = QPushButton("Выбрать все")
+        self._ctx_select_all_btn.setObjectName("btn_secondary")
+        self._ctx_select_all_btn.clicked.connect(lambda: self.table.selectAll())
+        ctx_bar.addWidget(self._ctx_select_all_btn)
 
-      cfg_row = QHBoxLayout()
-      save_cfg_btn = QPushButton("\U0001f4be Сохранить конфиг")
-      save_cfg_btn.setObjectName("btn_secondary")
-      save_cfg_btn.clicked.connect(self._save_config)
-      cfg_row.addWidget(save_cfg_btn)
-      load_cfg_btn = QPushButton("\U0001f4c2 Загрузить конфиг")
-      load_cfg_btn.setObjectName("btn_secondary")
-      load_cfg_btn.clicked.connect(self._load_config)
-      cfg_row.addWidget(load_cfg_btn)
-      cfg_row.addStretch()
-      layout.addLayout(cfg_row)
+        self._ctx_test_btn = QPushButton("⚡ Проверить выбранные")
+        self._ctx_test_btn.setObjectName("btn_secondary")
+        self._ctx_test_btn.clicked.connect(self._test_selected)
+        self._ctx_test_btn.setVisible(False)
+        ctx_bar.addWidget(self._ctx_test_btn)
 
-      self.table = QTableWidget(0, 8)
-      self.table.setHorizontalHeaderLabels([
-          "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Прокси", "Активен",
-      ])
-      self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-      self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-      self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-      self.table.verticalHeader().setVisible(False)
-      self.table.doubleClicked.connect(self._edit_account)
-      layout.addWidget(self.table)
+        self._ctx_del_btn = QPushButton("🗑 Удалить")
+        self._ctx_del_btn.setObjectName("btn_danger")
+        self._ctx_del_btn.clicked.connect(self._delete_selected)
+        self._ctx_del_btn.setVisible(False)
+        ctx_bar.addWidget(self._ctx_del_btn)
 
-      self.status_label = QLabel("Аккаунтов: 0")
-      self.status_label.setObjectName("label_muted")
-      layout.addWidget(self.status_label)
+        ctx_bar.addStretch()
+        layout.addLayout(ctx_bar)
 
+        # ── Таблица ───────────────────────────────────────────────────────
+        self.table = QTableWidget(0, 8)
+        self.table.setHorizontalHeaderLabels([
+            "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Прокси", "Активен",
+        ])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.doubleClicked.connect(self._edit_account)
+        self.table.itemSelectionChanged.connect(self._update_contextual_buttons)
+        layout.addWidget(self.table)
+
+        self.status_label = QLabel("Аккаунтов: 0")
+        self.status_label.setObjectName("label_muted")
+        layout.addWidget(self.status_label)
   def get_accounts(self) -> list:
       return self._accounts
 
@@ -836,6 +837,17 @@ class AccountsScreen(QWidget):
       active_count = sum(1 for a in self._accounts if a.is_active)
       self.status_label.setText(f"Аккаунтов: {len(self._accounts)} (активных: {active_count})")
 
+
+    def _update_contextual_buttons(self):
+        """Показывает/скрывает контекстные кнопки в зависимости от выбора строк."""
+        selected = len(set(idx.row() for idx in self.table.selectedIndexes()))
+        has_sel = selected > 0
+        self._ctx_test_btn.setVisible(has_sel)
+        self._ctx_del_btn.setVisible(has_sel)
+        if has_sel:
+            self._ctx_test_btn.setText(f"⚡ Проверить ({selected})")
+            self._ctx_del_btn.setText(f"🗑 Удалить ({selected})")
+  
   def _add_account(self):
       dlg = AccountDialog(parent=self)
       if dlg.exec() == QDialog.DialogCode.Accepted:
@@ -932,7 +944,7 @@ class AccountsScreen(QWidget):
       if not self._accounts:
           return
       self._test_cancel_event.clear()
-      self.cancel_test_btn.setEnabled(True)
+      self.cancel_test_btn.setVisible(True)
       self.test_all_btn.setEnabled(False)
       self.test_all_btn.setText("\u23f3 Проверяю...")
       for row in range(self.table.rowCount()):
@@ -968,7 +980,7 @@ class AccountsScreen(QWidget):
               if completed[0] >= total:
                   self.test_all_btn.setEnabled(True)
                   self.test_all_btn.setText("Проверить все")
-                  self.cancel_test_btn.setEnabled(False)
+                  self.cancel_test_btn.setVisible(False)
                   ok_cnt = sum(
                       1 for i in range(self.table.rowCount())
                       if self.table.item(i, 5) and "✓" in (self.table.item(i, 5).text() or "")
@@ -1192,7 +1204,7 @@ class AccountsScreen(QWidget):
       self._test_workers.clear()
       self.test_all_btn.setEnabled(True)
       self.test_all_btn.setText("Проверить все")
-      self.cancel_test_btn.setEnabled(False)
+      self.cancel_test_btn.setVisible(False)
       self.status_label.setText(f"\u23f9 Проверка отменена | Аккаунтов: {len(self._accounts)}")
 
   def _save_config(self) -> None:
