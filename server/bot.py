@@ -2480,8 +2480,19 @@ async def cb_admin_del_mod(query: CallbackQuery):
 api_app = FastAPI(title="FMail Sender License API", docs_url=None, redoc_url=None)
 
 
+def _mask_hwid(h: str) -> str:
+    """Маскирует HWID для показа: abcd…wxyz."""
+    h = (h or "").strip()
+    return h if len(h) <= 8 else f"{h[:4]}…{h[-4:]}"
+
+
 async def _notify_hwid_bound(lic: dict, key: str, hwid: str) -> None:
-    """Уведомляет пользователя и админов о ПЕРВОЙ привязке HWID к лицензии."""
+    """Уведомляет пользователя и админов о ПЕРВОЙ привязке HWID к лицензии.
+
+    Запускается через asyncio.create_task — НЕ блокирует активацию и
+    никогда не роняет её (все ошибки ловятся и логируются).
+    """
+    masked = _mask_hwid(hwid)
     try:
         tg_id = int(lic.get("telegram_id") or 0)
     except Exception:
@@ -2493,7 +2504,7 @@ async def _notify_hwid_bound(lic: dict, key: str, hwid: str) -> None:
                 tg_id,
                 "🔐 <b>Устройство привязано</b>\n\n"
                 f"Лицензия <code>{key}</code> ({plan_name}) привязана к этому ПК.\n"
-                f"💻 HWID: <code>{hwid}</code>\n\n"
+                f"💻 HWID: <code>{masked}</code>\n\n"
                 "Если это были не вы — срочно обратитесь в поддержку.",
             )
         except Exception as e:
@@ -2505,10 +2516,10 @@ async def _notify_hwid_bound(lic: dict, key: str, hwid: str) -> None:
                 "🔐 Первая привязка HWID\n"
                 f"🔑 <code>{key}</code> ({plan_name})\n"
                 f"👤 TG: <code>{tg_id or '—'}</code>\n"
-                f"💻 <code>{hwid}</code>",
+                f"💻 <code>{masked}</code>",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("HWID bind admin-notify failed admin=%s: %s", _admin_id, e)
 
 
 class ActivateRequest(BaseModel):
@@ -2544,8 +2555,18 @@ async def activate(req: ActivateRequest):
         raise HTTPException(status_code=403, detail="HWID mismatch — license bound to another device")
 
     if not existing_hwid:
-        await db.bind_hwid_to_license(key, hwid)
-        await _notify_hwid_bound(lic, key, hwid)
+        bound = await db.bind_hwid_to_license(key, hwid)
+        # Перечитываем авторитетное состояние — закрываем race двойной привязки
+        lic = await db.get_license(key) or lic
+        actual_hwid = (lic.get("hwid") or "").upper()
+        if actual_hwid and actual_hwid != hwid.upper():
+            raise HTTPException(
+                status_code=403,
+                detail="HWID mismatch — license bound to another device",
+            )
+        if bound:
+            # Не блокируем активацию на отправке уведомления в Telegram
+            asyncio.create_task(_notify_hwid_bound(lic, key, hwid))
 
     payload = {
         "plan": lic.get("plan", ""),

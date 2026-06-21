@@ -516,19 +516,20 @@ async def get_license(key: str) -> Optional[dict]:
 
 
 async def bind_hwid_to_license(key: str, hwid: str) -> bool:
-  lic = await get_license(key)
-  if not lic:
-      return False
-  existing_hwid = lic.get("hwid", "")
-  if existing_hwid and existing_hwid.upper() != hwid.upper():
-      return False
+  """Атомарно привязывает HWID только если он ещё НЕ задан.
+
+  Возвращает True только если привязка произошла именно этим вызовом
+  (rowcount=1). Закрывает race двойной привязки при параллельных активациях:
+  первый запрос выигрывает, остальные получают False.
+  """
   async with _db() as db:
-      await db.execute(
-          "UPDATE licenses SET hwid=?, activated_at=? WHERE key=?",
+      cur = await db.execute(
+          "UPDATE licenses SET hwid=?, activated_at=? "
+          "WHERE key=? AND (hwid IS NULL OR hwid='')",
           (hwid.upper(), _now(), key.upper()),
       )
       await db.commit()
-  return True
+      return cur.rowcount > 0
 
 
 async def revoke_license(key: str) -> bool:
