@@ -325,7 +325,8 @@ class BulkImportWorker(QThread):
             skipped = 0
             for i, line in enumerate(lines):
                 self.progress.emit(i + 1, total)
-                # Умное определение разделителя: ; или : (iejesusmirey.com использует ; формат)
+                # Умное определение разделителя: ; или :
+                # Форматы: email:pass  /  email:pass:token  /  email;pass;alias
                 _sep = ";" if ";" in line and ":" not in line.split(";")[0] else ":"
                 parts = line.split(_sep)
                 if len(parts) < 2:
@@ -333,7 +334,10 @@ class BulkImportWorker(QThread):
                     continue
                 email = parts[0].strip()
                 alias = parts[2].strip() if len(parts) >= 3 and _sep == ";" else ""
-                password = ":".join(parts[1:]).strip()
+                # БАГ-FIX: для :-разделителя берём ТОЛЬКО parts[1] как пароль.
+                # email:pass:token (Rambler-формат) — третье поле = токен/резерв, НЕ пароль.
+                # Старый код ":".join(parts[1:]) давал "pass:token" → 100% провал AUTH.
+                password = parts[1].strip()
                 if not email or "@" not in email:
                     skipped += 1
                     continue
