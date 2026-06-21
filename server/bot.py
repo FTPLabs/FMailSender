@@ -244,6 +244,7 @@ class CaptchaFlow(StatesGroup):
 def kb_main(is_admin_user: bool = False, is_mod_user: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="👤 Личный кабинет", callback_data="menu_cabinet")],
+        [InlineKeyboardButton(text="🎁 Бесплатный триал", callback_data="claim_trial")],
         [
             InlineKeyboardButton(text="💳 Купить лицензию", callback_data="menu_buy"),
             InlineKeyboardButton(text="📥 Скачать", callback_data="menu_download"),
@@ -793,6 +794,88 @@ async def cb_cabinet(query: CallbackQuery):
     await send_or_edit(query, "\n".join(lines), reply_markup=kb_cabinet)
 
 
+# ─── Бесплатный триал (self-service) ─────────────────────────────────────────
+
+@dp.callback_query(F.data == "claim_trial")
+async def cb_claim_trial(query: CallbackQuery):
+    """Self-service триал: выдаёт пробную лицензию 1 раз на Telegram-аккаунт.
+
+    Решает chicken-egg: скачивание требует активную лицензию, а получить её
+    раньше без админа было нельзя. Теперь пользователь активирует триал сам —
+    после чего открывается скачивание (ключ привяжется к HWID при первом запуске).
+    """
+    if not await _require_onboarding(query):
+        return
+    user = query.from_user
+    try:
+        licenses = await db.get_license_by_telegram(user.id)
+    except Exception as e:
+        logger.error("db error in cb_claim_trial: %s", e)
+        await query.answer("⚠️ Ошибка БД. Попробуй позже.", show_alert=True)
+        return
+
+    if _get_active_license(licenses):
+        await send_or_edit(
+            query,
+            "✅ <b>У тебя уже есть активная подписка</b>\n\nНажми «Скачать» — файл доступен.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📥 Скачать .exe", callback_data="menu_download")],
+                [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
+            ]),
+        )
+        return
+
+    # Abuse-control: триал выдаётся один раз на Telegram-аккаунт
+    if any((lic.get("plan") == "trial") for lic in licenses):
+        await send_or_edit(
+            query,
+            "❌ <b>Триал уже использован</b>\n\n"
+            "Бесплатный доступ выдаётся один раз. Для продолжения купи лицензию.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Купить лицензию", callback_data="menu_buy")],
+                [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
+            ]),
+        )
+        return
+
+    try:
+        lic = await db.create_license(
+            plan="trial",
+            telegram_id=user.id,
+            note=f"self-service trial @{user.username or user.id}",
+        )
+    except Exception as e:
+        logger.error("create trial error for %d: %s", user.id, e)
+        await query.answer("⚠️ Не удалось выдать триал. Попробуй позже.", show_alert=True)
+        return
+
+    plan_data = PLANS.get("trial", {})
+    exp_disp = lic.get("expires_at", "")[:16].replace("T", " ")
+    await send_or_edit(
+        query,
+        "🎁 <b>Бесплатный триал активирован!</b>\n\n"
+        f"🔑 Ключ: <code>{lic['key']}</code>\n"
+        f"📦 {plan_data.get('name', 'Trial')} · до {exp_disp} UTC\n\n"
+        "1️⃣ Нажми «Скачать» — exe скачается с привязкой к ключу.\n"
+        "2️⃣ При первом запуске введи ключ — HWID привяжется автоматически.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📥 Скачать .exe", callback_data="menu_download")],
+            [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
+        ]),
+    )
+    logger.info("Self-service trial issued: tg=%d key=%s", user.id, lic.get("key"))
+    for _admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                _admin_id,
+                "🎁 Self-service триал выдан\n"
+                f"👤 TG: <code>{user.id}</code> @{user.username or '—'}\n"
+                f"🔑 <code>{lic.get('key')}</code>",
+            )
+        except Exception:
+            pass
+
+
 # ─── Скачать приложение ──────────────────────────────────────────────────────
 
 @dp.callback_query(F.data == "menu_download")
@@ -819,8 +902,14 @@ async def cb_menu_download(query: CallbackQuery):
     if not active_lic:
         await send_or_edit(
             query,
-            "❌ <b>Скачивание недоступно</b>\n\nУ тебя нет активной подписки.\nНажми «Купить лицензию» для получения доступа.",
-            reply_markup=kb_main(is_admin(user_id), is_mod_user=is_moderator(user_id)),
+            "❌ <b>Скачивание недоступно</b>\n\n"
+            "У тебя нет активной подписки.\n"
+            "🎁 Получи <b>бесплатный триал</b> или купи лицензию — затем скачивание откроется.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🎁 Бесплатный триал", callback_data="claim_trial")],
+                [InlineKeyboardButton(text="💳 Купить лицензию", callback_data="menu_buy")],
+                [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
+            ]),
         )
         return
 
@@ -2391,6 +2480,37 @@ async def cb_admin_del_mod(query: CallbackQuery):
 api_app = FastAPI(title="FMail Sender License API", docs_url=None, redoc_url=None)
 
 
+async def _notify_hwid_bound(lic: dict, key: str, hwid: str) -> None:
+    """Уведомляет пользователя и админов о ПЕРВОЙ привязке HWID к лицензии."""
+    try:
+        tg_id = int(lic.get("telegram_id") or 0)
+    except Exception:
+        tg_id = 0
+    plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", ""))
+    if tg_id:
+        try:
+            await bot.send_message(
+                tg_id,
+                "🔐 <b>Устройство привязано</b>\n\n"
+                f"Лицензия <code>{key}</code> ({plan_name}) привязана к этому ПК.\n"
+                f"💻 HWID: <code>{hwid}</code>\n\n"
+                "Если это были не вы — срочно обратитесь в поддержку.",
+            )
+        except Exception as e:
+            logger.warning("HWID bind user-notify failed tg=%s: %s", tg_id, e)
+    for _admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                _admin_id,
+                "🔐 Первая привязка HWID\n"
+                f"🔑 <code>{key}</code> ({plan_name})\n"
+                f"👤 TG: <code>{tg_id or '—'}</code>\n"
+                f"💻 <code>{hwid}</code>",
+            )
+        except Exception:
+            pass
+
+
 class ActivateRequest(BaseModel):
     key: str
     hwid: str
@@ -2425,6 +2545,7 @@ async def activate(req: ActivateRequest):
 
     if not existing_hwid:
         await db.bind_hwid_to_license(key, hwid)
+        await _notify_hwid_bound(lic, key, hwid)
 
     payload = {
         "plan": lic.get("plan", ""),

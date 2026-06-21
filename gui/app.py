@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QFrame, QStackedWidget, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QByteArray, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QByteArray, QSize, pyqtSignal, QTimer
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QIcon
 
@@ -237,9 +237,13 @@ class Sidebar(QFrame):
 class MainWindow(QMainWindow):
     """Главное окно — animated background + sidebar + content stack."""
 
+    _license_invalid_sig = pyqtSignal(str)
+
     def __init__(self, license_info=None, parent=None):
         super().__init__(parent)
         self._license_info = license_info
+        self._license_expired = False
+        self._lic_online_counter = 0
 
         try:
             from core._version import APP_NAME, APP_VERSION
@@ -290,6 +294,64 @@ class MainWindow(QMainWindow):
         self._screens: dict[str, QWidget] = {}
         self._build_screens()
         self._navigate("dashboard")
+
+        # Авто-закрытие при истечении/отзыве подписки
+        self._license_invalid_sig.connect(self._on_license_invalid)
+        self._start_license_watch()
+
+    def _start_license_watch(self) -> None:
+        """Каждые 30с проверяет срок подписки; раз в ~30 мин — онлайн-перепроверку."""
+        if self._license_info is None:
+            return
+        self._lic_timer = QTimer(self)
+        self._lic_timer.setInterval(30_000)
+        self._lic_timer.timeout.connect(self._check_license_expiry)
+        self._lic_timer.start()
+
+    def _check_license_expiry(self) -> None:
+        if self._license_expired:
+            return
+        try:
+            if self._license_info is not None and self._license_info.is_expired:
+                self._on_license_invalid("Срок подписки истёк.")
+                return
+        except Exception:
+            pass
+        self._lic_online_counter += 1
+        if self._lic_online_counter >= 60:
+            self._lic_online_counter = 0
+            self._revalidate_license_async()
+
+    def _revalidate_license_async(self) -> None:
+        """Фоновая онлайн-перепроверка (отзыв/grace) — результат через сигнал в GUI-поток."""
+        import threading
+
+        def _work():
+            try:
+                from core.license import check_license
+                valid, _info, msg = check_license()
+            except Exception:
+                return
+            if not valid:
+                self._license_invalid_sig.emit(msg or "Лицензия недействительна.")
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_license_invalid(self, message: str) -> None:
+        if self._license_expired:
+            return
+        self._license_expired = True
+        try:
+            self._lic_timer.stop()
+        except Exception:
+            pass
+        from PyQt6.QtWidgets import QMessageBox, QApplication
+        QMessageBox.warning(
+            self, "Подписка неактивна",
+            f"{message}\n\nПриложение будет закрыто. "
+            f"Продлите подписку через Telegram-бот и запустите заново.",
+        )
+        QApplication.quit()
 
     def _build_screens(self) -> None:
         screens = {
