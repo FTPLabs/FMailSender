@@ -8,6 +8,7 @@ import email
 import imaplib
 import smtplib
 import ssl
+import socket
 import threading
 from email.header import decode_header
 from email.mime.multipart import MIMEMultipart
@@ -125,6 +126,7 @@ class _FetchWorker(QThread):
         if not imap_host or not login or not password:
             return []
 
+        socket.setdefaulttimeout(15)  # БАГ-3 FIX: IMAP не зависает если сервер не отвечает
         ctx = ssl.create_default_context()
         if imap_ssl:
             M = imaplib.IMAP4_SSL(imap_host, imap_port, ssl_context=ctx)
@@ -133,6 +135,7 @@ class _FetchWorker(QThread):
             M.starttls(ssl_context=ctx)
 
         M.login(login, password)
+        M.socket.settimeout(15)
         M.select("INBOX")
 
         # Ищем последние 50 писем
