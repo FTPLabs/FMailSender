@@ -31,6 +31,15 @@ import json
 from pathlib import Path
 
 
+  # ─── Logging (MUST be before JsonFileStorage which uses logger in __init__) ───
+  logging.basicConfig(
+      level=logging.INFO,
+      format="%(asctime)s | %(levelname)-7s | %(name)s: %(message)s",
+      handlers=[logging.StreamHandler(sys.stdout)],
+  )
+  logger = logging.getLogger("bot")
+
+  
 # ─── Persistent FSM Storage ──────────────────────────────────────────────────
 
 class JsonFileStorage(BaseStorage):
@@ -178,12 +187,7 @@ def _extract_vt_url(release_body: str) -> str:
     m = re.search(r'https://www\.virustotal\.com/[^\s)\]]+', release_body)
     return m.group(0) if m else ""
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-7s | %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
-logger = logging.getLogger("bot")
+# logger уже инициализирован выше (ранняя инициализация для JsonFileStorage)
 
 from aiogram.client.default import DefaultBotProperties
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
