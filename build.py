@@ -98,8 +98,6 @@ a = Analysis(
         'psutil', 'wmi', 'win32api', 'win32con',
         'openpyxl', 'reportlab',
     ],
-    # ВАЖНО: collect_all PyQt6 необходим — PyInstaller часто пропускает плагины Qt
-    collect_all=['PyQt6', 'PyQt6.Qt6'],
     hookspath=[],
     hooksconfig={{}},
     runtime_hooks=[],
@@ -181,6 +179,7 @@ def main():
         sys.executable, "-m", "PyInstaller",
         "--clean",
         "--noconfirm",
+        "--collect-all", "PyQt6",
         "--distpath", str(DIST),
         "--workpath", str(BUILD),
         str(SPEC_FILE),
