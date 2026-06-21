@@ -778,18 +778,20 @@ class AccountsScreen(QWidget):
           layout.addLayout(ctx_bar)
 
           # ── Таблица ───────────────────────────────────────────────────────
-          self.table = QTableWidget(0, 9)
-          self.table.setHorizontalHeaderLabels([
-              "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Прокси", "Активен", "Отправлено",
-          ])
-          self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-          self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-          self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-          self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-          self.table.verticalHeader().setVisible(False)
-          self.table.setShowGrid(False)
-          self.table.setAlternatingRowColors(True)
-          self.table.doubleClicked.connect(self._edit_account)
+          self.table = QTableWidget(0, 3)
+            self.table.setHorizontalHeaderLabels([
+                "Email", "Статус", "Прокси",
+            ])
+            self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+            self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+            self.table.setColumnWidth(2, 160)
+            self.table.verticalHeader().setVisible(False)
+            self.table.setShowGrid(False)
+            self.table.setAlternatingRowColors(True)
+            self.table.doubleClicked.connect(self._edit_account)
           self.table.itemSelectionChanged.connect(self._update_contextual_buttons)
           layout.addWidget(self.table)
 
@@ -806,56 +808,58 @@ class AccountsScreen(QWidget):
         # Автопроверка при загрузке отключена — слишком много потоков при большом кол-ве аккаунтов
 
     def _refresh_table(self):
-        self.table.setRowCount(0)
-        for acc in self._accounts:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(acc.email))
-            self.table.setItem(row, 1, QTableWidgetItem(acc.host))
-            self.table.setItem(row, 2, QTableWidgetItem(str(acc.port)))
-            self.table.setItem(row, 3, QTableWidgetItem(str(acc.daily_limit)))
-            self.table.setItem(row, 4, QTableWidgetItem(str(acc.hourly_limit)))
-            # Статус: last_test_ok если проверяли, иначе «Не проверено»
-            _ltok = getattr(acc, 'last_test_ok', None)
-            if _ltok is True:
-                status_item = QTableWidgetItem("✓ OK")
-                status_item.setForeground(QColor(Colors.SUCCESS))
-            elif _ltok is False:
-                status_item = QTableWidgetItem("✗ Ошибка")
-                status_item.setForeground(QColor(Colors.ERROR))
-            else:
-                status_item = QTableWidgetItem("❓ Не проверено")
-                status_item.setForeground(QColor(Colors.TEXT_MUTED))
-            # (setForeground already set above)
-            self.table.setItem(row, 5, status_item)
+          self.table.setRowCount(0)
+          for acc in self._accounts:
+              row = self.table.rowCount()
+              self.table.insertRow(row)
+              self.table.setRowHeight(row, 32)
 
-            # Прокси + флаг страны (обновляется CountryWorker после SMTP OK)
-            _proxy_raw = (acc.proxy or "").strip()
-            _proxy_display = _proxy_raw if _proxy_raw else "—"
-            proxy_item = QTableWidgetItem(_proxy_display)
-            proxy_item.setForeground(QColor("#6C8EBF" if _proxy_raw else Colors.TEXT_MUTED))
-            proxy_item.setToolTip(_proxy_raw or "Прокси не назначен")
-            self.table.setItem(row, 6, proxy_item)
-            # FIX: запускаем CountryWorker сразу — показываем флаг при загрузке без ожидания теста
-            if _proxy_raw:
-                QTimer.singleShot(100 + row * 50, lambda r=row, p=_proxy_raw: self._fetch_proxy_country(r, p))
-            active_item = QTableWidgetItem("✓" if acc.is_active else "✗")
-            active_item.setForeground(
-                QColor(Colors.SUCCESS) if acc.is_active else QColor(Colors.ERROR)
-            )
-            self.table.setItem(row, 7, active_item)
-            # Колонка 8: статистика отправленных писем
-            _sent = getattr(acc, 'daily_sent', None)
-            if _sent is None:
-                _sent = getattr(acc, 'sent_today', 0)
-            _sent_txt = f"{_sent or 0}/{acc.daily_limit}"
-            sent_item = QTableWidgetItem(_sent_txt)
-            sent_item.setForeground(QColor(Colors.TEXT_MUTED))
-            sent_item.setToolTip(f"Отправлено сегодня: {_sent or 0} из {acc.daily_limit}")
-            self.table.setItem(row, 8, sent_item)
-        active_count = sum(1 for a in self._accounts if a.is_active)
-        self.status_label.setText(f"Аккаунтов: {len(self._accounts)} (активных: {active_count})")
+              # Колонка 0: Email (с подсказкой: хост, лимиты)
+              email_item = QTableWidgetItem(acc.email)
+              email_item.setToolTip(
+                  f"{acc.email}\n"
+                  f"Host: {acc.host}:{acc.port}\n"
+                  f"Лимит: {acc.daily_limit}/день, {acc.hourly_limit}/час"
+              )
+              self.table.setItem(row, 0, email_item)
 
+              # Колонка 1: Статус — коротко + полная причина в tooltip
+              _ltok = getattr(acc, 'last_test_ok', None)
+              _ltmsg = getattr(acc, 'last_test_msg', "")
+              if _ltok is True:
+                  _sent = getattr(acc, 'sent_today', 0)
+                  status_item = QTableWidgetItem(f"✅ Валидный  {_sent}/{acc.daily_limit}")
+                  status_item.setForeground(QColor(Colors.SUCCESS))
+                  status_item.setToolTip(f"Аккаунт работает\nОтправлено сегодня: {_sent} из {acc.daily_limit}")
+              elif _ltok is False:
+                  first_line = (_ltmsg or "Неверный логин или пароль").split('\n')[0]
+                  status_item = QTableWidgetItem(f"❌ {first_line[:55]}")
+                  status_item.setForeground(QColor(Colors.ERROR))
+                  status_item.setToolTip(_ltmsg or "Аккаунт недействителен")
+              else:
+                  status_item = QTableWidgetItem("❓ Не проверено")
+                  status_item.setForeground(QColor(Colors.TEXT_MUTED))
+                  status_item.setToolTip("Нажмите ⚡ Проверить для проверки аккаунта")
+              self.table.setItem(row, 1, status_item)
+
+              # Колонка 2: Прокси
+              _proxy_raw = (acc.proxy or "").strip()
+              proxy_item = QTableWidgetItem(_proxy_raw if _proxy_raw else "—")
+              proxy_item.setForeground(QColor("#6C8EBF" if _proxy_raw else Colors.TEXT_MUTED))
+              proxy_item.setToolTip(_proxy_raw or "Прокси не назначен")
+              self.table.setItem(row, 2, proxy_item)
+              if _proxy_raw:
+                  QTimer.singleShot(100 + row * 50, lambda r=row, p=_proxy_raw: self._fetch_proxy_country(r, p))
+
+          active_count = sum(1 for a in self._accounts if a.is_active)
+          valid_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is True)
+          invalid_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is False)
+          self.status_label.setText(
+              f"Аккаунтов: {len(self._accounts)} | "
+              f"✅ Валидных: {valid_count} | "
+              f"❌ Невалидных: {invalid_count} | "
+              f"Активных: {active_count}"
+          )
 
     def _update_contextual_buttons(self):
         """Показывает/скрывает контекстные кнопки в зависимости от выбора строк."""
@@ -914,34 +918,27 @@ class AccountsScreen(QWidget):
         """Проверяет один аккаунт по индексу."""
         if row < 0 or row >= len(self._accounts):
             return
-        item = self.table.item(row, 5)
-        if item:
-            item.setText("⏳ Проверка...")
-            item.setForeground(QColor(Colors.TEXT_MUTED))
-        acc = self._accounts[row]
-        w = TestWorker(acc, parent=self)
+        # Статус теперь в колонке 1
+          item = self.table.item(row, 1)
+          if item:
+              item.setText("⏳ Проверка...")
+              item.setForeground(QColor(Colors.TEXT_MUTED))
+          acc = self._accounts[row]
+          w = TestWorker(acc, parent=self)
 
-        @pyqtSlot(bool, str)
-        def on_result(ok, msg, r=row):
-            item = self.table.item(r, 5)
-            if item:
-                item.setText("✓ OK" if ok else "✗ Ошибка")
-                item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
-                item.setToolTip(msg)
-            if 0 <= r < len(self._accounts):
-                self._accounts[r].last_test_ok = ok
-                # FIX: автоматически деактивируем аккаунт при ошибке, активируем при успехе
-                self._accounts[r].is_active = ok
-                save_accounts(self._accounts)
-                active_item = self.table.item(r, 7)
-                if active_item:
-                    from PyQt6.QtGui import QColor
-                    active_item.setText("✓" if ok else "✗")
-                    active_item.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
-                # FIX: прокси-детект всегда — независимо от результата SMTP-теста
-                _px = (self._accounts[r].proxy or "") if 0 <= r < len(self._accounts) else ""
-                if _px.strip():
-                    self._fetch_proxy_country(r, _px.strip())
+          @pyqtSlot(bool, str)
+          def on_result(ok, msg, r=row):
+              if 0 <= r < len(self._accounts):
+                  self._accounts[r].last_test_ok = ok
+                  self._accounts[r].last_test_msg = msg  # сохраняем полный текст ошибки
+                  self._accounts[r].is_active = ok
+                  save_accounts(self._accounts)
+              # Обновляем ячейку статуса (колонка 1)
+              self._refresh_table()
+              # FIX: прокси-детект всегда
+              _px = (self._accounts[r].proxy or "") if 0 <= r < len(self._accounts) else ""
+              if _px.strip():
+                  self._fetch_proxy_country(r, _px.strip())
 
         w.result_ready.connect(on_result)
         self._test_workers.append(w)
