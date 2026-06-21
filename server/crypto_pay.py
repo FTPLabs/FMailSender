@@ -51,14 +51,14 @@ class CryptoPayClient:
                     )
                 return data.get("result", {})
         except aiohttp.ClientError as e:
-              # Инвалидируем сессию при сетевой ошибке — следующий запрос создаст новую
-              if self._session and not self._session.closed:
-                  try:
-                      await self._session.close()
-                  except Exception:
-                      pass
-              self._session = None
-              raise RuntimeError(f"Network error: {e}") from e
+            # Инвалидируем сессию при сетевой ошибке — следующий запрос создаст новую
+            if self._session and not self._session.closed:
+                try:
+                    await self._session.close()
+                except Exception:
+                    pass
+            self._session = None
+            raise RuntimeError(f"Network error: {e}") from e
 
     async def create_invoice(
         self,
