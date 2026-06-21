@@ -573,6 +573,13 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
           if not verify:
               ctx.check_hostname = False
               ctx.verify_mode = _ssl.CERT_NONE
+          # OAuth2-аккаунт Microsoft? (refresh/access token присутствует)
+          _is_oauth_acct = _is_ms_domain(account.email) and bool(
+              getattr(account, "refresh_token", "")
+              or getattr(account, "access_token", "")
+              or getattr(account, "oauth_token", "")
+          )
+          s = None
           try:
               if use_ssl:
                   s = _smtplib.SMTP_SSL(host, port, context=ctx, timeout=10)
@@ -584,15 +591,14 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                       s.ehlo()
               # OAuth2/XOAUTH2 для Microsoft (Outlook/Hotmail/Live) — иначе LOGIN
               _oauth_tok = ""
-              if _is_ms_domain(account.email) and (
-                  getattr(account, "refresh_token", "")
-                  or getattr(account, "access_token", "")
-                  or getattr(account, "oauth_token", "")
-              ):
+              if _is_oauth_acct:
                   _oauth_tok = (
                       _get_oauth_token(account) if _HAS_OAUTH2
                       else (getattr(account, "access_token", "") or getattr(account, "oauth_token", ""))
                   )
+                  # Для OAuth-аккаунта отказ токена — окончательный, без отката на пароль
+                  if not _oauth_tok:
+                      return False, "OAuth2: не удалось получить access token (проверьте refresh_token и доступ к интернету)"
               if _oauth_tok:
                   s.ehlo()
                   _xo = _build_xoauth2(account.email, _oauth_tok)
@@ -601,20 +607,17 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                       code, resp = s.docmd("")
                   if code != 235:
                       _rmsg = resp.decode("utf-8", "replace") if isinstance(resp, (bytes, bytearray)) else str(resp)
-                      try:
-                          s.quit()
-                      except Exception:
-                          pass
                       return False, f"OAuth2 отклонён: {_rmsg[:120]}"
               else:
                   s.login(account.email, account.password)
-              s.quit()
               cert_flag = "" if verify else " (cert-verify=off)"
               _auth_kind = " (OAuth2)" if _oauth_tok else ""
               return True, f"OK — {host}:{port}{cert_flag}{_auth_kind} авторизация успешна"
           except _smtplib.SMTPAuthenticationError as e:
               raw = e.smtp_error
               detail = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+              if _is_oauth_acct:
+                  return False, f"OAuth2 отклонён сервером: {detail[:120]}"
               return False, f"Неверный логин или пароль: {detail[:120]}"
           except _smtplib.SMTPNotSupportedError:
               return None, "SMTP AUTH не поддерживается. Требуется App Password (Outlook/T-Online)."
@@ -627,6 +630,15 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
               return None, f"connect/{type(e).__name__}: {e}"
           except Exception as e:
               return None, f"err/{type(e).__name__}: {e}"
+          finally:
+              if s is not None:
+                  try:
+                      s.quit()
+                  except Exception:
+                      try:
+                          s.close()
+                      except Exception:
+                          pass
 
       # ── Шаг 1: основная конфигурация с cert-verify ────────────────────────────
       ok, msg = _attempt(account.host, account.port, account.use_ssl, account.use_tls, verify=True)

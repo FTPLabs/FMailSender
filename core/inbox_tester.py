@@ -85,7 +85,7 @@ def _imap_host_for(account) -> tuple[str, int, bool]:
 
 
 def _smtp_send(sender, to_addr: str, msg) -> tuple[bool, str]:
-    """Отправляет письмо через SMTP sender-аккаунта (с OAuth2 для MS)."""
+    """Отправляет письмо через SMTP sender-аккаунта (XOAUTH2 для MS, иначе LOGIN)."""
     host = getattr(sender, "host", "") or getattr(sender, "smtp_host", "")
     port = int(getattr(sender, "port", 465) or 465)
     use_ssl = bool(getattr(sender, "use_ssl", port == 465))
@@ -93,28 +93,52 @@ def _smtp_send(sender, to_addr: str, msg) -> tuple[bool, str]:
     user = sender.email
     pwd = getattr(sender, "password", "")
 
-    # OAuth2 для Microsoft
-    auth_pwd = pwd
-    if _is_ms(user):
+    # OAuth2-токен для Microsoft (Outlook/Hotmail/Live) — обязателен для XOAUTH2
+    oauth_tok = ""
+    if _is_ms(user) and (
+        getattr(sender, "refresh_token", "")
+        or getattr(sender, "access_token", "")
+        or getattr(sender, "oauth_token", "")
+    ):
         try:
             from core.oauth2_refresh import get_valid_access_token
-            tok = get_valid_access_token(sender)
-            if tok:
-                auth_pwd = tok
+            oauth_tok = get_valid_access_token(sender) or ""
         except Exception:
-            pass
+            oauth_tok = ""
+        if not oauth_tok:
+            return False, "OAuth2: не удалось получить access token для Microsoft-аккаунта"
+
+    def _auth(srv) -> tuple[bool, str]:
+        srv.ehlo()
+        if oauth_tok:
+            from core.oauth2_refresh import build_xoauth2
+            xo = build_xoauth2(user, oauth_tok)
+            code, resp = srv.docmd("AUTH", "XOAUTH2 " + xo)
+            if code == 334:  # challenge → авторизация не прошла
+                code, resp = srv.docmd("")
+            if code != 235:
+                rmsg = resp.decode("utf-8", "replace") if isinstance(resp, (bytes, bytearray)) else str(resp)
+                return False, f"OAuth2 отклонён: {rmsg[:120]}"
+            return True, ""
+        srv.login(user, pwd)
+        return True, ""
 
     ctx = ssl.create_default_context()
     try:
         if use_ssl or port == 465:
             with smtplib.SMTP_SSL(host, port, context=ctx, timeout=25) as srv:
-                srv.login(user, auth_pwd)
+                ok, err = _auth(srv)
+                if not ok:
+                    return False, err
                 srv.sendmail(user, [to_addr], msg.as_string())
         else:
             with smtplib.SMTP(host, port, timeout=25) as srv:
+                srv.ehlo()
                 if use_tls:
                     srv.starttls(context=ctx)
-                srv.login(user, auth_pwd)
+                ok, err = _auth(srv)
+                if not ok:
+                    return False, err
                 srv.sendmail(user, [to_addr], msg.as_string())
         return True, ""
     except Exception as exc:
