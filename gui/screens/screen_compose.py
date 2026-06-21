@@ -1032,7 +1032,7 @@ a {{ color: #6366F1; }}
         check_btn.clicked.connect(_check)
         dlg.exec()
 
-      def _on_spam_error(self, error: str):
+    def _on_spam_error(self, error: str):
         self.spam_check_btn.setEnabled(True)
         self.spam_check_btn.setText("Проверить спам-балл")
         QMessageBox.warning(self, "Ошибка проверки", f"Не удалось проверить:\n{error}")
