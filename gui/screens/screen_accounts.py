@@ -27,12 +27,13 @@ from PyQt6.QtWidgets import (
     QMessageBox, QDialogButtonBox, QTextEdit, QFrame,
     QFileDialog, QProgressBar, QProgressDialog,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QTimer, QSize
 from PyQt6.QtGui import QColor
 
 from core.license import get_storage_key
 from core.sender import SmtpAccount, test_smtp_connection, get_smtp_config_for_domain
 from gui.theme import Colors, Spacing
+from gui import icons
 
 import random
 
@@ -44,10 +45,10 @@ class ProxyManager:
       socks5://user:pass@host:port   — уже URL
       socks4://host:port             — уже URL
       http://host:port               — уже URL
-      user:pass@host:port            — без схемы → socks5://user:pass@host:port
-      host:port                      → socks5://host:port
-      host:port:user:pass            → socks5://user:pass@host:port
-      user:pass:host:port            → socks5://user:pass@host:port
+      user:pass@host:port            — без схемы -> socks5://user:pass@host:port
+      host:port                      -> socks5://host:port
+      host:port:user:pass            -> socks5://user:pass@host:port
+      user:pass:host:port            -> socks5://user:pass@host:port
     """
 
     def __init__(self, raw_list: list[str] | None = None, mode: str = "round_robin"):
@@ -489,7 +490,9 @@ class AccountDialog(QDialog):
 
         # GUI-2 FIX: кнопка теста SMTP прямо в диалоге — мгновенная обратная связь
         test_row = QHBoxLayout()
-        self.test_btn = QPushButton("🔌 Тест подключения")
+        self.test_btn = QPushButton("Тест подключения")
+        self.test_btn.setIcon(icons.make_icon(icons.POWER))
+        self.test_btn.setIconSize(QSize(16, 16))
         self.test_btn.setObjectName("test_smtp_btn")
         self.test_btn.setToolTip("Проверить SMTP-подключение с текущими данными")
         self.test_btn.clicked.connect(self._test_smtp_now)
@@ -514,11 +517,11 @@ class AccountDialog(QDialog):
         password = self.password_edit.text().strip()
         host     = self.host_edit.text().strip()
         if not email or not password or not host:
-            self.test_status.setText("⚠️  Введите email, пароль и SMTP-хост")
-            self.test_status.setStyleSheet("color: orange;")
+            self.test_status.setText("Введите email, пароль и SMTP-хост")
+            self.test_status.setStyleSheet("color: #F59E0B;")
             return
         self.test_btn.setEnabled(False)
-        self.test_status.setText("⏳ Подключение…")
+        self.test_status.setText("Подключение…")
         self.test_status.setStyleSheet("color: gray;")
         QApplication.processEvents()
         acc = SmtpAccount(
@@ -534,12 +537,12 @@ class AccountDialog(QDialog):
         def _on_done(ok: bool, msg: str):
             self.test_btn.setEnabled(True)
             if ok:
-                self.test_status.setText("✅ Подключение успешно")
-                self.test_status.setStyleSheet("color: #4caf50;")
+                self.test_status.setText("Подключение успешно")
+                self.test_status.setStyleSheet("color: #10B981;")
             else:
                 short = msg[:80] + "…" if len(msg) > 80 else msg
-                self.test_status.setText(f"❌ {short}")
-                self.test_status.setStyleSheet("color: #f44336;")
+                self.test_status.setText(short)
+                self.test_status.setStyleSheet("color: #EF4444;")
 
         self._test_worker.result_ready.connect(_on_done)
         self._test_worker.start()
@@ -641,8 +644,8 @@ class _CountryWorker(QThread):
     @staticmethod
     def _cc_flag(cc: str) -> str:
         if len(cc) == 2:
-            return "".join(chr(0x1F1E0 + ord(c) - ord('A')) for c in cc.upper())
-        return "\U0001f30d"
+            return cc.upper()
+        return ""
 
     @staticmethod
     def _resolve(proxy_url: str) -> str:
@@ -658,7 +661,7 @@ class _CountryWorker(QThread):
             uname = parsed.username or ""
             upass = parsed.password or ""
             if not host:
-                return "\u2753"
+                return "—"
 
             auth = ""
             if uname:
@@ -724,7 +727,7 @@ class _CountryWorker(QThread):
                 ctry = d.get("country","")
                 return f"{_CountryWorker._cc_flag(cc)} {ctry} (хост)".strip()
         except Exception:
-            return "\U0001f310"
+            return "—"
 
 class AccountsScreen(QWidget):
     accounts_changed = pyqtSignal(list)
@@ -772,7 +775,9 @@ class AccountsScreen(QWidget):
           self.test_all_btn.clicked.connect(self._test_all)
           toolbar.addWidget(self.test_all_btn)
 
-          self.cancel_test_btn = QPushButton("⏹ Отмена")
+          self.cancel_test_btn = QPushButton("Отмена")
+          self.cancel_test_btn.setIcon(icons.make_icon(icons.STOP))
+          self.cancel_test_btn.setIconSize(QSize(16, 16))
           self.cancel_test_btn.setObjectName("btn_secondary")
           self.cancel_test_btn.clicked.connect(self._cancel_test)
           self.cancel_test_btn.setVisible(False)
@@ -789,13 +794,17 @@ class AccountsScreen(QWidget):
           self._ctx_select_all_btn.clicked.connect(lambda: self.table.selectAll())
           ctx_bar.addWidget(self._ctx_select_all_btn)
 
-          self._ctx_test_btn = QPushButton("⚡ Проверить выбранные")
+          self._ctx_test_btn = QPushButton("Проверить выбранные")
+          self._ctx_test_btn.setIcon(icons.make_icon(icons.ZAP))
+          self._ctx_test_btn.setIconSize(QSize(16, 16))
           self._ctx_test_btn.setObjectName("btn_secondary")
           self._ctx_test_btn.clicked.connect(self._test_selected)
           self._ctx_test_btn.setVisible(False)
           ctx_bar.addWidget(self._ctx_test_btn)
 
-          self._ctx_del_btn = QPushButton("🗑 Удалить")
+          self._ctx_del_btn = QPushButton("Удалить")
+          self._ctx_del_btn.setIcon(icons.make_icon(icons.TRASH))
+          self._ctx_del_btn.setIconSize(QSize(16, 16))
           self._ctx_del_btn.setObjectName("btn_danger")
           self._ctx_del_btn.clicked.connect(self._delete_selected)
           self._ctx_del_btn.setVisible(False)
@@ -855,18 +864,18 @@ class AccountsScreen(QWidget):
               _ltmsg = getattr(acc, 'last_test_msg', "")
               if _ltok is True:
                   _sent = getattr(acc, 'sent_today', 0)
-                  status_item = QTableWidgetItem(f"✅ Валидный  {_sent}/{acc.daily_limit}")
+                  status_item = QTableWidgetItem(f"Валидный  {_sent}/{acc.daily_limit}")
                   status_item.setForeground(QColor(Colors.SUCCESS))
                   status_item.setToolTip(f"Аккаунт работает\nОтправлено сегодня: {_sent} из {acc.daily_limit}")
               elif _ltok is False:
                   first_line = (_ltmsg or "Неверный логин или пароль").split('\n')[0]
-                  status_item = QTableWidgetItem(f"❌ {first_line[:55]}")
+                  status_item = QTableWidgetItem(f"{first_line[:55]}")
                   status_item.setForeground(QColor(Colors.ERROR))
                   status_item.setToolTip(_ltmsg or "Аккаунт недействителен")
               else:
-                  status_item = QTableWidgetItem("❓ Не проверено")
-                  status_item.setForeground(QColor(Colors.TEXT_MUTED))
-                  status_item.setToolTip("Нажмите ⚡ Проверить для проверки аккаунта")
+                  status_item = QTableWidgetItem("Не проверено")
+                  status_item.setForeground(QColor("#6666AA"))
+                  status_item.setToolTip("Нажмите «Проверить» для проверки аккаунта")
               self.table.setItem(row, 1, status_item)
 
               # Колонка 2: Прокси
@@ -883,8 +892,8 @@ class AccountsScreen(QWidget):
           invalid_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is False)
           self.status_label.setText(
               f"Аккаунтов: {len(self._accounts)} | "
-              f"✅ Валидных: {valid_count} | "
-              f"❌ Невалидных: {invalid_count} | "
+              f"Валидных: {valid_count} | "
+              f"Невалидных: {invalid_count} | "
               f"Активных: {active_count}"
           )
 
@@ -895,8 +904,8 @@ class AccountsScreen(QWidget):
         self._ctx_test_btn.setVisible(has_sel)
         self._ctx_del_btn.setVisible(has_sel)
         if has_sel:
-            self._ctx_test_btn.setText(f"⚡ Проверить ({selected})")
-            self._ctx_del_btn.setText(f"🗑 Удалить ({selected})")
+            self._ctx_test_btn.setText(f"Проверить ({selected})")
+            self._ctx_del_btn.setText(f"Удалить ({selected})")
   
     def _add_account(self):
         dlg = AccountDialog(parent=self)
@@ -948,7 +957,7 @@ class AccountsScreen(QWidget):
         # Статус теперь в колонке 1
         item = self.table.item(row, 1)
         if item:
-            item.setText("⏳ Проверка...")
+            item.setText("Проверка...")
             item.setForeground(QColor(Colors.TEXT_MUTED))
         acc = self._accounts[row]
         w = TestWorker(acc, parent=self)
@@ -988,7 +997,7 @@ class AccountsScreen(QWidget):
 
         ИСПРАВЛЕНО:
         - Колонка статуса = 1 (не 5/7, которых не существует в 3-колоночной таблице)
-        - Не все потоки сразу: GMX/Rambler блокируют массовые подключения → ложные ❌
+        - Не все потоки сразу: GMX/Rambler блокируют массовые подключения -> ложные ошибки
         - ok_cnt из last_test_ok, не из несуществующей колонки 5
         """
         if not self._accounts:
@@ -999,13 +1008,13 @@ class AccountsScreen(QWidget):
         self._test_cancel_event.clear()
         self.cancel_test_btn.setVisible(True)
         self.test_all_btn.setEnabled(False)
-        self.test_all_btn.setText("⏳ Проверяю...")
+        self.test_all_btn.setText("Проверяю...")
 
         # Пометить все как «в очереди» — колонка 1 (Статус)
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 1)
             if item:
-                item.setText("⏳ В очереди...")
+                item.setText("В очереди...")
                 item.setForeground(QColor(Colors.TEXT_MUTED))
 
         total = len(self._accounts)
@@ -1025,7 +1034,7 @@ class AccountsScreen(QWidget):
 
                 status_item = self.table.item(row, 1)
                 if status_item:
-                    status_item.setText("⏳ Проверка...")
+                    status_item.setText("Проверка...")
                     status_item.setForeground(QColor(Colors.TEXT_MUTED))
 
                 w = TestWorker(acc, parent=self)
@@ -1038,7 +1047,7 @@ class AccountsScreen(QWidget):
                     # Обновить статус — колонка 1 (единственная колонка статуса)
                     si = self.table.item(r, 1)
                     if si:
-                        si.setText("✅ Валидный" if ok else "❌ Ошибка")
+                        si.setText("Валидный" if ok else "Ошибка")
                         si.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
                         si.setToolTip(msg)
 
@@ -1051,7 +1060,7 @@ class AccountsScreen(QWidget):
                     done = completed[0]
                     ok_so_far = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is True)
                     self.status_label.setText(
-                        f"Проверено: {done}/{total} | ✅ {ok_so_far} | ❌ {done - ok_so_far}"
+                        f"Проверено: {done}/{total} | Валидных: {ok_so_far} | Невалидных: {done - ok_so_far}"
                     )
 
                     if done >= total or self._test_cancel_event.is_set():
@@ -1067,8 +1076,8 @@ class AccountsScreen(QWidget):
                         ok_final = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is True)
                         self.status_label.setText(
                             f"Аккаунтов: {len(self._accounts)} | "
-                            f"✅ Валидных: {ok_final} | "
-                            f"❌ Невалидных: {total - ok_final} | "
+                            f"Валидных: {ok_final} | "
+                            f"Невалидных: {total - ok_final} | "
                             f"Активных: {ok_final}"
                         )
                     else:
@@ -1106,7 +1115,7 @@ class AccountsScreen(QWidget):
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         for i, p in enumerate(proxies):
             table.setItem(i, 0, QTableWidgetItem(p))
-            item = QTableWidgetItem("⏳ Проверка...")
+            item = QTableWidgetItem("Проверка...")
             item.setForeground(QColor(Colors.TEXT_MUTED))
             table.setItem(i, 1, item)
             table.setItem(i, 2, QTableWidgetItem(""))
@@ -1114,7 +1123,9 @@ class AccountsScreen(QWidget):
         lay.addWidget(table)
 
         btn_row = QHBoxLayout()
-        use_btn = QPushButton("✓ Использовать валидные")
+        use_btn = QPushButton("Использовать валидные")
+        use_btn.setIcon(icons.make_icon(icons.ARROW_RIGHT))
+        use_btn.setIconSize(QSize(16, 16))
         use_btn.setObjectName("btn_primary")
         use_btn.setEnabled(False)
         cancel_btn = QPushButton("Отмена")
@@ -1133,12 +1144,12 @@ class AccountsScreen(QWidget):
             c_item = table.item(idx, 2)
             e_item = table.item(idx, 3)
             if valid:
-                s_item.setText("✓ OK")
+                s_item.setText("OK")
                 s_item.setForeground(QColor(Colors.SUCCESS))
                 c_item.setText(country or "—")
                 valid_proxies.append(proxies[idx])
             else:
-                s_item.setText("✗ Ошибка")
+                s_item.setText("Ошибка")
                 s_item.setForeground(QColor(Colors.ERROR))
                 e_item.setText(error)
 
@@ -1156,7 +1167,7 @@ class AccountsScreen(QWidget):
             dlg.accept()
             QMessageBox.information(
                 self, "Прокси назначены",
-                f"✓ {len(valid_proxies)} валидных прокси назначено {len(self._accounts)} аккаунтам."
+                f"{len(valid_proxies)} валидных прокси назначено {len(self._accounts)} аккаунтам."
             )
 
         worker.result.connect(on_result)
@@ -1198,7 +1209,9 @@ class AccountsScreen(QWidget):
         lay.addWidget(text_edit)
 
         file_row = QHBoxLayout()
-        load_file_btn = QPushButton("📂 Загрузить из файла")
+        load_file_btn = QPushButton("Загрузить из файла")
+        load_file_btn.setIcon(icons.make_icon(icons.UPLOAD))
+        load_file_btn.setIconSize(QSize(16, 16))
         load_file_btn.setObjectName("btn_secondary")
 
         def _load_file():
@@ -1290,7 +1303,7 @@ class AccountsScreen(QWidget):
         self.test_all_btn.setEnabled(True)
         self.test_all_btn.setText("Проверить все")
         self.cancel_test_btn.setVisible(False)
-        self.status_label.setText(f"\u23f9 Проверка отменена | Аккаунтов: {len(self._accounts)}")
+        self.status_label.setText(f"Проверка отменена | Аккаунтов: {len(self._accounts)}")
 
     def _save_config(self) -> None:
         """Сохранить аккаунты в файл по выбору пользователя."""

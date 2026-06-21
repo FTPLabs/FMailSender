@@ -4,6 +4,7 @@ FMail Sender — Telegram Bot + FastAPI License Server v3.0.0
 Поддержка: тикеты с диалогом, медиафайлы, голосовые, ответы обеих сторон.
 """
 import asyncio
+import hmac
 import html
 import logging
 import os
@@ -1463,17 +1464,21 @@ async def _proceed_to_payment(event, state: FSMContext, hwid: str, plan_id: str)
 @dp.callback_query(F.data.startswith("check_pay:"))
 async def cb_check_pay(query: CallbackQuery, state: FSMContext):
     invoice_id = query.data.split(":", 1)[1]
+    payment = await db.get_payment(invoice_id)
+    if not payment:
+        await query.answer("❌ Платёж не найден.", show_alert=True)
+        return
     try:
-        paid = await crypto_client.check_invoice(invoice_id)
+        paid = await crypto_client.check_invoice(
+            invoice_id,
+            expected_amount=payment.get("amount"),
+            expected_asset="USDT",
+        )
     except Exception as e:
         await query.answer(f"Ошибка проверки: {e}", show_alert=True)
         return
     if not paid:
         await query.answer("⏳ Оплата ещё не поступила. Попробуй через минуту.", show_alert=True)
-        return
-    payment = await db.get_payment(invoice_id)
-    if not payment:
-        await query.answer("❌ Платёж не найден.", show_alert=True)
         return
     # Atomic + idempotent: если уже обработан — вернёт существующий ключ
     license_data = await db.create_license_for_payment(
@@ -2477,7 +2482,8 @@ class AdminRevokeRequest(BaseModel):
 async def admin_revoke(req: AdminRevokeRequest):
     provided = req.api_key or req.admin_secret
     expected = ADMIN_API_KEY or os.environ.get("ADMIN_REVOKE_SECRET", "")
-    if not expected or provided != expected:
+    # constant-time сравнение — защита от timing-атаки на админ-секрет
+    if not expected or not hmac.compare_digest(provided, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
     revoked = await db.revoke_license(req.key.strip().upper())
     if not revoked:
@@ -3054,7 +3060,11 @@ async def _poll_pending_payments():
                 if not invoice_id:
                     continue
                 try:
-                    paid = await crypto_client.check_invoice(invoice_id)
+                    paid = await crypto_client.check_invoice(
+                        invoice_id,
+                        expected_amount=payment.get("amount"),
+                        expected_asset="USDT",
+                    )
                     if paid:
                         license_data = await db.create_license_for_payment(
                             invoice_id=invoice_id,

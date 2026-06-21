@@ -40,7 +40,7 @@ def fetch_result(uid: str, timeout: int = 20) -> dict:
       error      - строка с ошибкой или ""
     """
     url = f"https://www.mail-tester.com/test-{uid}"
-    result = {"score": None, "max_score": 10, "inbox_status": "⏳ Ожидание", "url": url, "received": False, "error": ""}
+    result = {"score": None, "max_score": 10, "inbox_status": "Ожидание", "url": url, "received": False, "error": ""}
 
     try:
         req = urllib.request.Request(
@@ -56,7 +56,7 @@ def fetch_result(uid: str, timeout: int = 20) -> dict:
 
         # Письмо ещё не получено?
         if "havent received" in html.lower() or "we haven" in html.lower() or "not received" in html.lower():
-            result["inbox_status"] = "⏳ Письмо ещё не получено"
+            result["inbox_status"] = "Письмо ещё не получено"
             result["received"] = False
             return result
 
@@ -67,15 +67,15 @@ def fetch_result(uid: str, timeout: int = 20) -> dict:
             result["score"] = score
             result["received"] = True
             if score >= 9:
-                result["inbox_status"] = f"✅ Входящие ({score}/10) — отлично"
+                result["inbox_status"] = f"Входящие ({score}/10) — отлично"
             elif score >= 7:
-                result["inbox_status"] = f"✅ Входящие ({score}/10) — хорошо"
+                result["inbox_status"] = f"Входящие ({score}/10) — хорошо"
             elif score >= 5:
-                result["inbox_status"] = f"⚠️ Возможно спам ({score}/10)"
+                result["inbox_status"] = f"Возможно спам ({score}/10)"
             else:
-                result["inbox_status"] = f"🚫 Спам ({score}/10)"
+                result["inbox_status"] = f"Спам ({score}/10)"
         else:
-            result["inbox_status"] = "⏳ Результат обрабатывается"
+            result["inbox_status"] = "Результат обрабатывается"
             result["received"] = True
 
     except urllib.error.URLError as e:

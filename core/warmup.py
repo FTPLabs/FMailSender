@@ -5,6 +5,7 @@ v2.7.0: исправлен _save_counter (теперь инкрементиру�
 import atexit
 import json
 import math
+import os
 import random
 import time
 from dataclasses import dataclass, field
@@ -140,12 +141,16 @@ class WarmupScheduler:
                     )
 
     def _save(self) -> None:
+        # Атомарная запись: temp + os.replace — прерывание не оставит
+        # частично записанный (повреждённый) JSON.
         self.data_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.data_path, "w", encoding="utf-8") as f:
+        tmp = self.data_path.with_name(self.data_path.name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(
                 {email: r.to_dict() for email, r in self.records.items()},
                 f, ensure_ascii=False, indent=2,
             )
+        os.replace(tmp, self.data_path)
         self._save_counter = 0
 
     def _maybe_save(self) -> None:

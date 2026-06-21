@@ -191,7 +191,12 @@ def apply_patch(
             if sha256 and _sha256_bytes(data) != sha256:
                 return False, f"Контрольная сумма не совпала: {rel_path}"
 
-            dest = PATCH_DIR / rel_path
+            # Защита от path traversal: rel_path с '..' или абсолютный путь
+            # не должен выводить запись за пределы PATCH_DIR.
+            _base = PATCH_DIR.resolve()
+            dest = (PATCH_DIR / rel_path).resolve()
+            if _base != dest and _base not in dest.parents:
+                return False, f"Небезопасный путь в патче: {rel_path}"
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
             logger.info("Patch applied: %s", rel_path)

@@ -713,8 +713,8 @@ class SendingEngine:
         self._paused = False
         self._campaign_task = asyncio.current_task()
         if self._log_queue:
-            self._log_queue.put_nowait({"type": "log", "message":
-                f"[{time.strftime('%H:%M:%S')}] 🚀 Запуск рассылки: {len(recipients)} получателей"})
+            self._log_queue.put_nowait({"type": "log", "level": "info", "message":
+                f"[{time.strftime('%H:%M:%S')}] Запуск рассылки: {len(recipients)} получателей"})
 
         # Сбрасываем суточный/часовой счётчик если период истёк
         _now = time.time()
@@ -761,18 +761,18 @@ class SendingEngine:
                 _result = await self._send_one(sem, account, recipient, template)
                 if _result.success:
                     if _attempt > 0 and self._log_queue:
-                        self._log_queue.put_nowait({"type": "log", "message":
-                            f"[{time.strftime('%H:%M:%S')}] ↩ {recipient.email}: успех с {account.email} (попытка {_attempt + 1})"})
+                        self._log_queue.put_nowait({"type": "log", "level": "ok", "message":
+                            f"[{time.strftime('%H:%M:%S')}] {recipient.email}: успех с {account.email} (попытка {_attempt + 1})"})
                     return _result
                 _last_result = _result
                 if _attempt < _MAX_RETRIES - 1 and self._log_queue:
-                    self._log_queue.put_nowait({"type": "log", "message":
-                        f"[{time.strftime('%H:%M:%S')}] ↩ {recipient.email}: {_result.error[:60]} — пробую другой аккаунт..."})
+                    self._log_queue.put_nowait({"type": "log", "level": "warn", "message":
+                        f"[{time.strftime('%H:%M:%S')}] {recipient.email}: {_result.error[:60]} — пробую другой аккаунт..."})
             if _last_result is not None:
                 return _last_result
             if self._log_queue:
-                self._log_queue.put_nowait({"type": "log", "message":
-                    f"[{time.strftime('%H:%M:%S')}] ⚠ {recipient.email}: все аккаунты недоступны"})
+                self._log_queue.put_nowait({"type": "log", "level": "err", "message":
+                    f"[{time.strftime('%H:%M:%S')}] {recipient.email}: все аккаунты недоступны"})
             return SendResult(
                 recipient_email=recipient.email,
                 success=False,
@@ -800,8 +800,8 @@ class SendingEngine:
                         with self._stats_lock:
                             self._stats["errors"] += 1
                         if self._log_queue:
-                            self._log_queue.put_nowait({"type": "log", "message":
-                                f"[{time.strftime('%H:%M:%S')}] ✗ ошибка [{type(result).__name__}]: {result}"})
+                            self._log_queue.put_nowait({"type": "log", "level": "err", "message":
+                                f"[{time.strftime('%H:%M:%S')}] ошибка [{type(result).__name__}]: {result}"})
                         continue
                     results.append(result)
                     with self._stats_lock:
@@ -812,10 +812,12 @@ class SendingEngine:
                     if self._log_queue:
                         _ts = time.strftime('%H:%M:%S')
                         if result.success:
-                            _lmsg = f"[{_ts}] ✓ {result.recipient_email}  ← {result.account_used}"
+                            _lmsg = f"[{_ts}] {result.recipient_email}  via {result.account_used}"
+                            _lvl = "ok"
                         else:
-                            _lmsg = f"[{_ts}] ✗ {result.recipient_email}: {result.error or 'неизвестная ошибка'}"
-                        self._log_queue.put_nowait({"type": "log", "message": _lmsg})
+                            _lmsg = f"[{_ts}] {result.recipient_email}: {result.error or 'неизвестная ошибка'}"
+                            _lvl = "err"
+                        self._log_queue.put_nowait({"type": "log", "level": _lvl, "message": _lmsg})
                     self._emit_progress(results, recipients, result)
                 if (
                     self.config.pause_after_n > 0
@@ -834,8 +836,8 @@ class SendingEngine:
         if self._log_queue:
             _ok = sum(1 for r in results if r.success)
             _fail = len(results) - _ok
-            self._log_queue.put_nowait({"type": "log", "message":
-                f"[{time.strftime('%H:%M:%S')}] ═══ Готово: ✓ {_ok} успешно, ✗ {_fail} ошибок ═══"})
+            self._log_queue.put_nowait({"type": "log", "level": "info", "message":
+                f"[{time.strftime('%H:%M:%S')}] Готово: {_ok} успешно, {_fail} ошибок"})
         if self.on_finished:
             self.on_finished(results)
         return results

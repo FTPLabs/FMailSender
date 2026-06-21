@@ -259,7 +259,7 @@ class ActivationScreen(QWidget):
             self.status_label.setStyleSheet(
                 f"color: #10B981; font-size: 12px; font-weight: 600; background: transparent;"
             )
-            self.status_label.setText("✅ Лицензия активирована!")
+            self.status_label.setText("Лицензия активирована!")
             self.btn_activate.setEnabled(False)
 
             if license_info:
@@ -269,7 +269,7 @@ class ActivationScreen(QWidget):
                 # Активация прошла, но check_license не смог прочитать токен
                 # (нет JWT_SECRET в окружении) — перезапуск приложения решит проблему
                 self.status_label.setText(
-                    "✅ Лицензия активирована!\n"
+                    "Лицензия активирована!\n"
                     "Перезапустите приложение для входа."
                 )
         else:
@@ -279,4 +279,4 @@ class ActivationScreen(QWidget):
         self.status_label.setStyleSheet(
             f"color: {Colors.ERROR}; font-size: 12px; background: transparent;"
         )
-        self.status_label.setText(f"❌ {msg}")
+        self.status_label.setText(msg)

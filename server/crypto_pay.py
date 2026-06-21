@@ -87,11 +87,39 @@ class CryptoPayClient:
         items = result.get("items", [])
         return items[0] if items else None
 
-    async def check_invoice(self, invoice_id: str) -> bool:
-        """Return True if the invoice has been paid."""
+    @staticmethod
+    def _invoice_matches(invoice: Optional[dict],
+                         expected_amount: Optional[float],
+                         expected_asset: Optional[str]) -> bool:
+        """Проверяет, что оплаченный инвойс совпадает по сумме и активу.
+        Защита от недоплаты / оплаты другим (более дешёвым) активом."""
+        if not (invoice and invoice.get("status") == "paid"):
+            return False
+        if expected_asset is not None and invoice.get("asset") != expected_asset:
+            logger.warning("invoice asset mismatch: got %s expected %s",
+                           invoice.get("asset"), expected_asset)
+            return False
+        if expected_amount is not None:
+            try:
+                # допускаем переплату, отклоняем недоплату (с эпсилоном на округление)
+                if float(invoice.get("amount", 0)) + 1e-6 < float(expected_amount):
+                    logger.warning("invoice amount mismatch: got %s expected %s",
+                                   invoice.get("amount"), expected_amount)
+                    return False
+            except (TypeError, ValueError):
+                return False
+        return True
+
+    async def check_invoice(
+        self,
+        invoice_id: str,
+        expected_amount: Optional[float] = None,
+        expected_asset: Optional[str] = None,
+    ) -> bool:
+        """Return True if the invoice has been paid (и совпадает по сумме/активу)."""
         try:
             invoice = await self.get_invoice(invoice_id)
-            return bool(invoice and invoice.get("status") == "paid")
+            return self._invoice_matches(invoice, expected_amount, expected_asset)
         except Exception as e:
             logger.warning("check_invoice error for %s: %s", invoice_id, e)
             return False

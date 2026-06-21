@@ -146,11 +146,11 @@ class SpamCheckResult:
     @property
     def verdict(self) -> str:
         if self.score < 20:
-            return "✅ Хороший"
+            return "Хороший"
         elif self.score < 50:
-            return "⚠️ Подозрительный"
+            return "Подозрительный"
         else:
-            return "🚫 Спам"
+            return "Спам"
 
     @property
     def is_clean(self) -> bool:
@@ -352,7 +352,7 @@ class SpamChecker:
     def get_recommendations(self, result: SpamCheckResult) -> List[str]:
         recs = []
         if result.score >= 50:
-            recs.append("⚠️ Высокий spam score — письмо может попасть в спам")
+            recs.append("Высокий spam score — письмо может попасть в спам")
         for issue in result.issues:
             if "спам-слов" in issue.lower():
                 recs.append("Уберите спам-триггеры из текста письма")
@@ -361,5 +361,5 @@ class SpamChecker:
             elif "url в теме" in issue.lower():
                 recs.append("Не размещайте URL прямо в теме письма")
         if not result.issues:
-            recs.append("✅ Письмо выглядит чисто — хорошие шансы на доставку")
+            recs.append("Письмо выглядит чисто — хорошие шансы на доставку")
         return recs

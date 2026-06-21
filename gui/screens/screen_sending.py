@@ -11,10 +11,11 @@ from PyQt6.QtWidgets import (
   QListWidgetItem, QDateTimeEdit, QCheckBox, QGroupBox,
   QFormLayout, QMessageBox, QSplitter, QFileDialog
 )
-from PyQt6.QtCore import QSettings, Qt, QTimer, QDateTime, pyqtSignal
+from PyQt6.QtCore import QSettings, Qt, QTimer, QDateTime, QSize, pyqtSignal
 from PyQt6.QtGui import QColor
 from core.sender import SendingEngine, SmtpAccount, Recipient, EmailTemplate, CampaignConfig, SendResult
 from gui.theme import Colors, Spacing
+from gui import icons
 
 # ── Звуковое уведомление ────────────────────────────────────────────────────
 def _play_completion_chime() -> None:
@@ -276,8 +277,10 @@ class SendingScreen(QWidget):
       splitter.setSizes([380, 620])
       layout.addWidget(splitter, 1)
       self._restore_settings()
-      save_btn = QPushButton("💾 Сохранить лог")
+      save_btn = QPushButton("Сохранить лог")
       save_btn.setObjectName("btn_icon")
+      save_btn.setIcon(icons.make_icon(icons.SAVE))
+      save_btn.setIconSize(QSize(16, 16))
       save_btn.clicked.connect(self._export_log)
       rl.addWidget(save_btn, 0, Qt.AlignmentFlag.AlignRight)
 
@@ -381,11 +384,14 @@ class SendingScreen(QWidget):
               _msg = item["message"]
               _msg = _translate_smtp_error(_msg)  # Переводим ошибки на русский
               _wi = QListWidgetItem(_msg)
-              if " ✓ " in _msg or _msg.startswith("[") and "✓" in _msg:
+              _level = item.get("level")
+              if _level == "ok":
                   _wi.setForeground(QColor("#22c55e"))
-              elif " ✗ " in _msg or "⚠" in _msg or _msg.startswith("[") and "✗" in _msg:
+              elif _level == "err":
                   _wi.setForeground(QColor("#ef4444"))
-              elif "🚀" in _msg or "═══" in _msg:
+              elif _level == "warn":
+                  _wi.setForeground(QColor("#f59e0b"))
+              elif _level == "info":
                   _wi.setForeground(QColor("#a78bfa"))
               self.log_list.addItem(_wi)
               # Удаляем старые строки если превышен лимит

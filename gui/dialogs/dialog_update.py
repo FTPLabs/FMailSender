@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QTextEdit, QFrame
 )
-from PyQt6.QtCore import QTimer, pyqtSignal
+from PyQt6.QtCore import QTimer, pyqtSignal, QSize
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import QUrl
 
@@ -20,6 +20,7 @@ from core.updater import (
     fetch_patch_manifest, apply_patch,
 )
 from gui.theme import Colors, Spacing
+from gui import icons
 
 
 def _fmt_size(b: int) -> str:
@@ -60,8 +61,10 @@ class UpdateDialog(QDialog):
 
         # Заголовок
         header_row = QHBoxLayout()
-        icon_lbl = QLabel("🚀")
-        icon_lbl.setStyleSheet("font-size:28px;")
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(
+            icons.make_icon(icons.ROCKET, color=Colors.ACCENT).pixmap(QSize(28, 28))
+        )
         header_row.addWidget(icon_lbl)
         vbox = QVBoxLayout()
         title = QLabel(f"FMail Sender v{self._info.version}")
@@ -80,9 +83,12 @@ class UpdateDialog(QDialog):
         meta_layout = QHBoxLayout(meta_frame)
         meta_layout.setContentsMargins(12, 8, 12, 8)
 
+        size_icon = QLabel()
+        size_icon.setPixmap(icons.make_icon(icons.PACKAGE).pixmap(QSize(16, 16)))
+        meta_layout.addWidget(size_icon)
         self._size_lbl = QLabel(
-            f"📦  Полный EXE: {_fmt_size(self._info.download_size)}"
-            if self._info.download_size else "📦  Обновление доступно"
+            f"Полный EXE: {_fmt_size(self._info.download_size)}"
+            if self._info.download_size else "Обновление доступно"
         )
         self._size_lbl.setObjectName("label_muted")
         meta_layout.addWidget(self._size_lbl)
@@ -90,19 +96,32 @@ class UpdateDialog(QDialog):
 
         published = self._info.published_at[:10] if self._info.published_at else ""
         if published:
-            date_lbl = QLabel(f"📅  {published}")
+            date_icon = QLabel()
+            date_icon.setPixmap(icons.make_icon(icons.CALENDAR).pixmap(QSize(16, 16)))
+            meta_layout.addWidget(date_icon)
+            date_lbl = QLabel(f"{published}")
             date_lbl.setObjectName("label_muted")
             meta_layout.addWidget(date_lbl)
 
         layout.addWidget(meta_frame)
 
         # Patch-badge (скрыт до загрузки манифеста)
+        patch_row = QHBoxLayout()
+        patch_row.setContentsMargins(0, 4, 0, 4)
+        self._patch_badge_icon = QLabel()
+        self._patch_badge_icon.setPixmap(
+            icons.make_icon(icons.ZAP, color="#22c55e").pixmap(QSize(16, 16))
+        )
+        self._patch_badge_icon.setVisible(False)
+        patch_row.addWidget(self._patch_badge_icon)
         self._patch_badge = QLabel("")
         self._patch_badge.setStyleSheet(
-            f"color: #22c55e; font-weight:bold; font-size:13px; padding:4px 0;"
+            f"color: #22c55e; font-weight:bold; font-size:13px;"
         )
         self._patch_badge.setVisible(False)
-        layout.addWidget(self._patch_badge)
+        patch_row.addWidget(self._patch_badge)
+        patch_row.addStretch()
+        layout.addLayout(patch_row)
 
         # Заметки о релизе
         notes_lbl = QLabel("Что нового:")
@@ -140,8 +159,10 @@ class UpdateDialog(QDialog):
         self._btn_open.clicked.connect(self._open_release_page)
         btn_row.addWidget(self._btn_open)
 
-        self._btn_update = QPushButton("⬇ Обновить")
+        self._btn_update = QPushButton("Обновить")
         self._btn_update.setObjectName("btn_primary")
+        self._btn_update.setIcon(icons.make_icon(icons.DOWNLOAD))
+        self._btn_update.setIconSize(QSize(16, 16))
         self._btn_update.clicked.connect(self._start_update)
         btn_row.addWidget(self._btn_update)
 
@@ -166,13 +187,16 @@ class UpdateDialog(QDialog):
         patch_kb = self._info.patch_size / 1024
         full_mb = self._info.download_size / 1_048_576 if self._info.download_size else 0
         
-        badge_text = f"⚡ Доступен быстрый патч: ~{patch_kb:.0f} КБ"
+        badge_text = f"Доступен быстрый патч: ~{patch_kb:.0f} КБ"
         if full_mb:
             badge_text += f" (вместо {full_mb:.0f} МБ полного EXE)"
         
         self._patch_badge.setText(badge_text)
         self._patch_badge.setVisible(True)
-        self._btn_update.setText("⚡ Применить патч")
+        self._patch_badge_icon.setVisible(True)
+        self._btn_update.setText("Применить патч")
+        self._btn_update.setIcon(icons.make_icon(icons.ZAP))
+        self._btn_update.setIconSize(QSize(16, 16))
         self._patch_mode = True
         self.adjustSize()
 
@@ -216,15 +240,17 @@ class UpdateDialog(QDialog):
         if ok:
             n = len(self._info.patch_files)
             self._status_lbl.setText(
-                f"✅ Патч применён ({n} файл{'ов' if n != 1 else ''}). Перезапустите приложение."
+                f"Патч применён ({n} файл{'ов' if n != 1 else ''}). Перезапустите приложение."
             )
             self._status_lbl.setStyleSheet("color: #22c55e; font-weight:bold;")
-            self._btn_update.setText("🔄 Перезапустить")
+            self._btn_update.setText("Перезапустить")
+            self._btn_update.setIcon(icons.make_icon(icons.REFRESH))
+            self._btn_update.setIconSize(QSize(16, 16))
             self._btn_update.setEnabled(True)
             self._btn_update.clicked.disconnect()
             self._btn_update.clicked.connect(self._request_restart)
         else:
-            self._status_lbl.setText(f"❌ Ошибка патча: {err}")
+            self._status_lbl.setText(f"Ошибка патча: {err}")
             self._status_lbl.setStyleSheet("color: #ef4444;")
             self._btn_update.setText("Повторить")
             self._btn_update.setEnabled(True)
@@ -255,10 +281,11 @@ class UpdateDialog(QDialog):
 
     def _on_download_done(self, ok: bool, err: str):
         if ok and self._zip_path and self._zip_path.exists():
-            self._status_lbl.setText("✅ Загрузка завершена. Применение...")
+            self._status_lbl.setText("Загрузка завершена. Применение...")
+            self._status_lbl.setStyleSheet("color: #22c55e; font-weight:bold;")
             QTimer.singleShot(500, lambda: apply_update_windows(self._zip_path))
         else:
-            self._status_lbl.setText(f"❌ Ошибка: {err}")
+            self._status_lbl.setText(f"Ошибка: {err}")
             self._status_lbl.setStyleSheet("color: #ef4444;")
             self._btn_update.setEnabled(True)
 

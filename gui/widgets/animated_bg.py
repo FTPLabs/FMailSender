@@ -61,6 +61,16 @@ class AnimatedBackground(QWidget):
         self._aurora_t += self._DT * 0.15
         self.update()
 
+    def hideEvent(self, event) -> None:
+        # Останавливаем таймер когда окно скрыто/свёрнуто — не жжём CPU впустую.
+        self._timer.stop()
+        super().hideEvent(event)
+
+    def showEvent(self, event) -> None:
+        if not self._timer.isActive():
+            self._timer.start()
+        super().showEvent(event)
+
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)

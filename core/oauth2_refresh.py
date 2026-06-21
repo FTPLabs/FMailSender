@@ -200,7 +200,7 @@ def test_oauth2_smtp(
     info = refresh_ms_token(email, refresh_token, timeout=timeout)
     if not info:
         return False, (
-            "❌ OAuth2 refresh провалился — refresh_token отклонён Microsoft.\n"
+            "OAuth2 refresh провалился — refresh_token отклонён Microsoft.\n"
             "Причины: токен просрочен, аккаунт заблокирован, или SMTP AUTH отключён.\n"
             "Решение: зайдите в Outlook, разрешите SMTP в настройках приложения."
         )
@@ -228,27 +228,27 @@ def test_oauth2_smtp(
             pass
 
         if code == 235:
-            return True, f"✅ OAuth2 AUTH успешно — {email}"
+            return True, f"OAuth2 AUTH успешно — {email}"
 
         # Детальная расшифровка ошибок Microsoft
         if code == 535:
-            return False, f"❌ 535 Invalid credentials — access_token отклонён. Токен возможно просрочен."
+            return False, f"535 Invalid credentials — access_token отклонён. Токен возможно просрочен."
         if code == 534:
-            return False, f"❌ 534 AUTH Required — SMTP AUTH не включён для аккаунта {email}. Включите в настройках Outlook."
+            return False, f"534 AUTH Required — SMTP AUTH не включён для аккаунта {email}. Включите в настройках Outlook."
         if "TLS" in raw.upper() or "STARTTLS" in raw.upper():
-            return False, f"❌ TLS ошибка: {raw[:200]}"
-        return False, f"❌ SMTP код {code}: {raw[:200]}"
+            return False, f"TLS ошибка: {raw[:200]}"
+        return False, f"SMTP код {code}: {raw[:200]}"
 
     except smtplib.SMTPConnectError as exc:
-        return False, f"❌ Не удалось подключиться к {host}:{port} — {exc}"
+        return False, f"Не удалось подключиться к {host}:{port} — {exc}"
     except smtplib.SMTPServerDisconnected:
-        return False, f"❌ Сервер разорвал соединение (возможно IP заблокирован)"
+        return False, f"Сервер разорвал соединение (возможно IP заблокирован)"
     except ssl.SSLError as exc:
-        return False, f"❌ SSL/TLS ошибка: {exc}"
+        return False, f"SSL/TLS ошибка: {exc}"
     except OSError as exc:
-        return False, f"❌ Сетевая ошибка: {exc}"
+        return False, f"Сетевая ошибка: {exc}"
     except Exception as exc:
-        return False, f"❌ {type(exc).__name__}: {exc}"
+        return False, f"{type(exc).__name__}: {exc}"
 
 
 def parse_pipe_account_line(line: str) -> Optional[dict]:

@@ -26,6 +26,7 @@ except ImportError:
 from PyQt6.QtCore import QUrl
 
 from gui.theme import Colors, Spacing
+from gui import icons
 
 TEMPLATES_DIR = Path("data/templates")
 
@@ -151,20 +152,20 @@ class FormattingToolbar(QFrame):
         layout.addWidget(sep())
 
         # ── Выравнивание ─────────────────────────────────────────────────────
-        layout.addWidget(fbtn("←", lambda: self._align(Qt.AlignmentFlag.AlignLeft), "По левому краю", icon_key="align_left"))
-        layout.addWidget(fbtn("↔", lambda: self._align(Qt.AlignmentFlag.AlignCenter), "По центру", icon_key="align_center"))
-        layout.addWidget(fbtn("→", lambda: self._align(Qt.AlignmentFlag.AlignRight), "По правому краю", icon_key="align_right"))
+        layout.addWidget(fbtn("", lambda: self._align(Qt.AlignmentFlag.AlignLeft), "По левому краю", icon_key="align_left"))
+        layout.addWidget(fbtn("", lambda: self._align(Qt.AlignmentFlag.AlignCenter), "По центру", icon_key="align_center"))
+        layout.addWidget(fbtn("", lambda: self._align(Qt.AlignmentFlag.AlignRight), "По правому краю", icon_key="align_right"))
         layout.addWidget(sep())
 
         # ── Ссылка ──────────────────────────────────────────────────────────────
-        layout.addWidget(fbtn("⊕", self._insert_link, "Вставить ссылку (URL)", icon_key="link"))
+        layout.addWidget(fbtn("", self._insert_link, "Вставить ссылку (URL)", icon_key="link"))
         layout.addWidget(sep())
 
         # ── Переменные ───────────────────────────────────────────────────────
         self._vars_combo = QComboBox()
         self._vars_combo.setFixedWidth(162)
         self._vars_combo.setFixedHeight(30)
-        self._vars_combo.addItem("∴ Переменная...")
+        self._vars_combo.addItem("Переменная...")
         self._vars_combo.addItems([
             "{{first_name}}", "{{last_name}}", "{{company}}",
             "{{custom_1}}", "{{custom_2}}", "{{custom_3}}",
@@ -278,9 +279,11 @@ class FormattingToolbar(QFrame):
         hex_input.setFixedHeight(28)
         hex_row.addWidget(hex_input)
 
-        custom_btn = QPushButton("⬛ Своя")
+        custom_btn = QPushButton("Своя")
         custom_btn.setObjectName("btn_custom")
         custom_btn.setFixedHeight(28)
+        custom_btn.setIcon(icons.make_icon(icons.PALETTE, 16))
+        custom_btn.setIconSize(QSize(16, 16))
         def _open_custom():
             std = QColorDialog.getColor(Qt.GlobalColor.white, dialog, "Цвет текста")
             if std.isValid():
@@ -412,8 +415,10 @@ class ComposeScreen(QWidget):
           load_btn.clicked.connect(self._load_template)
           header_row.addWidget(load_btn)
 
-          self.use_template_btn = QPushButton("Использовать →")
+          self.use_template_btn = QPushButton("Использовать")
           self.use_template_btn.setObjectName("btn_primary")
+          self.use_template_btn.setIcon(icons.make_icon(icons.ARROW_RIGHT, 16))
+          self.use_template_btn.setIconSize(QSize(16, 16))
           self.use_template_btn.clicked.connect(self._emit_template)
           header_row.addWidget(self.use_template_btn)
           layout.addLayout(header_row)
@@ -456,7 +461,7 @@ class ComposeScreen(QWidget):
           self.formatting_toolbar = FormattingToolbar(self.rich_editor)
           rich_layout.addWidget(self.formatting_toolbar)
           rich_layout.addWidget(self.rich_editor, 1)
-          self.editor_tabs.addTab(rich_tab, "✏️ Редактор")
+          self.editor_tabs.addTab(rich_tab, icons.make_icon(icons.EDIT), "Редактор")
 
           # Вкладка 2: HTML-код
           self.html_editor = QTextEdit()
@@ -477,8 +482,10 @@ class ComposeScreen(QWidget):
           prev_lbl.setObjectName("label_muted")
           prev_header.addWidget(prev_lbl)
           prev_header.addStretch()
-          refresh_btn = QPushButton("↻  Обновить")
+          refresh_btn = QPushButton("Обновить")
           refresh_btn.setObjectName("btn_secondary")
+          refresh_btn.setIcon(icons.make_icon(icons.REFRESH, 16))
+          refresh_btn.setIconSize(QSize(16, 16))
           refresh_btn.clicked.connect(self._update_preview)
           prev_header.addWidget(refresh_btn)
           preview_layout.addLayout(prev_header)
@@ -498,7 +505,7 @@ class ComposeScreen(QWidget):
             self.preview = QTextBrowser()
             self.preview.setOpenExternalLinks(True)
           preview_layout.addWidget(self.preview, 1)
-          self.editor_tabs.addTab(preview_container, "👁 Предпросмотр")
+          self.editor_tabs.addTab(preview_container, icons.make_icon(icons.EYE), "Предпросмотр")
 
           self.editor_tabs.currentChanged.connect(self._on_tab_changed)
           layout.addWidget(self.editor_tabs, 1)
@@ -522,14 +529,16 @@ class ComposeScreen(QWidget):
           self.spam_check_btn.clicked.connect(self._check_spam)
           bottom_row.addWidget(self.spam_check_btn)
 
-          self.uniqueize_btn = QPushButton("\U0001f500 Уникализировать")
+          self.uniqueize_btn = QPushButton("Уникализировать")
           self.uniqueize_btn.setObjectName("btn_secondary")
+          self.uniqueize_btn.setIcon(icons.make_icon(icons.ZAP, 16))
           self.uniqueize_btn.setToolTip("16 техник уникализации для обхода спам-фильтров")
           self.uniqueize_btn.clicked.connect(self._uniqueize)
           bottom_row.addWidget(self.uniqueize_btn)
 
-          self.delivery_test_btn = QPushButton("\U0001f4ec Тест доставки")
+          self.delivery_test_btn = QPushButton("Тест доставки")
           self.delivery_test_btn.setObjectName("btn_secondary")
+          self.delivery_test_btn.setIcon(icons.make_icon(icons.SEARCH, 16))
           self.delivery_test_btn.setToolTip("Проверить: письмо попадёт во Входящие или Спам?")
           self.delivery_test_btn.clicked.connect(self._test_delivery)
           bottom_row.addWidget(self.delivery_test_btn)
@@ -576,7 +585,7 @@ a {{ color: #6366F1; }}
 
         if self.preview is not None:
             if _HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-                # setHtml с https base URL → браузер загружает внешние ресурсы (картинки с CDN, шрифты).
+                # setHtml с https base URL -> браузер загружает внешние ресурсы (картинки с CDN, шрифты).
                 # Это надёжнее temp-файла: нет race-condition при удалении и нет ограничений file://
                 # FIX: https base URL позволяет браузеру загружать внешние изображения (CDN, логотипы)
                   # about:blank блокировал external resources даже при LocalContentCanAccessRemoteUrls=True
@@ -675,21 +684,21 @@ a {{ color: #6366F1; }}
         inner_lay = QVBoxLayout(inner)
         inner_lay.setSpacing(4)
         if issues:
-            inner_lay.addWidget(QLabel("<b>\U0001f6ab \u041f\u0440\u043e\u0431\u043b\u0435\u043c\u044b:</b>"))
+            inner_lay.addWidget(QLabel(f"<b style='color:{Colors.ERROR}'>Проблемы:</b>"))
             for i in issues:
                 l = QLabel(f"  \u2022 {i}")
                 l.setWordWrap(True)
                 l.setStyleSheet(f"color: {Colors.ERROR};")
                 inner_lay.addWidget(l)
         if warnings:
-            inner_lay.addWidget(QLabel("<b>\u26a0\ufe0f \u041f\u0440\u0435\u0434\u0443\u043f\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u044f:</b>"))
+            inner_lay.addWidget(QLabel(f"<b style='color:{Colors.WARNING}'>Предупреждения:</b>"))
             for w in warnings:
                 l = QLabel(f"  \u2022 {w}")
                 l.setWordWrap(True)
                 l.setStyleSheet(f"color: {Colors.WARNING};")
                 inner_lay.addWidget(l)
         if passed:
-            inner_lay.addWidget(QLabel("<b>\u2705 \u041f\u0440\u043e\u0439\u0434\u0435\u043d\u043e:</b>"))
+            inner_lay.addWidget(QLabel(f"<b style='color:{Colors.SUCCESS}'>Пройдено:</b>"))
             for p in passed[:6]:
                 l = QLabel(f"  \u2022 {p}")
                 l.setWordWrap(True)
@@ -699,8 +708,9 @@ a {{ color: #6366F1; }}
         lay.addWidget(scroll)
 
         btn_row = QHBoxLayout()
-        ai_btn = QPushButton("\u2728 \u0418\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441 \u0418\u0418")
+        ai_btn = QPushButton("Исправить с ИИ")
         ai_btn.setObjectName("btn_primary")
+        ai_btn.setIcon(icons.make_icon(icons.ROCKET, 16))
         close_btn = QPushButton("\u0417\u0430\u043a\u0440\u044b\u0442\u044c")
         close_btn.setObjectName("btn_secondary")
         close_btn.clicked.connect(dlg.accept)
@@ -725,7 +735,7 @@ a {{ color: #6366F1; }}
                 fixer = AiSpamFixer(api_key=key.strip())
 
             ai_btn.setEnabled(False)
-            ai_btn.setText("\u2728 \u0418\u0441\u043f\u0440\u0430\u0432\u043b\u044f\u044e...")
+            ai_btn.setText("Исправляю...")
 
             class _AiFixWorker(QThread):
                 done = pyqtSignal(object)
@@ -748,7 +758,7 @@ a {{ color: #6366F1; }}
             )
             def on_done(fix_result):
                 ai_btn.setEnabled(True)
-                ai_btn.setText("\u2728 \u0418\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441 \u0418\u0418")
+                ai_btn.setText("Исправить с ИИ")
                 reply = QMessageBox.question(
                     dlg,
                     "\u0418\u0418-\u0438\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0433\u043e\u0442\u043e\u0432\u043e",
@@ -761,7 +771,7 @@ a {{ color: #6366F1; }}
                     dlg.accept()
             def on_err(msg):
                 ai_btn.setEnabled(True)
-                ai_btn.setText("\u2728 \u0418\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441 \u0418\u0418")
+                ai_btn.setText("Исправить с ИИ")
                 QMessageBox.warning(dlg, "\u041e\u0448\u0438\u0431\u043a\u0430 \u0418\u0418", msg)
             worker.done.connect(on_done)
             worker.err.connect(on_err)
@@ -972,8 +982,13 @@ a {{ color: #6366F1; }}
         def _copy():
             from PyQt6.QtWidgets import QApplication as _QA
             _QA.clipboard().setText(test_email)
-            copy_btn.setText("✓")
-            QTimer.singleShot(1800, lambda: copy_btn.setText("Копировать"))
+            copy_btn.setIcon(icons.make_icon(icons.CHECK, 16))
+            copy_btn.setIconSize(QSize(16, 16))
+            copy_btn.setText("")
+            def _reset_copy():
+                copy_btn.setIcon(QIcon())
+                copy_btn.setText("Копировать")
+            QTimer.singleShot(1800, _reset_copy)
         copy_btn.clicked.connect(_copy)
         email_row.addWidget(copy_btn)
         lay.addLayout(email_row)
@@ -1005,8 +1020,10 @@ a {{ color: #6366F1; }}
                 acc_row.addWidget(acc_combo, 1)
                 auto_fl.addLayout(acc_row)
 
-            send_btn = QPushButton("⚡ Отправить тест автоматически")
+            send_btn = QPushButton("Отправить тест автоматически")
             send_btn.setObjectName("btn_primary")
+            send_btn.setIcon(icons.make_icon(icons.ZAP, 16))
+            send_btn.setIconSize(QSize(16, 16))
             auto_fl.addWidget(send_btn)
             lay.addWidget(auto_frame)
 
@@ -1022,7 +1039,7 @@ a {{ color: #6366F1; }}
 
                 send_btn.setEnabled(False)
                 send_btn.setText("Отправляю...")
-                status_lbl.setText("📤 Соединение с SMTP-сервером...")
+                status_lbl.setText("Соединение с SMTP-сервером...")
                 send_result: list = [None]
 
                 def _send_worker():
@@ -1059,14 +1076,15 @@ a {{ color: #6366F1; }}
                         QTimer.singleShot(300, _poll_send)
                     else:
                         send_btn.setEnabled(True)
-                        send_btn.setText("⚡ Отправить тест автоматически")
+                        send_btn.setText("Отправить тест автоматически")
                         if send_result[0] is True:
                             status_lbl.setText(
-                                "✅ Письмо отправлено! Подождите 30–60 сек и нажмите «Проверить»."
+                                "<span style=\"color:#10B981\">Письмо отправлено!</span> "
+                                "Подождите 30–60 сек и нажмите «Проверить»."
                             )
                             check_btn.setEnabled(True)
                         else:
-                            status_lbl.setText(f"❌ Ошибка отправки: {send_result[0]}")
+                            status_lbl.setText(f"<span style=\"color:#EF4444\">Ошибка отправки:</span> {send_result[0]}")
 
                 QTimer.singleShot(300, _poll_send)
 
@@ -1074,7 +1092,7 @@ a {{ color: #6366F1; }}
         else:
             # Нет аккаунтов — ручная инструкция
             hint = QLabel(
-                "ℹ️ Добавьте SMTP-аккаунт во вкладке <b>Аккаунты</b> для автоматической отправки.<br>"
+                "Добавьте SMTP-аккаунт во вкладке <b>Аккаунты</b> для автоматической отправки.<br>"
                 "Пока можно скопировать адрес и отправить письмо вручную."
             )
             hint.setTextFormat(Qt.TextFormat.RichText)
@@ -1098,8 +1116,10 @@ a {{ color: #6366F1; }}
 
         # ── Кнопки ──────────────────────────────────────────
         btn_row = QHBoxLayout()
-        check_btn = QPushButton("🔍 Проверить результат")
+        check_btn = QPushButton("Проверить результат")
         check_btn.setObjectName("btn_primary")
+        check_btn.setIcon(icons.make_icon(icons.SEARCH, 16))
+        check_btn.setIconSize(QSize(16, 16))
         check_btn.setEnabled(not bool(self._accounts))  # если нет аккаунтов — доступна сразу
         browser_btn = QPushButton("Открыть в браузере")
         browser_btn.setObjectName("btn_secondary")
@@ -1115,7 +1135,7 @@ a {{ color: #6366F1; }}
         def _check():
             check_btn.setEnabled(False)
             check_btn.setText("Проверяю...")
-            status_lbl.setText("🌐 Запрашиваем результат mail-tester.com...")
+            status_lbl.setText("Запрашиваем результат mail-tester.com...")
             result_ref: list = [None]
 
             def _fetch_worker():
@@ -1130,9 +1150,9 @@ a {{ color: #6366F1; }}
                 else:
                     r = result_ref[0] or {}
                     check_btn.setEnabled(True)
-                    check_btn.setText("🔍 Проверить снова")
+                    check_btn.setText("Проверить снова")
                     if r.get("error"):
-                        status_lbl.setText(f"❌ Ошибка: {r['error']}")
+                        status_lbl.setText(f"<span style=\"color:#EF4444\">Ошибка:</span> {r['error']}")
                         bar.setVisible(False)
                     else:
                         status_lbl.setText(r.get("inbox_status", "Нет данных"))

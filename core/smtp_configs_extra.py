@@ -36,7 +36,7 @@ def load_extra_configs() -> dict[str, dict]:
         # "tutanota.com": NOT SUPPORTED — uses proprietary protocol
         # ProtonMail Bridge (local proxy required)
         "protonmail.com":{"host": "127.0.0.1",         "port": 1025, "use_ssl": False, "use_tls": False,
-                          "_note": "⚠ Требуется ProtonMail Bridge (https://proton.me/mail/bridge). Без него — Connection refused на 127.0.0.1:1025"},
+                          "_note": "Требуется ProtonMail Bridge (https://proton.me/mail/bridge). Без него — Connection refused на 127.0.0.1:1025"},
         "proton.me":     {"host": "127.0.0.1",         "port": 1025, "use_ssl": False, "use_tls": False},
         # mailbox.org определён в core/sender.py._SMTP_CONFIGS — дубликат удалён (FIX M1)
 

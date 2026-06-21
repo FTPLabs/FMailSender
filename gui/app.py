@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QByteArray, QSize, pyqtSignal
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor
 
+from gui import icons
 from gui.theme import Colors, Spacing, Typography
 from gui.screens.screen_dashboard import DashboardScreen
 from gui.screens.screen_accounts import AccountsScreen
@@ -43,12 +44,12 @@ def _render_svg_icon(svg_bytes: bytes, size: int = 32) -> QPixmap:
 
 
 NAV_ITEMS = [
-    ("dashboard",   "Дашборд",     "󰕮"),
-    ("accounts",    "Аккаунты",    "󰀄"),
-    ("recipients",  "Получатели",  "󰅹"),
-    ("compose",     "Письмо",      "󰏑"),
-    ("sending",     "Рассылка",    "󰑩"),
-    ("inbox",       "Входящие",    "󰇮"),
+    ("dashboard",   "Дашборд",     icons.LAYOUT),
+    ("accounts",    "Аккаунты",    icons.USERS),
+    ("recipients",  "Получатели",  icons.CONTACT),
+    ("compose",     "Письмо",      icons.FILE_TEXT),
+    ("sending",     "Рассылка",    icons.SEND),
+    ("inbox",       "Входящие",    icons.INBOX),
 ]
 
 
@@ -58,13 +59,16 @@ class NavButton(QPushButton):
     def __init__(self, key: str, label: str, icon: str, parent=None):
         super().__init__(parent)
         self._key = key
+        self._icon_svg = icon
         self.setFixedHeight(46)
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setText(label)
+        self.setText("  " + label)
+        self.setIconSize(QSize(18, 18))
         self._update_style(False)
 
     def _update_style(self, active: bool) -> None:
+        self.setIcon(icons.make_icon(self._icon_svg, 18, "#E8E8FF" if active else "#6666AA"))
         if active:
             self.setStyleSheet(
                 "QPushButton {"
@@ -290,7 +294,7 @@ class MainWindow(QMainWindow):
         inbox      = self._screens.get("inbox")
         dashboard  = self._screens.get("dashboard")
 
-        # accounts → sending + inbox + compose (для автоматического теста доставки)
+        # accounts -> sending + inbox + compose (для автоматического теста доставки)
         if hasattr(accounts, "accounts_changed"):
             if hasattr(sending, "set_accounts"):
                 accounts.accounts_changed.connect(sending.set_accounts)
@@ -299,18 +303,18 @@ class MainWindow(QMainWindow):
             if hasattr(compose, "set_accounts"):
                 accounts.accounts_changed.connect(compose.set_accounts)
 
-        # recipients → sending + inbox
+        # recipients -> sending + inbox
         if hasattr(recipients, "list_ready"):
             if hasattr(sending, "set_recipients"):
                 recipients.list_ready.connect(sending.set_recipients)
             if hasattr(inbox, "set_recipients"):
                 recipients.list_ready.connect(inbox.set_recipients)
 
-        # compose → sending
+        # compose -> sending
         if hasattr(compose, "template_ready") and hasattr(sending, "set_template"):
             compose.template_ready.connect(sending.set_template)
 
-        # sending → dashboard
+        # sending -> dashboard
         if hasattr(sending, "campaign_finished") and hasattr(dashboard, "update_campaign_results"):
             sending.campaign_finished.connect(dashboard.update_campaign_results)
 

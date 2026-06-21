@@ -223,7 +223,7 @@ class AnalyticsScreen(QWidget):
         for row, r in enumerate(results):
             self.results_table.setItem(row, 0, QTableWidgetItem(r.recipient_email))
 
-            status_item = QTableWidgetItem("✓ Успешно" if r.success else f"✗ {r.error[:40]}")
+            status_item = QTableWidgetItem("Успешно" if r.success else f"{r.error[:40]}")
             status_item.setForeground(
                 QColor(Colors.SUCCESS) if r.success else QColor(Colors.ERROR)
             )
@@ -303,7 +303,7 @@ class AnalyticsScreen(QWidget):
         self.campaign_combo.addItem("Текущая кампания")
         campaigns = self._data.get("campaigns", [])
         for camp in reversed(campaigns):
-            label = f"{camp.get('date', '—')}  ({camp.get('success', 0)}/{camp.get('total', 0)} ✓)"
+            label = f"{camp.get('date', '—')}  ({camp.get('success', 0)}/{camp.get('total', 0)})"
             self.campaign_combo.addItem(label)
         idx = min(current, self.campaign_combo.count() - 1)
         self.campaign_combo.setCurrentIndex(idx)
@@ -332,9 +332,18 @@ class AnalyticsScreen(QWidget):
             status = check_dns_auth(domain)
 
             lines = [f"<b>Домен: {domain}</b><br>"]
-            lines.append(f"SPF: {'✓ ' + (status.spf[:80] if status.spf else '') if status.spf_valid else '✗ Не настроен'}<br>")
-            lines.append(f"DKIM: {'✓ Настроен' if status.dkim_valid else '✗ Не найден'}<br>")
-            lines.append(f"DMARC: {'✓ ' + (status.dmarc[:80] if status.dmarc else '') if status.dmarc_valid else '✗ Не настроен'}<br>")
+            if status.spf_valid:
+                spf_val = "<span style='color:#10B981'>Настроен</span>" + (f" {status.spf[:80]}" if status.spf else "")
+            else:
+                spf_val = "<span style='color:#EF4444'>Не настроен</span>"
+            lines.append(f"SPF: {spf_val}<br>")
+            dkim_val = "<span style='color:#10B981'>Настроен</span>" if status.dkim_valid else "<span style='color:#EF4444'>Не найден</span>"
+            lines.append(f"DKIM: {dkim_val}<br>")
+            if status.dmarc_valid:
+                dmarc_val = "<span style='color:#10B981'>Настроен</span>" + (f" {status.dmarc[:80]}" if status.dmarc else "")
+            else:
+                dmarc_val = "<span style='color:#EF4444'>Не настроен</span>"
+            lines.append(f"DMARC: {dmarc_val}<br>")
 
             if status.suggestions:
                 lines.append("<br><b>Рекомендации:</b><br>")

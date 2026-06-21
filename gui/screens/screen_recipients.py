@@ -19,12 +19,13 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QListWidget, QListWidgetItem, QCheckBox,
     QMessageBox, QLineEdit, QTabWidget, QSplitter, QTextEdit
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
 from PyQt6.QtGui import QColor
 
 from core.sender import Recipient
 from core.spam_checker import validate_email_format
 from gui.theme import Colors, Spacing
+from gui import icons
 
 RECIPIENTS_DIR = Path("data/recipients")
 UNSUBSCRIBE_FILE = Path("data/unsubscribe.json")
@@ -48,7 +49,7 @@ def _save_unsubscribe(emails: set) -> None:
 
 
 class FieldMappingDialog(QDialog):
-    """Диалог маппинга колонок CSV → поля Recipient."""
+    """Диалог маппинга колонок CSV -> поля Recipient."""
 
     RECIPIENT_FIELDS = ["email", "first_name", "last_name", "company",
                         "custom_1", "custom_2", "custom_3", "custom_4", "custom_5"]
@@ -195,12 +196,16 @@ class RecipientsScreen(QWidget):
         dedup_btn = QPushButton("Удалить дубликаты")
         dedup_btn.clicked.connect(self._deduplicate)
         filter_row.addWidget(dedup_btn)
-        del_sel_btn = QPushButton("🗑 Удалить выбранные")
+        del_sel_btn = QPushButton("Удалить выбранные")
         del_sel_btn.setObjectName("btn_danger")
+        del_sel_btn.setIcon(icons.make_icon(icons.TRASH, 16))
+        del_sel_btn.setIconSize(QSize(16, 16))
         del_sel_btn.clicked.connect(self._delete_selected)
         filter_row.addWidget(del_sel_btn)
-        sel_all_btn = QPushButton("☑ Выделить все")
+        sel_all_btn = QPushButton("Выделить все")
         sel_all_btn.setObjectName("btn_secondary")
+        sel_all_btn.setIcon(icons.make_icon(icons.CHECK, 16))
+        sel_all_btn.setIconSize(QSize(16, 16))
         sel_all_btn.clicked.connect(lambda: self.table.selectAll())
         filter_row.addWidget(sel_all_btn)
 
@@ -256,8 +261,10 @@ class RecipientsScreen(QWidget):
 
         bottom_row.addStretch()
 
-        self.use_list_btn = QPushButton("Использовать список →")
+        self.use_list_btn = QPushButton("Использовать список")
         self.use_list_btn.setObjectName("btn_primary")
+        self.use_list_btn.setIcon(icons.make_icon(icons.ARROW_RIGHT, 16))
+        self.use_list_btn.setIconSize(QSize(16, 16))
         self.use_list_btn.setEnabled(False)
         self.use_list_btn.clicked.connect(self._emit_list)
         bottom_row.addWidget(self.use_list_btn)
@@ -725,9 +732,9 @@ class RecipientsScreen(QWidget):
               self.table.setItem(row, 3, QTableWidgetItem(r.last_name))
               self.table.setItem(row, 4, QTableWidgetItem(r.company))
 
-              status_item = QTableWidgetItem("✓" if is_valid else "✗")
+              status_item = QTableWidgetItem("Да" if is_valid else "Нет")
               status_item.setForeground(
-                  QColor("#22c55e") if is_valid else QColor("#ef4444")
+                  QColor("#10B981") if is_valid else QColor("#EF4444")
               )
               self.table.setItem(row, 5, status_item)
 

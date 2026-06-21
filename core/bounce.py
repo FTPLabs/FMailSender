@@ -219,13 +219,23 @@ class BounceMonitor:
                     return set()
                 return set(data)
             except Exception:
-                pass
+                # Файл повреждён/нечитаем: НЕ затираем его пустым блэклистом —
+                # сохраняем копию для ручного восстановления, чтобы add_to_blacklist
+                # позже не перезаписал реальные данные.
+                logger.warning("blacklist.json повреждён — сохраняю копию .corrupt")
+                try:
+                    os.replace(self.blacklist_path,
+                               self.blacklist_path.with_name(self.blacklist_path.name + ".corrupt"))
+                except Exception:
+                    pass
         return set()
 
     def _save_blacklist(self) -> None:
         self.blacklist_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.blacklist_path, "w", encoding="utf-8") as f:
+        tmp = self.blacklist_path.with_name(self.blacklist_path.name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(list(self._blacklist), f, ensure_ascii=False, indent=2)
+        os.replace(tmp, self.blacklist_path)
 
     def _load_bounces(self) -> List[BounceRecord]:
         if self.bounce_log_path.exists():
@@ -238,8 +248,10 @@ class BounceMonitor:
 
     def _save_bounces(self) -> None:
         self.bounce_log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.bounce_log_path, "w", encoding="utf-8") as f:
+        tmp = self.bounce_log_path.with_name(self.bounce_log_path.name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump([r.to_dict() for r in self._bounce_records], f, ensure_ascii=False, indent=2)
+        os.replace(tmp, self.bounce_log_path)
 
     def is_blacklisted(self, email_addr: str) -> bool:
         return email_addr.lower() in self._blacklist
