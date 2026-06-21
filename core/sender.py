@@ -167,53 +167,16 @@ _SMTP_CONFIGS: dict[str, dict] = {
     # Google Workspace custom domains — FIX: iejesusmirey.com / buzzmaster.market = G Suite → smtp.gmail.com
     "iejesusmirey.com":  {"host": "smtp.gmail.com",        "port": 465, "use_ssl": True,  "use_tls": False},
     "buzzmaster.market": {"host": "smtp.gmail.com",        "port": 465, "use_ssl": True,  "use_tls": False},
-
-      # Web.de (Germany) — FIX v2.9.4: добавлен отсутствующий провайдер
-      "web.de":            {"host": "smtp.web.de",           "port": 587, "use_ssl": False, "use_tls": True,
-                            "imap_host": "imap.web.de",      "imap_port": 993, "imap_ssl": True},
-      # Yandex
-      "yandex.ru":         {"host": "smtp.yandex.ru",        "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.yandex.ru",   "imap_port": 993, "imap_ssl": True},
-      "ya.ru":             {"host": "smtp.yandex.ru",        "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.yandex.ru",   "imap_port": 993, "imap_ssl": True},
-      "yandex.com":        {"host": "smtp.yandex.com",       "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.yandex.com",  "imap_port": 993, "imap_ssl": True},
-      "yandex.kz":         {"host": "smtp.yandex.kz",        "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.yandex.kz",   "imap_port": 993, "imap_ssl": True},
-      # Zoho
-      "zoho.com":          {"host": "smtp.zoho.com",         "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.zoho.com",    "imap_port": 993, "imap_ssl": True},
-      "zohomail.com":      {"host": "smtp.zoho.com",         "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.zoho.com",    "imap_port": 993, "imap_ssl": True},
       # Fastmail
-      "fastmail.com":      {"host": "smtp.fastmail.com",     "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.fastmail.com","imap_port": 993, "imap_ssl": True},
-      "fastmail.fm":       {"host": "smtp.fastmail.com",     "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.fastmail.com","imap_port": 993, "imap_ssl": True},
-      # Yahoo international
-      "yahoo.de":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
-      "yahoo.co.uk":       {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
-      "yahoo.fr":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
-      "yahoo.es":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
-      "yahoo.it":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
-      "yahoo.ca":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
-      "yahoo.com.au":      {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "imap.mail.yahoo.com","imap_port": 993, "imap_ssl": True},
-      # T-Online (Telekom Germany)
-      "t-online.de":       {"host": "securesmtp.t-online.de","port": 465, "use_ssl": True,  "use_tls": False,
-                            "imap_host": "secureimap.t-online.de","imap_port": 993, "imap_ssl": True},
-      # Tutanota
-      "tutanota.com":      {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True,
-                            "imap_host": "mail.tutanota.com","imap_port": 993, "imap_ssl": True},
-      "tutamail.com":      {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True,
-                            "imap_host": "mail.tutanota.com","imap_port": 993, "imap_ssl": True},
-  }
+      "fastmail.com":      {"host": "smtp.fastmail.com",     "port": 465, "use_ssl": True,  "use_tls": False},
+      "fastmail.fm":       {"host": "smtp.fastmail.com",     "port": 465, "use_ssl": True,  "use_tls": False},
+      # Tutanota / Tuta
+      "tutanota.com":      {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True},
+      "tutamail.com":      {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True},
+      "tuta.io":           {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True},
+      # Yahoo — дополнительные TLD
+      "yahoo.ca":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+}
 
 # Load extended SMTP providers (poczta.fm, sapo.pt, bigpond, telenet, comcast +80 more)
 # Per smtp-configs-extended skill — update at module init so all domains are available
@@ -944,9 +907,22 @@ class SendingEngine:
                         await smtp.ehlo()  # повторный EHLO после STARTTLS — обязателен по RFC 3207
                     except Exception as _exc:
                         logging.getLogger("sender").debug("Пропущено исключение: %s", _exc)
-                await smtp.login(account.email, account.password)
-                await smtp.send_message(msg)
-                return SendResult(
+                # OAuth2/XOAUTH2 для Microsoft (Outlook/Hotmail/Live)
+                  _domain_async = account.email.split("@")[-1].lower() if "@" in account.email else ""
+                  _ms_domains_async = frozenset({
+                      "outlook.com", "hotmail.com", "live.com", "msn.com", "windowslive.com",
+                      "outlook.de", "hotmail.de", "live.de", "outlook.fr", "hotmail.fr",
+                      "live.fr", "outlook.ru", "hotmail.ru", "live.ru", "outlook.co.uk",
+                      "hotmail.co.uk", "outlook.es", "hotmail.es", "outlook.it", "hotmail.it",
+                  })
+                  _oauth = getattr(account, "oauth_token", "")
+                  if _oauth and _domain_async in _ms_domains_async:
+                      # Для Outlook OAuth2: используем токен как пароль через LOGIN
+                      await smtp.login(account.email, _oauth)
+                  else:
+                      await smtp.login(account.email, account.password)
+                  await smtp.send_message(msg)
+                  return SendResult(
                     recipient_email=recipient.email,
                     success=True,
                     account_used=account.email,
