@@ -778,9 +778,9 @@ class AccountsScreen(QWidget):
         layout.addLayout(ctx_bar)
 
         # ── Таблица ───────────────────────────────────────────────────────
-        self.table = QTableWidget(0, 8)
+        self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels([
-            "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Прокси", "Активен",
+            "Email", "Хост", "Порт", "Дн. лимит", "Ч. лимит", "Статус", "Прокси", "Активен", "Отправлено",
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -815,8 +815,18 @@ class AccountsScreen(QWidget):
           self.table.setItem(row, 2, QTableWidgetItem(str(acc.port)))
           self.table.setItem(row, 3, QTableWidgetItem(str(acc.daily_limit)))
           self.table.setItem(row, 4, QTableWidgetItem(str(acc.hourly_limit)))
-          status_item = QTableWidgetItem("⏳ Ожидание...")
-          status_item.setForeground(QColor(Colors.TEXT_MUTED))
+          # Статус: last_test_ok если проверяли, иначе «Не проверено»
+            _ltok = getattr(acc, 'last_test_ok', None)
+            if _ltok is True:
+                status_item = QTableWidgetItem("✓ OK")
+                status_item.setForeground(QColor(Colors.SUCCESS))
+            elif _ltok is False:
+                status_item = QTableWidgetItem("✗ Ошибка")
+                status_item.setForeground(QColor(Colors.ERROR))
+            else:
+                status_item = QTableWidgetItem("❓ Не проверено")
+                status_item.setForeground(QColor(Colors.TEXT_MUTED))
+          # (setForeground already set above)
           self.table.setItem(row, 5, status_item)
 
           # Прокси + флаг страны (обновляется CountryWorker после SMTP OK)
@@ -834,6 +844,15 @@ class AccountsScreen(QWidget):
               QColor(Colors.SUCCESS) if acc.is_active else QColor(Colors.ERROR)
           )
           self.table.setItem(row, 7, active_item)
+            # Колонка 8: статистика отправленных писем
+            _sent = getattr(acc, 'daily_sent', None)
+            if _sent is None:
+                _sent = getattr(acc, 'sent_today', 0)
+            _sent_txt = f"{_sent or 0}/{acc.daily_limit}"
+            sent_item = QTableWidgetItem(_sent_txt)
+            sent_item.setForeground(QColor(Colors.TEXT_MUTED))
+            sent_item.setToolTip(f"Отправлено сегодня: {_sent or 0} из {acc.daily_limit}")
+            self.table.setItem(row, 8, sent_item)
       active_count = sum(1 for a in self._accounts if a.is_active)
       self.status_label.setText(f"Аккаунтов: {len(self._accounts)} (активных: {active_count})")
 
@@ -990,6 +1009,13 @@ class AccountsScreen(QWidget):
                       f"✓ {ok_cnt} рабочих | "
                       f"✗ {total - ok_cnt} с ошибками"
                   )
+                    # Сортировка: валидные аккаунты наверх, невалидные вниз
+                    self._accounts.sort(
+                        key=lambda a: (0 if getattr(a, 'last_test_ok', None) is True else 1,
+                                       a.email)
+                    )
+                    save_accounts(self._accounts)
+                    self._refresh_table()
 
 
           w.result_ready.connect(on_result)
