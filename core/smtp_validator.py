@@ -399,8 +399,8 @@ def _check_dnsbl(host: str) -> bool:
                 return True
             except socket.gaierror:
                 pass
-    except Exception:
-        pass
+    except Exception as _smtp_e:
+        import logging as _log; _log.getLogger("smtp_validator").warning("dnsbl_check: неожиданная ошибка: %s", _smtp_e)
     return False
 
 
@@ -604,8 +604,8 @@ class SmtpValidator:
                 if progress_cb:
                     try:
                         progress_cb(done, total, r)
-                    except Exception:
-                        pass
+                    except Exception as _cb_e:
+                        import logging as _log; _log.getLogger("smtp_validator").debug("progress_cb exception (ignored): %s", _cb_e)
                 if cancel_event and cancel_event.is_set():
                     break
 

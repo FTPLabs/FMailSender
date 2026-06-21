@@ -46,8 +46,8 @@ class JsonFileStorage(BaseStorage):
         if self._path.exists():
             try:
                 return json.loads(self._path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.warning("JsonFileStorage._load: ошибка чтения %s: %s", self._path, _e)
         # Восстановление из .tmp (остаётся при краше в _dump_sync)
         _tmp = self._path.with_suffix(".tmp")
         if _tmp.exists():
@@ -55,8 +55,8 @@ class JsonFileStorage(BaseStorage):
                 _data = json.loads(_tmp.read_text(encoding="utf-8"))
                 _tmp.replace(self._path)  # восстанавливаем основной файл
                 return _data
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.warning("JsonFileStorage._load: ошибка восстановления из .tmp: %s", _e)
         return {}
 
     def _dump_sync(self, snapshot: dict) -> None:
@@ -685,8 +685,8 @@ async def cb_captcha(query: CallbackQuery, state: FSMContext):
                 f"Найди и нажми на этот смайлик: <b>{correct}</b>",
                 reply_markup=kb_captcha(emojis, correct),
             )
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("captcha_send: ошибка отправки сообщения: %s", _e)
 
 
 @dp.callback_query(F.data == "check_sub")
@@ -700,8 +700,8 @@ async def cb_check_subscription(query: CallbackQuery):
         await query.answer("❌ Вы ещё не вступили в канал! Нажмите кнопку выше.", show_alert=True)
         try:
             await query.message.edit_reply_markup(reply_markup=kb_subscription(invite))
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("check_subscription: не удалось обновить markup: %s", _e)
         return
 
     # Шаг 3: подписка есть — проверяем принятие условий
@@ -1474,9 +1474,9 @@ async def cb_check_pay(query: CallbackQuery, state: FSMContext):
     # Atomic + idempotent: если уже обработан — вернёт существующий ключ
     license_data = await db.create_license_for_payment(
         invoice_id=invoice_id,
-        plan=payment["plan"],
+        plan=payment.get("plan", ""),
         hwid=payment.get("hwid", ""),
-        telegram_id=payment["telegram_id"],
+        telegram_id=payment.get("telegram_id", 0),
     )
     await state.clear()
     text = (
@@ -1661,7 +1661,7 @@ async def msg_admin_note(message: Message, state: FSMContext):
         note=note,
     )
     plan = PLANS.get(data["plan_id"], {})
-    key = license_data["key"]
+    key = license_data.get("key", "")
     await message.answer(
         f"✅ <b>Ключ создан!</b>\n\n"
         f"📦 {plan.get('name', data['plan_id'])} | до {license_data['expires_at'][:10]}\n"
@@ -1978,8 +1978,8 @@ async def _broadcast_task(admin_id: int, user_ids: list, text: str) -> None:
     try:
         await bot.send_message(admin_id,
             f"📢 <b>Рассылка завершена</b>\n✅ Отправлено: {sent}\n❌ Ошибок: {failed}")
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("broadcast_end_notify: не удалось отправить отчёт admin=%s: %s", admin_id, _e)
 
 
 # ─── Admin Command ────────────────────────────────────────────────────────────
@@ -2121,7 +2121,7 @@ async def msg_mod_note(message: Message, state: FSMContext):
         note=note,
     )
     plan = PLANS.get(data["plan_id"], {})
-    key = license_data["key"]
+    key = license_data.get("key", "")
     await message.answer(
         f"✅ <b>Ключ создан!</b>\n\n"
         f"📦 {plan.get('name', data['plan_id'])} | до {license_data['expires_at'][:10]}\n"
@@ -2418,7 +2418,7 @@ async def activate(req: ActivateRequest):
         await db.bind_hwid_to_license(key, hwid)
 
     payload = {
-        "plan": lic["plan"],
+        "plan": lic.get("plan", ""),
         "max_threads": lic["max_threads"],
         "max_recipients": lic["max_recipients"],
         "exp": int(expires_at.timestamp()),
@@ -3056,10 +3056,10 @@ async def _poll_pending_payments():
                             invoice_id=invoice_id,
                             plan=payment["plan"],
                             hwid=payment.get("hwid", ""),
-                            telegram_id=payment["telegram_id"],
+                            telegram_id=payment.get("telegram_id", 0),
                         )
-                        user_id = payment["telegram_id"]
-                        plan_name = PLANS.get(payment["plan"], {}).get("name", payment["plan"])
+                        user_id = payment.get("telegram_id", 0)
+                        plan_name = PLANS.get(payment.get("plan", ""), {}).get("name", payment.get("plan", ""))
                         try:
                             await bot.send_message(
                                 user_id,
@@ -3088,7 +3088,8 @@ async def main():
     # Загружаем модераторов из БД в in-memory set
     _db_mods = await db.get_all_moderators()
     for _m in _db_mods:
-        _moderator_ids.add(_m["telegram_id"])
+        if _m.get("telegram_id"):
+            _moderator_ids.add(_m["telegram_id"])
     logger.info("Loaded moderators from DB: %d (env: %d)", len(_db_mods), len(MODERATOR_IDS))
     # FIX: загружаем капчу и условия из БД — in-memory кэш переживёт перезапуск
     _cap, _terms = await get_all_passed_users()
