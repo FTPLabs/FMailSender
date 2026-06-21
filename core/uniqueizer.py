@@ -310,48 +310,48 @@ def technique_hidden_text(html: str, count: int = 3) -> str:
 # ============================================================
 # Technique 13: Font-family stack shuffle
 # ============================================================
-  def technique_font_stack(html: str) -> str:
-      """Перемешивает порядок шрифтов в font-family, сохраняя quoted-имена с пробелами."""
-      def _shuffle(m: re.Match) -> str:
-          raw = m.group(1).strip().rstrip(';')
-          # Парсим шрифты с учётом кавычек
-          fonts: list[str] = []
-          buf = ""
-          in_quote: str | None = None
-          for ch in raw:
-              if ch in ('"', "'") and not in_quote:
-                  in_quote = ch
-                  buf += ch
-              elif in_quote and ch == in_quote:
-                  in_quote = None
-                  buf += ch
-              elif ch == ',' and not in_quote:
-                  f = buf.strip()
-                  if f:
-                      fonts.append(f)
-                  buf = ""
-              else:
-                  buf += ch
-          if buf.strip():
-              fonts.append(buf.strip())
+def technique_font_stack(html: str) -> str:
+    """Перемешивает порядок шрифтов в font-family, сохраняя quoted-имена с пробелами."""
+    def _shuffle(m: re.Match) -> str:
+        raw = m.group(1).strip().rstrip(';')
+        # Парсим шрифты с учётом кавычек
+        fonts: list[str] = []
+        buf = ""
+        in_quote: str | None = None
+        for ch in raw:
+            if ch in ('"', "'") and not in_quote:
+                in_quote = ch
+                buf += ch
+            elif in_quote and ch == in_quote:
+                in_quote = None
+                buf += ch
+            elif ch == ',' and not in_quote:
+                f = buf.strip()
+                if f:
+                    fonts.append(f)
+                buf = ""
+            else:
+                buf += ch
+        if buf.strip():
+            fonts.append(buf.strip())
 
-          if len(fonts) <= 2:
-              return m.group(0)
+        if len(fonts) <= 2:
+            return m.group(0)
 
-          generic = fonts[-1]
-          specific = fonts[:-1]
-          random.shuffle(specific)
-          # Восстанавливаем кавычки для имён с пробелами
-          result = []
-          for f in specific + [generic]:
-              f_inner = f.strip().strip("'\"")
-              if ' ' in f_inner and not f.strip().startswith(("'", '"')):
-                  result.append(f"'{f_inner}'")
-              else:
-                  result.append(f)
-          return "font-family: " + ", ".join(result)
+        generic = fonts[-1]
+        specific = fonts[:-1]
+        random.shuffle(specific)
+        # Восстанавливаем кавычки для имён с пробелами
+        result = []
+        for f in specific + [generic]:
+            f_inner = f.strip().strip("'\"")
+            if ' ' in f_inner and not f.strip().startswith(("'", '"')):
+                result.append(f"'{f_inner}'")
+            else:
+                result.append(f)
+        return "font-family: " + ", ".join(result)
 
-      return re.sub(r"font-family:\s*([^;{}]+)", _shuffle, html)
+    return re.sub(r"font-family:\s*([^;{}]+)", _shuffle, html)
 
 
 # ============================================================
