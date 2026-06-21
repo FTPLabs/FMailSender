@@ -354,26 +354,6 @@ class FormattingToolbar(QFrame):
         self._vars_combo.blockSignals(False)
   
 
-class SpamCheckWorker(QThread):
-    """Воркер для асинхронной проверки спам-балла в отдельном потоке."""
-    finished = pyqtSignal(object)
-    error = pyqtSignal(str)
-
-    def __init__(self, subject: str, html: str, parent=None):
-        super().__init__(parent)
-        self.subject = subject
-        self.html = html
-
-    def run(self):
-        try:
-            from core.spam_checker import SpamChecker
-            checker = SpamChecker()
-            result = checker.check(self.subject, self.html)
-            self.finished.emit(result)
-        except Exception as e:
-            self.error.emit(str(e))
-
-
 class ComposeScreen(QWidget):
     """Экран создания письма."""
 
@@ -528,7 +508,7 @@ class ComposeScreen(QWidget):
           self.uniqueize_btn = QPushButton("Уникализировать")
           self.uniqueize_btn.setObjectName("btn_secondary")
           self.uniqueize_btn.setIcon(icons.make_icon(icons.ZAP, 16))
-          self.uniqueize_btn.setToolTip("16 техник уникализации для обхода спам-фильтров")
+          self.uniqueize_btn.setToolTip("Уникализация для «Входящих»: spintax, безопасные отпечатки, ИИ-перефразировка")
           self.uniqueize_btn.clicked.connect(self._uniqueize)
           bottom_row.addWidget(self.uniqueize_btn)
 
@@ -559,33 +539,35 @@ class ComposeScreen(QWidget):
             self._update_preview()
 
     def _update_preview(self):
-        """Обновляет HTML-превью."""
+        """Обновляет HTML-превью так, чтобы он совпадал с браузером/почтовым клиентом."""
         html = self.html_editor.toPlainText()
         if not html.strip():
             html = self.rich_editor.toHtml()
 
-        # Оборачиваем в базовый HTML если нет тегов html/body
-        if "<html" not in html.lower():
-            html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-body {{ font-family: Arial, sans-serif; font-size: 14px; 
-       line-height: 1.6; color: #333; margin: 20px; }}
-a {{ color: #6366F1; }}
-</style>
-</head>
-<body>{html}</body>
-</html>"""
+        # Полный документ оставляем как есть (точный рендер). Фрагмент — оборачиваем
+        # в минимальную корректную обёртку: сброс отступов, charset+viewport,
+        # адаптивные картинки. Никакого лишнего body-margin, который «кривил» вид.
+        low = html.lower()
+        is_full_doc = ("<html" in low) or ("<!doctype" in low) or ("<body" in low)
+        if not is_full_doc:
+            html = (
+                "<!DOCTYPE html>\n<html><head>"
+                '<meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width, initial-scale=1">'
+                "<style>"
+                "html,body{margin:0;padding:0;background:#ffffff;}"
+                "body{font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;"
+                "font-size:14px;line-height:1.5;color:#1a1a1a;-webkit-font-smoothing:antialiased;}"
+                "img{max-width:100%;height:auto;}"
+                "a{color:#6366F1;}"
+                "</style></head><body>" + html + "</body></html>"
+            )
 
         if self.preview is not None:
             if _HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-                # setHtml с https base URL -> браузер загружает внешние ресурсы (картинки с CDN, шрифты).
-                # Это надёжнее temp-файла: нет race-condition при удалении и нет ограничений file://
-                # FIX: https base URL позволяет браузеру загружать внешние изображения (CDN, логотипы)
-                  # about:blank блокировал external resources даже при LocalContentCanAccessRemoteUrls=True
-                  self.preview.setHtml(html, QUrl("https://fmail.shop/"))
+                # https base URL -> браузер грузит внешние ресурсы (картинки CDN, шрифты);
+                # about:blank блокирует их даже при LocalContentCanAccessRemoteUrls=True.
+                self.preview.setHtml(html, QUrl("https://fmail.shop/"))
             else:
                 self.preview.setHtml(html)
     def _add_attachment(self):
@@ -616,168 +598,6 @@ a {{ color: #6366F1; }}
         letter = chr(ord('A') + len(self._ab_variants) - 1)
         # ab_tabs removed — A/B variant UI not yet implemented
 
-    def _check_spam(self):
-        """Run spam check in background thread to avoid UI freeze."""
-        self.spam_check_btn.setEnabled(False)
-        self.spam_check_btn.setText("⏳ Проверка...")
-        subject = self.subject_input.text().strip()
-        html = self.html_editor.toPlainText().strip() or self.rich_editor.toHtml()
-        if not subject and not html:
-            self.spam_check_btn.setEnabled(True)
-            self.spam_check_btn.setText("Проверить спам-балл")
-            QMessageBox.warning(self, "Предупреждение", "Заполните тему и тело письма перед проверкой.")
-            return
-        worker = SpamCheckWorker(subject, html, self)
-        worker.finished.connect(self._on_spam_result)
-        worker.error.connect(self._on_spam_error)
-        worker.finished.connect(worker.deleteLater)
-        worker.error.connect(worker.deleteLater)
-        self._spam_worker = worker
-        worker.start()
-
-    def _on_spam_result(self, result):
-        self.spam_check_btn.setEnabled(True)
-        self.spam_check_btn.setText("Проверить спам-балл")
-        self._show_spam_dialog_ai(result)
-
-    def _show_spam_dialog_ai(self, result):
-        score = getattr(result, 'score', 0)
-        verdict = getattr(result, 'verdict', '\u2014')
-        issues = getattr(result, 'issues', [])
-        warnings = getattr(result, 'warnings', [])
-        passed = getattr(result, 'passed', [])
-
-        if score < 20:
-            grade_color = "#22C55E"
-        elif score < 50:
-            grade_color = "#F59E0B"
-        else:
-            grade_color = "#EF4444"
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("\u0410\u043d\u0430\u043b\u0438\u0437 \u0441\u043f\u0430\u043c-\u0431\u0430\u043b\u043b\u0430")
-        dlg.setMinimumWidth(520)
-        dlg.setMinimumHeight(460)
-        lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
-        lay.setSpacing(Spacing.MD)
-
-        score_lbl = QLabel(f"<span style='font-size:18px;font-weight:bold;color:{grade_color}'>\u0421\u043f\u0430\u043c-\u0431\u0430\u043b\u043b: {score}/100</span> &nbsp; {verdict}")
-        score_lbl.setTextFormat(Qt.TextFormat.RichText)
-        lay.addWidget(score_lbl)
-
-        bar = QProgressBar()
-        bar.setRange(0, 100)
-        bar.setValue(score)
-        bar.setFixedHeight(10)
-        bar.setStyleSheet(f"QProgressBar::chunk{{background:{grade_color};border-radius:4px;}}QProgressBar{{border-radius:4px;background:rgba(255,255,255,0.08);}}")
-        lay.addWidget(bar)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFixedHeight(220)
-        inner = QWidget()
-        inner_lay = QVBoxLayout(inner)
-        inner_lay.setSpacing(4)
-        if issues:
-            inner_lay.addWidget(QLabel(f"<b style='color:{Colors.ERROR}'>Проблемы:</b>"))
-            for i in issues:
-                l = QLabel(f"  \u2022 {i}")
-                l.setWordWrap(True)
-                l.setStyleSheet(f"color: {Colors.ERROR};")
-                inner_lay.addWidget(l)
-        if warnings:
-            inner_lay.addWidget(QLabel(f"<b style='color:{Colors.WARNING}'>Предупреждения:</b>"))
-            for w in warnings:
-                l = QLabel(f"  \u2022 {w}")
-                l.setWordWrap(True)
-                l.setStyleSheet(f"color: {Colors.WARNING};")
-                inner_lay.addWidget(l)
-        if passed:
-            inner_lay.addWidget(QLabel(f"<b style='color:{Colors.SUCCESS}'>Пройдено:</b>"))
-            for p in passed[:6]:
-                l = QLabel(f"  \u2022 {p}")
-                l.setWordWrap(True)
-                inner_lay.addWidget(l)
-        inner_lay.addStretch()
-        scroll.setWidget(inner)
-        lay.addWidget(scroll)
-
-        btn_row = QHBoxLayout()
-        ai_btn = QPushButton("Исправить с ИИ")
-        ai_btn.setObjectName("btn_primary")
-        ai_btn.setIcon(icons.make_icon(icons.ROCKET, 16))
-        close_btn = QPushButton("\u0417\u0430\u043a\u0440\u044b\u0442\u044c")
-        close_btn.setObjectName("btn_secondary")
-        close_btn.clicked.connect(dlg.accept)
-        btn_row.addWidget(ai_btn)
-        btn_row.addWidget(close_btn)
-        lay.addLayout(btn_row)
-
-        def _run_ai_fix():
-            from core.ai_fixer import AiSpamFixer
-            from PyQt6.QtWidgets import QInputDialog
-            fixer = AiSpamFixer()
-            if not fixer.has_key:
-                key, ok = QInputDialog.getText(
-                    dlg, "OpenAI API Key",
-                    "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 OpenAI API \u043a\u043b\u044e\u0447 (sk-...):",
-                    QLineEdit.EchoMode.Password,
-                )
-                if not ok or not key.strip():
-                    return
-                import os
-                os.environ["OPENAI_API_KEY"] = key.strip()
-                fixer = AiSpamFixer(api_key=key.strip())
-
-            ai_btn.setEnabled(False)
-            ai_btn.setText("Исправляю...")
-
-            class _AiFixWorker(QThread):
-                done = pyqtSignal(object)
-                err = pyqtSignal(str)
-                def __init__(self, fixer, subj, html, iss, warns):
-                    super().__init__()
-                    self._f = fixer; self._s = subj; self._h = html
-                    self._i = iss; self._w = warns
-                def run(self):
-                    try:
-                        self.done.emit(self._f.fix_email(self._s, self._h, self._i, self._w))
-                    except Exception as e:
-                        self.err.emit(str(e))
-
-            worker = _AiFixWorker(
-                fixer,
-                self.subject_input.text(),
-                self.html_editor.toPlainText() or self.rich_editor.toHtml(),
-                issues, warnings,
-            )
-            def on_done(fix_result):
-                ai_btn.setEnabled(True)
-                ai_btn.setText("Исправить с ИИ")
-                reply = QMessageBox.question(
-                    dlg,
-                    "\u0418\u0418-\u0438\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0433\u043e\u0442\u043e\u0432\u043e",
-                    f"\u0418\u0418 \u0438\u0441\u043f\u0440\u0430\u0432\u0438\u043b \u043f\u0438\u0441\u044c\u043c\u043e.\n\n{fix_result.explanation}\n\n\u041f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    self.subject_input.setText(fix_result.subject)
-                    self.html_editor.setPlainText(fix_result.body_html)
-                    dlg.accept()
-            def on_err(msg):
-                ai_btn.setEnabled(True)
-                ai_btn.setText("Исправить с ИИ")
-                QMessageBox.warning(dlg, "\u041e\u0448\u0438\u0431\u043a\u0430 \u0418\u0418", msg)
-            worker.done.connect(on_done)
-            worker.err.connect(on_err)
-            worker.done.connect(worker.deleteLater)
-            worker.err.connect(worker.deleteLater)
-            self._ai_fix_worker = worker
-            worker.start()
-
-        ai_btn.clicked.connect(_run_ai_fix)
-        dlg.exec()
     def _uniqueize(self):
         """Диалог выбора техник уникализации + применение."""
         from core.uniqueizer import ALL_TECHNIQUES, TECHNIQUE_LABELS, DEFAULT_TECHNIQUES, apply_all, ai_rephrase
@@ -850,11 +670,12 @@ a {{ color: #6366F1; }}
         ai_fl = QVBoxLayout(ai_frame)
         ai_fl.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
         ai_fl.setSpacing(Spacing.XS)
-        ai_fl.addWidget(QLabel("<b>AI-перефразировка (бесплатно)</b>"))
+        ai_fl.addWidget(QLabel("<b>ИИ-перефразировка текста</b>"))
         ai_note = QLabel(
-            "Groq llama3 (14400 req/день): console.groq.com\n"
-            "Together.ai ($25 бесплатно): api.together.ai\n"
-            "OpenRouter (free models): openrouter.ai"
+            "Groq (бесплатно, быстрый): console.groq.com\n"
+            "Together.ai ($25 на старте): api.together.ai\n"
+            "OpenRouter (free models): openrouter.ai\n"
+            "OpenAI gpt-4o-mini (платно, лучшее качество): platform.openai.com"
         )
         ai_note.setObjectName("label_muted")
         ai_note.setWordWrap(True)
@@ -862,12 +683,12 @@ a {{ color: #6366F1; }}
         ai_row = QHBoxLayout()
         from PyQt6.QtWidgets import QComboBox as _QCB
         ai_prov = _QCB()
-        ai_prov.addItems(["groq", "together", "openrouter"])
+        ai_prov.addItems(["groq", "together", "openrouter", "openai"])
         ai_prov.setFixedWidth(120)
         ai_row.addWidget(QLabel("Провайдер:"))
         ai_row.addWidget(ai_prov)
         ai_key = QLineEdit()
-        ai_key.setPlaceholderText("API ключ (gsk_... / sk-or-...)")
+        ai_key.setPlaceholderText("API ключ (gsk_... / sk-or-... / sk-...)")
         ai_key.setEchoMode(QLineEdit.EchoMode.Password)
         ai_row.addWidget(ai_key, 1)
         ai_fl.addLayout(ai_row)
@@ -1162,100 +983,6 @@ a {{ color: #6366F1; }}
 
         check_btn.clicked.connect(_check)
         dlg.exec()
-
-    def _on_spam_error(self, error: str):
-        self.spam_check_btn.setEnabled(True)
-        self.spam_check_btn.setText("Проверить спам-балл")
-        QMessageBox.warning(self, "Ошибка проверки", f"Не удалось проверить:\n{error}")
-
-
-    def _show_spam_dialog(self, result):
-      """Показывает диалог результата проверки спам-балла."""
-      from PyQt6.QtWidgets import (
-          QDialog, QLabel, QVBoxLayout, QProgressBar,
-          QHBoxLayout, QDialogButtonBox, QScrollArea, QWidget,
-      )
-
-      # FIX: grade_color не всегда присутствует в SpamCheckResult
-      score = getattr(result, "score", 0)
-      grade = getattr(result, "grade", "")
-      if hasattr(result, "grade_color"):
-          grade_color = result.grade_color
-      elif score < 30:
-          grade_color = "#22C55E"
-      elif score < 60:
-          grade_color = "#F59E0B"
-      else:
-          grade_color = "#EF4444"
-
-      dialog = QDialog(self)
-      dialog.setWindowTitle("Проверка спам-балла")
-      dialog.setMinimumWidth(480)
-      dialog.setMinimumHeight(400)
-      layout = QVBoxLayout(dialog)
-      layout.setSpacing(Spacing.LG)
-      layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
-
-      # Общий балл
-      score_label = QLabel(f"Спам-балл: {score}/100" + (f" — {grade}" if grade else ""))
-      score_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {grade_color};")
-      layout.addWidget(score_label)
-
-      bar = QProgressBar()
-      bar.setRange(0, 100)
-      bar.setValue(score)
-      bar.setStyleSheet(f"QProgressBar::chunk {{ background-color: {grade_color}; }}")
-      layout.addWidget(bar)
-
-      # Прокручиваемая область с деталями
-      scroll = QScrollArea()
-      scroll.setWidgetResizable(True)
-      inner = QWidget()
-      inner_layout = QVBoxLayout(inner)
-      inner_layout.setSpacing(Spacing.SM)
-
-      # Спам-слова из details (SpamCheckResult не имеет поля categories)
-      details = getattr(result, "details", {})
-      spam_words_found = details.get("spam_words_found", [])
-      if spam_words_found:
-          row = QHBoxLayout()
-          row.addWidget(QLabel("Найдено спам-слов:"))
-          row.addStretch()
-          row.addWidget(QLabel(str(len(spam_words_found))))
-          inner_layout.addLayout(row)
-
-      # Проблемы
-      if result.issues:
-          issues_label = QLabel("Проблемы:")
-          issues_label.setObjectName("label_subtitle")
-          inner_layout.addWidget(issues_label)
-          for issue in result.issues[:5]:
-              lbl = QLabel(f"• {issue}")
-              lbl.setStyleSheet(f"color: {Colors.ERROR};")
-              lbl.setWordWrap(True)
-              inner_layout.addWidget(lbl)
-
-      # Рекомендации
-      if result.warnings:
-          sugg_label = QLabel("Рекомендации:")
-          sugg_label.setObjectName("label_subtitle")
-          inner_layout.addWidget(sugg_label)
-          for s in result.warnings[:3]:
-              lbl = QLabel(f"• {s}")
-              lbl.setStyleSheet(f"color: {Colors.WARNING};")
-              lbl.setWordWrap(True)
-              inner_layout.addWidget(lbl)
-
-      inner_layout.addStretch()
-      scroll.setWidget(inner)
-      layout.addWidget(scroll, 1)
-
-      close_btn = QPushButton("Закрыть")
-      close_btn.setObjectName("btn_primary")
-      close_btn.clicked.connect(dialog.accept)
-      layout.addWidget(close_btn)
-
-      dialog.exec()
 
     def _emit_template(self):
       from core.sender import EmailTemplate

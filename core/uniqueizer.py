@@ -1,7 +1,26 @@
 """
-FMailSender Email Uniqueizer v1.0.0
-16 техник уникализации письма для обхода спам-фильтров без ИИ.
-Также поддерживает бесплатные ИИ-API: Groq, Together.ai, OpenRouter (free models).
+FMailSender Email Uniqueizer v2.0.0 — HTML-safe, deliverability-positive.
+
+Принцип: уникализировать письмо так, чтобы оно ПОПАДАЛО ВО «ВХОДЯЩИЕ», а не в спам.
+
+Почему переписано (v1 -> v2):
+  Старые техники (гомоглифы латиница/кириллица, zero-width символы, скрытый
+  бело-на-белом текст, unicode variation selectors, случайные HTML-сущности,
+  невидимые <span>) — это КЛАССИЧЕСКИЕ СПАМ-СИГНАЛЫ. Спам-фильтры (SpamAssassin,
+  Gmail, Outlook) детектируют их и понижают репутацию письма. Плюс наивная
+  regex-замена `(?<=>)[^<]+(?=<)` ЛОМАЛА HTML: цепляла текст внутри <script>/
+  <style>, путала атрибуты, а добавление data-* в конец тега ломало self-closing
+  теги (<img .../>).
+
+v2 делает две вещи правильно:
+  1. БЕЗОПАСНОСТЬ HTML: все текстовые правки идут ТОЛЬКО по текстовым узлам через
+     токенайзер (теги/комментарии/script/style/doctype не трогаются вообще).
+     Структура тегов остаётся инвариантной (см. verify_structure).
+  2. ДОСТАВЛЯЕМОСТЬ: оставлены только безопасные приёмы вариативности —
+     spintax {вариант1|вариант2} (реальная замена текста), доброкачественные
+     fingerprint-атрибуты/комментарии, микро-вариации CSS, перестановка
+     font-family, &nbsp; после пунктуации. Опционально — tracking pixel (выкл).
+     Для глубокой переформулировки — AI (ai_rephrase / OpenAI / free-провайдеры).
 """
 from __future__ import annotations
 
@@ -14,51 +33,10 @@ import urllib.request
 import uuid
 from typing import Dict, List, Optional, Tuple
 
-# Homoglyph tables: Latin -> Cyrillic look-alikes
-_L2C: Dict[str, str] = {
-    'a': '\u0430', 'e': '\u0435', 'o': '\u043e', 'p': '\u0440',
-    'c': '\u0441', 'x': '\u0445', 'A': '\u0410', 'B': '\u0412',
-    'C': '\u0421', 'E': '\u0415', 'H': '\u041d', 'K': '\u041a',
-    'M': '\u041c', 'O': '\u041e', 'P': '\u0420', 'T': '\u0422',
-    'X': '\u0425', 'Y': '\u0423',
-}
 
-# Zero-width characters
-_ZWC = [
-    '\u200b',  # Zero Width Space
-    '\u200c',  # Zero Width Non-Joiner
-    '\u200d',  # Zero Width Joiner
-    '\u2060',  # Word Joiner
-    '\ufeff',  # Zero Width No-Break Space
-    '\u00ad',  # Soft Hyphen
-]
-
-_LEGIT_WORDS = [
-    "confirmation", "notification", "update", "message", "delivery",
-    "secure", "verified", "account", "service", "system", "official",
-    "information", "support", "customer", "details", "request",
-    "transaction", "reference", "portal", "helpdesk",
-]
-
-_FREE_AI_PROVIDERS = {
-    "groq": {
-        "url": "https://api.groq.com/openai/v1/chat/completions",
-        "model": "llama3-8b-8192",
-        "note": "Free: 14400 req/day — https://console.groq.com",
-    },
-    "together": {
-        "url": "https://api.together.xyz/v1/chat/completions",
-        "model": "mistralai/Mistral-7B-Instruct-v0.3",
-        "note": "Free: $25 credits on signup — https://api.together.ai",
-    },
-    "openrouter": {
-        "url": "https://openrouter.ai/api/v1/chat/completions",
-        "model": "mistralai/mistral-7b-instruct:free",
-        "note": "Free tier models — https://openrouter.ai",
-    },
-}
-
-
+# ============================================================
+# Утилиты
+# ============================================================
 def _rid(n: int = 8) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
@@ -67,113 +45,146 @@ def _hash12() -> str:
     return hashlib.md5(uuid.uuid4().bytes).hexdigest()[:12]
 
 
+# Регэксп, выделяющий ВСЁ, что НЕ является видимым текстовым узлом:
+# комментарии, CDATA, doctype, целые блоки <script>/<style>, любые теги.
+_NON_TEXT_RE = re.compile(
+    r"(?:<!--.*?-->"
+    r"|<!\[CDATA\[.*?\]\]>"
+    r"|<![^>]*>"
+    r"|<script\b[^>]*>.*?</script>"
+    r"|<style\b[^>]*>.*?</style>"
+    r"|<[^>]+>)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _walk_text_nodes(html: str, transform) -> str:
+    """Применяет transform(text)->text ТОЛЬКО к видимым текстовым узлам.
+
+    Теги, атрибуты, комментарии, содержимое <script>/<style>, doctype остаются
+    нетронутыми. Это гарантирует, что структура HTML не ломается.
+    """
+    out: List[str] = []
+    pos = 0
+    for m in _NON_TEXT_RE.finditer(html):
+        if m.start() > pos:
+            chunk = html[pos:m.start()]
+            if chunk:
+                try:
+                    out.append(transform(chunk))
+                except Exception:
+                    out.append(chunk)
+        out.append(m.group(0))
+        pos = m.end()
+    if pos < len(html):
+        chunk = html[pos:]
+        try:
+            out.append(transform(chunk))
+        except Exception:
+            out.append(chunk)
+    return "".join(out)
+
+
+def _tag_sequence(html: str) -> List[str]:
+    """Возвращает последовательность имён тегов (для проверки инвариантности)."""
+    return [t.lower() for t in re.findall(r"<\s*(/?[a-zA-Z][\w:-]*)", html)]
+
+
+def verify_structure(before: str, after: str) -> bool:
+    """True, если последовательность тегов не изменилась (текст-онли техники)."""
+    return _tag_sequence(before) == _tag_sequence(after)
+
+
 # ============================================================
-# Technique 1: Zero-width characters between words
+# SPINTAX — главная безопасная техника: {вариант1|вариант2|вариант3}
 # ============================================================
-def technique_zero_width(html: str, intensity: float = 0.35) -> str:
-    """Вставляет невидимые символы нулевой ширины между словами."""
-    def _inject(m: re.Match) -> str:
-        text = m.group(0)
-        if len(text) < 4:
-            return text
-        parts = text.split(" ")
+_SPINTAX_RE = re.compile(r"\{([^{}]*\|[^{}]*)\}")
+
+
+def _spin_once(text: str) -> str:
+    def _pick(m: re.Match) -> str:
+        opts = m.group(1).split("|")
+        return random.choice(opts)
+    # несколько проходов — на случай вложенности после первой подстановки
+    for _ in range(5):
+        new = _SPINTAX_RE.sub(_pick, text)
+        if new == text:
+            break
+        text = new
+    return text
+
+
+def technique_spintax(html: str) -> str:
+    """Раскрывает spintax {a|b|c} -> один из вариантов. Только в текстовых узлах.
+
+    Это самый «честный» приём: текст реально различается у каждого получателя,
+    что улучшает доставляемость и не триггерит спам-фильтры.
+    """
+    if "{" not in html or "|" not in html:
+        return html
+    return _walk_text_nodes(html, _spin_once)
+
+
+def spin_text(text: str) -> str:
+    """Раскрывает spintax в обычной строке (для темы письма)."""
+    return _spin_once(text)
+
+
+# ============================================================
+# &nbsp; после пунктуации (тонко, безопасно, невидимо)
+# ============================================================
+def technique_nbsp(html: str, ratio: float = 0.15) -> str:
+    def _inject(text: str) -> str:
         out = []
-        for i, w in enumerate(parts):
-            out.append(w)
-            if i < len(parts) - 1:
-                if random.random() < intensity:
-                    out.append(random.choice(_ZWC))
-                out.append(" ")
+        n = len(text)
+        for i, ch in enumerate(text):
+            out.append(ch)
+            if ch in ".!?,:;" and i < n - 1 and text[i + 1] == " " and random.random() < ratio:
+                out.append("&nbsp;")
         return "".join(out)
-    return re.sub(r"(?<=>)[^<]+(?=<)", _inject, html)
+    return _walk_text_nodes(html, _inject)
 
 
 # ============================================================
-# Technique 2: Homoglyph substitution (Latin -> Cyrillic)
+# data-* атрибуты на блочных тегах (fingerprint) — self-closing safe
 # ============================================================
-def technique_homoglyphs(html: str, ratio: float = 0.12) -> str:
-    """Заменяет часть латинских букв на кириллические двойники."""
-    def _sub(m: re.Match) -> str:
-        return "".join(
-            _L2C[ch] if ch in _L2C and random.random() < ratio else ch
-            for ch in m.group(0)
-        )
-    return re.sub(r"(?<=>)[^<]+(?=<)", _sub, html)
+def technique_data_attrs(html: str, ratio: float = 0.5) -> str:
+    """Добавляет data-mid/data-ts к части блочных тегов.
 
-
-# ============================================================
-# Technique 3: HTML entity encoding of random chars
-# ============================================================
-def technique_html_entities(html: str, ratio: float = 0.08) -> str:
-    """Кодирует часть символов как HTML-сущности (&#65; = A)."""
-    def _encode(m: re.Match) -> str:
-        out = []
-        for ch in m.group(0):
-            if ch.isalpha() and random.random() < ratio:
-                code = ord(ch)
-                out.append(f"&#{code};" if random.random() < 0.5 else f"&#x{code:x};")
-            else:
-                out.append(ch)
-        return "".join(out)
-    return re.sub(r"(?<=>)[^<]+(?=<)", _encode, html)
-
-
-# ============================================================
-# Technique 4: Invisible spans (display:none / opacity:0)
-# ============================================================
-def technique_invisible_spans(html: str, count: int = 6) -> str:
-    """Вставляет невидимые <span> с рандомными словами."""
-    spans = []
-    for _ in range(count):
-        word = random.choice(_LEGIT_WORDS)
-        uid = _rid(6)
-        spans.append(
-            f'<span style="font-size:0px;line-height:0px;color:transparent;'
-            f'display:inline;opacity:0;" aria-hidden="true" data-uid="{uid}">{word}</span>'
-        )
-    tags = list(re.finditer(r"</(td|p|div|li|span)>", html, re.IGNORECASE))
-    for span in spans:
-        if tags:
-            t = random.choice(tags)
-            html = html[:t.end()] + span + html[t.end():]
-    return html
-
-
-# ============================================================
-# Technique 5: Random HTML comments
-# ============================================================
-def technique_random_comments(html: str, count: int = 4) -> str:
-    """Вставляет случайные HTML-комментарии с хешами."""
-    tags = list(re.finditer(r"</(td|p|div|tr|table)>", html, re.IGNORECASE))
-    for _ in range(count):
-        comment = f"<!-- {_hash12()} -->"
-        if tags:
-            t = random.choice(tags)
-            html = html[:t.end()] + comment + html[t.end():]
-    return html
-
-
-# ============================================================
-# Technique 6: Random data-* attributes on block tags
-# ============================================================
-def technique_data_attrs(html: str, ratio: float = 0.6) -> str:
-    """Добавляет случайные data-атрибуты к блочным тегам."""
+    Корректно работает с self-closing тегами (<img .../>): атрибуты
+    вставляются ПЕРЕД закрывающим '/>' или '>'.
+    """
     def _add(m: re.Match) -> str:
         if random.random() > ratio:
             return m.group(0)
         tag = m.group(0)
-        uid = _rid(8)
-        ts = random.randint(1_000_000, 9_999_999)
-        return tag[:-1] + f' data-mid="{uid}" data-ts="{ts}">'
-    return re.sub(r"<(td|tr|div|p|table|tbody)[^>]*>", _add, html, flags=re.IGNORECASE)
+        attrs = f' data-mid="{_rid(8)}" data-ts="{random.randint(1_000_000, 9_999_999)}"'
+        if tag.endswith("/>"):
+            return tag[:-2] + attrs + "/>"
+        return tag[:-1] + attrs + ">"
+    return re.sub(r"<(?:td|tr|div|p|table|tbody|section|article)\b[^>]*?/?>",
+                  _add, html, flags=re.IGNORECASE)
 
 
 # ============================================================
-# Technique 7: CSS micro-variation (color shift +/-1, unique meta)
+# Доброкачественные HTML-комментарии (после закрывающих блочных тегов)
+# ============================================================
+def technique_random_comments(html: str, count: int = 4) -> str:
+    tags = list(re.finditer(r"</(?:td|p|div|tr|table|section)>", html, re.IGNORECASE))
+    if not tags:
+        return html
+    for _ in range(count):
+        t = random.choice(tags)
+        comment = f"<!-- {_hash12()} -->"
+        html = html[:t.end()] + comment + html[t.end():]
+        tags = list(re.finditer(r"</(?:td|p|div|tr|table|section)>", html, re.IGNORECASE))
+    return html
+
+
+# ============================================================
+# CSS микро-вариации (±1 к hex-цвету) — только внутри CSS
 # ============================================================
 def technique_css_micro(html: str) -> str:
-    """Смещает цвета на ±1 только внутри CSS (style='' и <style>) + уникальный meta.
-    НЕ трогает URL-якоря и другие hex-строки вне CSS."""
     uid = _rid(16)
     marker = (
         f'<meta name="x-uid" content="{uid}">'
@@ -191,133 +202,40 @@ def technique_css_micro(html: str) -> str:
             return m.group(0)
 
     def _vary_css(css_text: str) -> str:
-        """Вариирует цвета только внутри CSS-контента."""
         return re.sub(r"#([0-9a-fA-F]{6})\b", _vary, css_text)
 
-    # Только внутри <style>...</style> блоков
-    html = re.sub(
-        r"(<style[^>]*>)(.*?)(</style>)",
-        lambda m: m.group(1) + _vary_css(m.group(2)) + m.group(3),
-        html, flags=re.DOTALL | re.IGNORECASE
-    )
-    # Только внутри style="..." (двойные кавычки)
-    html = re.sub(
-        r'(style\s*=\s*")([^"]+)(")',
-        lambda m: m.group(1) + _vary_css(m.group(2)) + m.group(3),
-        html, flags=re.IGNORECASE
-    )
-    # Только внутри style='...' (одинарные кавычки)
-    html = re.sub(
-        r"(style\s*=\s*')([^']+)(')",
-        lambda m: m.group(1) + _vary_css(m.group(2)) + m.group(3),
-        html, flags=re.IGNORECASE
-    )
-    html = re.sub(r"(<head[^>]*>)", r"\1" + marker, html, flags=re.IGNORECASE)
+    html = re.sub(r"(<style[^>]*>)(.*?)(</style>)",
+                  lambda m: m.group(1) + _vary_css(m.group(2)) + m.group(3),
+                  html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'(style\s*=\s*")([^"]+)(")',
+                  lambda m: m.group(1) + _vary_css(m.group(2)) + m.group(3),
+                  html, flags=re.IGNORECASE)
+    html = re.sub(r"(style\s*=\s*')([^']+)(')",
+                  lambda m: m.group(1) + _vary_css(m.group(2)) + m.group(3),
+                  html, flags=re.IGNORECASE)
+    if re.search(r"<head[^>]*>", html, re.IGNORECASE):
+        html = re.sub(r"(<head[^>]*>)", r"\1" + marker, html, count=1, flags=re.IGNORECASE)
     return html
 
 
 # ============================================================
-# Technique 8: Tracking pixel (data URI, unique UUID)
+# CSS custom properties (уникальный отпечаток в :root)
 # ============================================================
-def technique_tracking_pixel(html: str) -> str:
-    """Добавляет 1x1 tracking pixel с уникальным UUID (data URI)."""
-    uid = str(uuid.uuid4())
-    gif_b64 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-    pixel = (
-        f'<img src="data:image/gif;base64,{gif_b64}" width="1" height="1" '
-        f'alt="" style="display:block;width:1px;height:1px;border:0;" '
-        f'data-track-id="{uid}" />'
-    )
-    if "</body>" in html.lower():
-        html = re.sub(r"(</body>)", pixel + r"\1", html, flags=re.IGNORECASE)
-    else:
-        html += pixel
-    return html
+def technique_css_custom_props(html: str) -> str:
+    uid = _rid(16)
+    ts = random.randint(1_000_000, 9_999_999)
+    style = f'<style>:root{{--x-uid:"{uid}";--x-ts:"{ts}"}}</style>'
+    if "</head>" in html.lower():
+        return re.sub(r"(</head>)", style + r"\1", html, count=1, flags=re.IGNORECASE)
+    return style + html
 
 
 # ============================================================
-# Technique 9: Word-level span wrapping
-# ============================================================
-def technique_word_spans(html: str, ratio: float = 0.08) -> str:
-    """Оборачивает часть слов в <span data-w=uid>."""
-    def _wrap(m: re.Match) -> str:
-        parts = re.split(r"(\s+)", m.group(0))
-        out = []
-        for part in parts:
-            if part.strip() and random.random() < ratio:
-                out.append(f'<span data-w="{_rid(4)}">{part}</span>')
-            else:
-                out.append(part)
-        return "".join(out)
-    return re.sub(r"(?<=>)[^<]{5,}(?=<)", _wrap, html)
-
-
-# ============================================================
-# Technique 10: Non-breaking spaces after punctuation
-# ============================================================
-def technique_nbsp(html: str, ratio: float = 0.25) -> str:
-    """Вставляет &nbsp; после знаков препинания случайным образом."""
-    def _inject(m: re.Match) -> str:
-        text = m.group(0)
-        out = []
-        for i, ch in enumerate(text):
-            out.append(ch)
-            if ch in ".!?,:;" and i < len(text) - 1 and text[i + 1] == " " and random.random() < ratio:
-                out.append("&nbsp;")
-        return "".join(out)
-    return re.sub(r"(?<=>)[^<]+(?=<)", _inject, html)
-
-
-# ============================================================
-# Technique 11: Soft hyphens in long words
-# ============================================================
-def technique_soft_hyphens(html: str, ratio: float = 0.06) -> str:
-    """Вставляет мягкие переносы (U+00AD) в длинные слова.
-    FIX: пропускает URL-подобные строки чтобы не ломать ссылки в тексте.
-    """
-    SHY = "\u00ad"
-    _URL_RE = re.compile(r"https?://|www\\.|@[a-zA-Z0-9]|\\.(?:com|net|org|ru|uk|de|fr|io|co|tv)\\b", re.IGNORECASE)
-
-    def _inject(m: re.Match) -> str:
-        parts = re.split(r"(\s+)", m.group(0))
-        out = []
-        for w in parts:
-            if len(w) > 9 and random.random() < ratio and not _URL_RE.search(w):
-                mid = len(w) // 2
-                w = w[:mid] + SHY + w[mid:]
-            out.append(w)
-        return "".join(out)
-    return re.sub(r"(?<=>)[^<]+(?=<)", _inject, html)
-
-
-# ============================================================
-# Technique 12: Hidden text (white on white, height 1px)
-# ============================================================
-def technique_hidden_text(html: str, count: int = 3) -> str:
-    """Добавляет скрытые текстовые блоки (белый на белом)."""
-    snippets = []
-    for _ in range(count):
-        words = random.sample(_LEGIT_WORDS, k=random.randint(2, 4))
-        snippets.append(
-            f'<div style="color:#ffffff;background:#ffffff;font-size:1px;'
-            f'line-height:1px;max-height:1px;overflow:hidden;opacity:0;" '
-            f'aria-hidden="true" data-h="{_rid(6)}">{" ".join(words)}</div>'
-        )
-    body_m = re.search(r"<body[^>]*>", html, re.IGNORECASE)
-    if body_m:
-        pos = body_m.end()
-        html = html[:pos] + "".join(snippets) + html[pos:]
-    return html
-
-
-# ============================================================
-# Technique 13: Font-family stack shuffle
+# Перестановка font-family (сохраняем generic в конце)
 # ============================================================
 def technique_font_stack(html: str) -> str:
-    """Перемешивает порядок шрифтов в font-family, сохраняя quoted-имена с пробелами."""
     def _shuffle(m: re.Match) -> str:
-        raw = m.group(1).strip().rstrip(';')
-        # Парсим шрифты с учётом кавычек
+        raw = m.group(1).strip().rstrip(";")
         fonts: list[str] = []
         buf = ""
         in_quote: str | None = None
@@ -328,114 +246,109 @@ def technique_font_stack(html: str) -> str:
             elif in_quote and ch == in_quote:
                 in_quote = None
                 buf += ch
-            elif ch == ',' and not in_quote:
-                f = buf.strip()
-                if f:
-                    fonts.append(f)
+            elif ch == "," and not in_quote:
+                if buf.strip():
+                    fonts.append(buf.strip())
                 buf = ""
             else:
                 buf += ch
         if buf.strip():
             fonts.append(buf.strip())
-
         if len(fonts) <= 2:
             return m.group(0)
-
         generic = fonts[-1]
         specific = fonts[:-1]
         random.shuffle(specific)
-        # Восстанавливаем кавычки для имён с пробелами
         result = []
         for f in specific + [generic]:
             f_inner = f.strip().strip("'\"")
-            if ' ' in f_inner and not f.strip().startswith(("'", '"')):
+            if " " in f_inner and not f.strip().startswith(("'", '"')):
                 result.append(f"'{f_inner}'")
             else:
                 result.append(f)
         return "font-family: " + ", ".join(result)
-
     return re.sub(r"font-family:\s*([^;{}]+)", _shuffle, html)
 
 
 # ============================================================
-# Technique 14: Unicode variation selectors (FE00-FE02)
+# Tracking pixel (опционально, выключен по умолчанию)
 # ============================================================
-def technique_unicode_variation(html: str, ratio: float = 0.04) -> str:
-    """Добавляет Unicode variation selectors к части символов."""
-    VS = ["\ufe00", "\ufe01", "\ufe02"]
-
-    def _inject(m: re.Match) -> str:
-        out = []
-        for ch in m.group(0):
-            out.append(ch)
-            if ch.isalpha() and ord(ch) < 128 and random.random() < ratio:
-                out.append(random.choice(VS))
-        return "".join(out)
-    return re.sub(r"(?<=>)[^<]+(?=<)", _inject, html)
-
-
-# ============================================================
-# Technique 15: CSS custom properties as unique fingerprint
-# ============================================================
-def technique_css_custom_props(html: str) -> str:
-    """Добавляет CSS custom properties с уникальными значениями."""
-    uid = _rid(16)
-    ts = random.randint(1_000_000, 9_999_999)
-    style = f'<style>:root{{--x-uid:"{uid}";--x-ts:"{ts}"}}</style>'
-    if "</head>" in html.lower():
-        html = re.sub(r"(</head>)", style + r"\1", html, flags=re.IGNORECASE)
-    else:
-        html = style + html
-    return html
+def technique_tracking_pixel(html: str) -> str:
+    uid = str(uuid.uuid4())
+    gif_b64 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+    pixel = (
+        f'<img src="data:image/gif;base64,{gif_b64}" width="1" height="1" '
+        f'alt="" style="display:block;width:1px;height:1px;border:0;" '
+        f'data-track-id="{uid}"/>'
+    )
+    if "</body>" in html.lower():
+        return re.sub(r"(</body>)", pixel + r"\1", html, count=1, flags=re.IGNORECASE)
+    return html + pixel
 
 
 # ============================================================
-# Technique 16: Subject line zero-width injection
+# Тема письма — только spintax (никаких zero-width!)
 # ============================================================
-def technique_subject(subject: str, intensity: float = 0.4) -> str:
-    """Вставляет невидимые символы в тему письма."""
-    words = subject.split(" ")
-    out = []
-    for i, w in enumerate(words):
-        out.append(w)
-        if i < len(words) - 1:
-            if random.random() < intensity:
-                out.append(random.choice(["\u200b", "\u200c", "\u2060"]))
-            out.append(" ")
-    return "".join(out)
+def technique_subject(subject: str) -> str:
+    return spin_text(subject)
 
 
 # ============================================================
-# AI Rewrite via free API (Groq / Together.ai / OpenRouter)
+# AI rewrite (OpenAI-совместимые free-провайдеры + любой OpenAI endpoint)
 # ============================================================
+_FREE_AI_PROVIDERS = {
+    "groq": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "model": "llama-3.1-8b-instant",
+        "note": "Free: высокий лимит — https://console.groq.com",
+    },
+    "together": {
+        "url": "https://api.together.xyz/v1/chat/completions",
+        "model": "mistralai/Mistral-7B-Instruct-v0.3",
+        "note": "Free credits на старте — https://api.together.ai",
+    },
+    "openrouter": {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "model": "mistralai/mistral-7b-instruct:free",
+        "note": "Free-tier модели — https://openrouter.ai",
+    },
+    "openai": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "model": "gpt-4o-mini",
+        "note": "Платный, лучшее качество — https://platform.openai.com",
+    },
+}
+
+
 def ai_rephrase(
     html: str,
     api_key: str,
     provider: str = "groq",
     timeout: int = 45,
 ) -> Tuple[str, str]:
-    """
-    Перефразирует текст письма через бесплатный ИИ-API.
+    """Переформулирует видимый текст письма через ИИ, сохраняя HTML-разметку.
 
-    Бесплатные провайдеры:
-      groq       - https://console.groq.com  (14400 req/day бесплатно)
-      together   - https://api.together.ai   ($25 кредитов при регистрации)
-      openrouter - https://openrouter.ai     (free-tier модели mistral/gemma)
-
-    Returns: (rewritten_html, error_msg). error_msg == "" on success.
+    Returns: (rewritten_html, error_msg). error_msg == "" при успехе.
+    Никогда не бросает исключение — при ошибке возвращает исходный html + текст ошибки.
     """
     cfg = _FREE_AI_PROVIDERS.get(provider)
     if not cfg:
         return html, f"Неизвестный провайдер: {provider}"
+    if not api_key or not api_key.strip():
+        return html, "Не задан API-ключ"
 
     import json as _json
 
     prompt = (
-        "Rephrase this HTML email to bypass spam filters. "
-        "Keep ALL HTML tags, CSS and structure exactly as is. "
-        "Only change visible text content between tags. "
+        "Rephrase the VISIBLE TEXT of this HTML email so it reads naturally but "
+        "differs from the original (to improve deliverability). STRICT RULES:\n"
+        "1. Keep ALL HTML tags, attributes, CSS, links and structure byte-for-byte.\n"
+        "2. Only change human-readable text between tags. Do NOT add hidden text, "
+        "zero-width characters, homoglyphs or invisible spans.\n"
+        "3. Keep the same language as the original.\n"
+        "4. Preserve placeholders like {{first_name}} exactly.\n"
         "Return ONLY the modified HTML, nothing else.\n\n"
-        + html[:8000]
+        + html[:12000]
     )
 
     body = _json.dumps({
@@ -452,7 +365,7 @@ def ai_rephrase(
         cfg["url"],
         data=body,
         headers={
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {api_key.strip()}",
             "Content-Type": "application/json",
         },
         method="POST",
@@ -461,11 +374,12 @@ def ai_rephrase(
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = _json.loads(resp.read().decode())
         result = data["choices"][0]["message"]["content"].strip()
-        # Extract HTML if wrapped in markdown code block
         if "```" in result:
             m = re.search(r"```(?:html)?\n?(.*?)```", result, re.DOTALL)
             if m:
                 result = m.group(1).strip()
+        if not result:
+            return html, "Пустой ответ от ИИ"
         return result, ""
     except urllib.error.HTTPError as e:
         body_err = e.read().decode(errors="replace")[:200]
@@ -475,57 +389,42 @@ def ai_rephrase(
 
 
 # ============================================================
-# Master labels and apply function
+# Реестр техник + apply_all
 # ============================================================
+# Техники, работающие по текстовым узлам (безопасны для структуры).
+_TEXT_TECHNIQUES = {"spintax", "nbsp"}
+
+_TECHNIQUE_FNS = {
+    "spintax": technique_spintax,
+    "nbsp": technique_nbsp,
+    "data_attrs": technique_data_attrs,
+    "random_comments": technique_random_comments,
+    "css_micro": technique_css_micro,
+    "css_custom_props": technique_css_custom_props,
+    "font_stack": technique_font_stack,
+    "tracking_pixel": technique_tracking_pixel,
+}
 
 ALL_TECHNIQUES = [
-    "zero_width", "homoglyphs", "html_entities", "invisible_spans",
-    "random_comments", "data_attrs", "css_micro", "tracking_pixel",
-    "word_spans", "nbsp", "soft_hyphens", "hidden_text",
-    "font_stack", "unicode_variation", "css_custom_props",
+    "spintax", "nbsp", "data_attrs", "random_comments",
+    "css_micro", "css_custom_props", "font_stack", "tracking_pixel",
 ]
 
 TECHNIQUE_LABELS = {
-    "zero_width": "Символы нулевой ширины (ZWC)",
-    "homoglyphs": "Гомоглифы латиница/кириллица",
-    "html_entities": "HTML-сущности (&#65; = A)",
-    "invisible_spans": "Невидимые <span> со словами",
-    "random_comments": "Случайные HTML-комментарии",
-    "data_attrs": "data-* атрибуты (fingerprint)",
-    "css_micro": "CSS микро-вариации (±1 цвет)",
-    "tracking_pixel": "Tracking pixel (UUID data URI)",
-    "word_spans": "Обёртка слов в <span>",
-    "nbsp": "Неразрывные пробелы после знаков",
-    "soft_hyphens": "Мягкие переносы в длинных словах",
-    "hidden_text": "Скрытый белый текст",
-    "font_stack": "Перемешивание font-family",
-    "unicode_variation": "Unicode variation selectors",
-    "css_custom_props": "CSS custom properties (fingerprint)",
+    "spintax": "Spintax {вариант1|вариант2} — реальная вариация текста",
+    "nbsp": "Неразрывные пробелы после пунктуации",
+    "data_attrs": "data-* атрибуты (отпечаток, безопасно)",
+    "random_comments": "Доброкачественные HTML-комментарии",
+    "css_micro": "CSS микро-вариации цвета (±1)",
+    "css_custom_props": "CSS custom properties (отпечаток)",
+    "font_stack": "Перестановка порядка font-family",
+    "tracking_pixel": "Tracking pixel (1×1, опционально)",
 }
 
-_TECHNIQUE_FNS = {
-    "zero_width": technique_zero_width,
-    "homoglyphs": technique_homoglyphs,
-    "html_entities": technique_html_entities,
-    "invisible_spans": technique_invisible_spans,
-    "random_comments": technique_random_comments,
-    "data_attrs": technique_data_attrs,
-    "css_micro": technique_css_micro,
-    "tracking_pixel": technique_tracking_pixel,
-    "word_spans": technique_word_spans,
-    "nbsp": technique_nbsp,
-    "soft_hyphens": technique_soft_hyphens,
-    "hidden_text": technique_hidden_text,
-    "font_stack": technique_font_stack,
-    "unicode_variation": technique_unicode_variation,
-    "css_custom_props": technique_css_custom_props,
-}
-
-# Safe default set (do not break rendering)
+# По умолчанию — только безопасные для «Входящих»; tracking_pixel выключен.
 DEFAULT_TECHNIQUES = [
-    "zero_width", "invisible_spans", "random_comments", "data_attrs",
-    "css_micro", "tracking_pixel", "nbsp", "soft_hyphens",
-    "hidden_text", "css_custom_props",
+    "spintax", "nbsp", "data_attrs", "random_comments",
+    "css_micro", "css_custom_props", "font_stack",
 ]
 
 
@@ -535,10 +434,11 @@ def apply_all(
     techniques: Optional[List[str]] = None,
     seed: Optional[int] = None,
 ) -> Tuple[str, str]:
-    """
-    Применяет выбранные техники уникализации.
-    Возвращает (новый_html, новая_тема).
-    Никогда не бросает исключение.
+    """Применяет выбранные техники уникализации. Возвращает (html, subject).
+
+    Гарантирует HTML-безопасность: текстовые техники меняют только текстовые
+    узлы; структурные техники добавляют корректные теги/атрибуты. Никогда не
+    бросает исключение.
     """
     if seed is not None:
         random.seed(seed)
@@ -548,11 +448,12 @@ def apply_all(
     chosen = techniques if techniques is not None else DEFAULT_TECHNIQUES
     for name in chosen:
         fn = _TECHNIQUE_FNS.get(name)
-        if fn:
-            try:
-                html = fn(html)
-            except Exception:
-                pass
+        if not fn:
+            continue
+        try:
+            html = fn(html)
+        except Exception:
+            pass
 
     if subject:
         subject = technique_subject(subject)
