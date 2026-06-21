@@ -352,10 +352,10 @@ class SmtpAccount:
     is_active: bool = True
     proxy: str = ""
     oauth_token: str = ""       # access_token (legacy field — используй access_token)
-      access_token: str = ""     # Актуальный OAuth2 Bearer access_token
-      refresh_token: str = ""    # OAuth2 refresh_token для авто-обновления
-      token_expires_at: float = 0.0  # Unix-timestamp истечения access_token
-      imap_host: str = ""
+    access_token: str = ""      # Актуальный OAuth2 Bearer access_token
+    refresh_token: str = ""     # OAuth2 refresh_token для авто-обновления
+    token_expires_at: float = 0.0  # Unix-timestamp истечения access_token
+    imap_host: str = ""
     imap_port: int = 993
     imap_ssl: bool = True
     last_test_ok: Optional[bool] = field(default=None)
