@@ -62,7 +62,7 @@ PORT_FALLBACK_CONFIGS = [
     (587,  False, True,  "STARTTLS/587"),
     (25,   False, False, "Plain/25"),
     (2525, False, True,  "STARTTLS/2525"),
-    (993,  True,  False, "SSL/993-fallback"),
+    # (993) IMAP-порт исключён — не является SMTP-портом
 ]
 
 # ── SMTP CONFIGS: 300+ доменов ────────────────────────────────────────────────
