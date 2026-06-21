@@ -4,9 +4,13 @@ v3.3: CyberPro design — SVG logo, violet/cyan neon sidebar, glass panels.
 """
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QLabel, QPushButton, QFrame, QStackedWidget, QSizePolicy
+    QLabel, QPushButton, QFrame, QStackedWidget, QSizePolicy,
+    QGraphicsOpacityEffect,
 )
-from PyQt6.QtCore import Qt, QByteArray, QSize, pyqtSignal, QTimer
+from PyQt6.QtCore import (
+    Qt, QByteArray, QSize, pyqtSignal, QTimer,
+    QPropertyAnimation, QEasingCurve, QRect,
+)
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QIcon
 
@@ -74,7 +78,7 @@ class NavButton(QPushButton):
                 "QPushButton {"
                 "  background: rgba(139,92,246,0.15);"
                 "  border: none;"
-                "  border-left: 3px solid #8B5CF6;"
+                "  border-left: 3px solid transparent;"
                 "  border-radius: 0;"
                 "  color: #E8E8FF;"
                 "  font-weight: 600;"
@@ -181,6 +185,19 @@ class Sidebar(QFrame):
             nav_layout.addWidget(btn)
             self._nav_buttons[key] = btn
         nav_layout.addStretch()
+
+        # Анимированный индикатор выделения — скользит между пунктами навигации
+        self._indicator = QFrame(nav_frame)
+        self._indicator.setStyleSheet(
+            "background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            " stop:0 #8B5CF6, stop:1 #06B6D4); border-radius: 2px;"
+        )
+        self._indicator.setFixedWidth(3)
+        self._indicator.hide()
+        self._indicator_anim = QPropertyAnimation(self._indicator, b"geometry")
+        self._indicator_anim.setDuration(300)
+        self._indicator_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
         root.addWidget(nav_frame)
 
         root.addStretch()
@@ -232,6 +249,26 @@ class Sidebar(QFrame):
     def set_active_page(self, key: str) -> None:
         for k, btn in self._nav_buttons.items():
             btn.set_active(k == key)
+        self._move_indicator(key)
+
+    def _move_indicator(self, key: str) -> None:
+        """Перемещает (с анимацией) индикатор к активному пункту."""
+        if key not in self._nav_buttons:
+            return
+        idx = list(self._nav_buttons.keys()).index(key)
+        nav_top, btn_h, gap, bar_h = 12, 46, 2, 24
+        y = nav_top + idx * (btn_h + gap) + (btn_h - bar_h) // 2
+        target = QRect(0, y, 3, bar_h)
+        if not self._indicator.isVisible():
+            self._indicator.setGeometry(target)
+            self._indicator.show()
+            self._indicator.raise_()
+            return
+        self._indicator_anim.stop()
+        self._indicator_anim.setStartValue(self._indicator.geometry())
+        self._indicator_anim.setEndValue(target)
+        self._indicator_anim.start()
+        self._indicator.raise_()
 
 
 class MainWindow(QMainWindow):
@@ -412,6 +449,23 @@ class MainWindow(QMainWindow):
             return
         self._stack.setCurrentWidget(self._screens[key])
         self._sidebar.set_active_page(key)
+        self._fade_in(self._screens[key])
+
+    def _fade_in(self, widget) -> None:
+        """Мягкое появление экрана при переключении (160 мс)."""
+        try:
+            eff = QGraphicsOpacityEffect(widget)
+            widget.setGraphicsEffect(eff)
+            anim = QPropertyAnimation(eff, b"opacity", self)
+            anim.setDuration(170)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            anim.finished.connect(lambda: widget.setGraphicsEffect(None))
+            self._nav_anim = anim  # держим ссылку, чтобы не собрал GC
+            anim.start()
+        except Exception:
+            pass
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

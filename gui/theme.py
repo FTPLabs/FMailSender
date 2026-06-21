@@ -230,27 +230,27 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
 /* === TABLES ========================================================= */
 QTableWidget, QTableView {{
     background-color: transparent; color: {c.TEXT_PRIMARY};
-    gridline-color: {c.BORDER}; border: 1px solid {c.BORDER};
+    gridline-color: transparent; border: 1px solid {c.BORDER};
     border-radius: {r.CARD}; outline: none;
 }}
 QHeaderView::section {{
     background-color: {c.BG_SURFACE1}; color: {c.TEXT_SECONDARY};
     border: none; border-bottom: 1px solid {c.BORDER};
-    padding: 6px 10px; font-size: 11px;
-    font-weight: {t.WEIGHT_SEMIBOLD};
+    padding: 11px 14px; font-size: 11px;
+    font-weight: {t.WEIGHT_SEMIBOLD}; letter-spacing: 0.05em;
 }}
-QTableWidget::item {{ padding: 6px 10px; border-bottom: 1px solid rgba(139,92,246,0.06); }}
+QTableWidget::item {{ padding: 12px 14px; border-bottom: 1px solid rgba(139,92,246,0.05); }}
 QTableWidget::item:selected {{ background-color: {c.ACCENT_DIM}; color: white; }}
-QTableWidget::item:hover {{ background-color: rgba(255,255,255,0.04); }}
+QTableWidget::item:hover {{ background-color: rgba(255,255,255,0.03); }}
 
 /* === LIST =========================================================== */
 QListWidget {{
     background-color: transparent; color: {c.TEXT_PRIMARY};
     border: 1px solid {c.BORDER}; border-radius: {r.CARD}; outline: none;
 }}
-QListWidget::item {{ padding: 6px 10px; border-bottom: 1px solid rgba(139,92,246,0.06); }}
+QListWidget::item {{ padding: 11px 14px; border-bottom: 1px solid rgba(139,92,246,0.05); }}
 QListWidget::item:selected {{ background-color: {c.ACCENT_DIM}; color: white; }}
-QListWidget::item:hover {{ background-color: rgba(255,255,255,0.04); }}
+QListWidget::item:hover {{ background-color: rgba(255,255,255,0.03); }}
 
 /* === CHECKBOX ======================================================= */
 QCheckBox {{ color: {c.TEXT_PRIMARY}; spacing: 8px; }}
