@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS payments (
   hwid TEXT DEFAULT '',
   amount REAL NOT NULL,
   currency TEXT DEFAULT 'USDT',
+  provider TEXT DEFAULT 'crypto',
   status TEXT DEFAULT 'pending',
   license_key TEXT DEFAULT '',
   created_at TEXT NOT NULL,
@@ -135,6 +136,7 @@ async def _migrate_db() -> None:
         "ALTER TABLE users ADD COLUMN captcha_passed INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN hwid_reset_at TEXT DEFAULT ''",
         "ALTER TABLE users ADD COLUMN trial_used_at TEXT DEFAULT ''",
+        "ALTER TABLE payments ADD COLUMN provider TEXT DEFAULT 'crypto'",
     ]
   async with _db() as conn:
       for _sql in _migrations:
@@ -357,6 +359,7 @@ async def save_payment(
   hwid: str,
   amount: float,
   currency: str = "USDT",
+  provider: str = "crypto",
 ) -> int:
   async with _db() as db:
       # Check for existing - INSERT OR IGNORE returns lastrowid=0 on conflict
@@ -368,9 +371,9 @@ async def save_payment(
               return row[0]
       cur = await db.execute(
           """INSERT INTO payments
-             (telegram_id, invoice_id, plan, hwid, amount, currency, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)""",
-          (telegram_id, invoice_id, plan, hwid, amount, currency, _now()),
+             (telegram_id, invoice_id, plan, hwid, amount, currency, provider, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+          (telegram_id, invoice_id, plan, hwid, amount, currency, provider, _now()),
       )
       await db.commit()
       return cur.lastrowid
@@ -435,12 +438,14 @@ async def create_license_for_payment(
       ) as cur:
           row = await cur.fetchone()
       if row and row["license_key"]:
-          # Already processed - return existing key
+          # Already processed - return existing key (created=False: не выдавать повторно уведомление)
           async with db.execute(
               "SELECT * FROM licenses WHERE key=?", (row["license_key"],)
           ) as cur2:
               lic = await cur2.fetchone()
-          return dict(lic) if lic else {"key": row["license_key"]}
+          result = dict(lic) if lic else {"key": row["license_key"]}
+          result["created"] = False
+          return result
 
       # Not yet processed - create license and mark paid atomically
       plan_data = PLANS.get(plan, list(PLANS.values())[1])
@@ -456,6 +461,12 @@ async def create_license_for_payment(
       key = _generate_key()
       now_str = _now()
 
+      # FIX гонка double-credit: лицензия выдаётся атомарно через условный UPDATE
+      # платежа (status='pending' -> 'paid'). Параллельные вызовы (ручная проверка
+      # и фоновый поллер) гарантированно не создадут две лицензии: победитель
+      # определяется по rowcount единственного UPDATE; проигравший удаляет свою
+      # черновую лицензию и возвращает уже выданный ключ.
+      won = False
       try:
           await db.execute(
               """INSERT INTO licenses
@@ -469,11 +480,20 @@ async def create_license_for_payment(
                   days, "", expires_at, now_str,
               ),
           )
-          await db.execute(
-              "UPDATE payments SET status='paid', license_key=?, paid_at=? WHERE invoice_id=?",
+          claim = await db.execute(
+              "UPDATE payments SET status='paid', license_key=?, paid_at=? "
+              "WHERE invoice_id=? AND status='pending'",
               (key, now_str, invoice_id),
           )
-          await db.commit()
+          if claim.rowcount == 1:
+              # Захват наш: лицензия и оплаченный платёж фиксируются вместе.
+              await db.commit()
+              won = True
+          else:
+              # Захват проиграли (платёж уже оплачен другим вызовом): убираем
+              # черновую лицензию, ничего не выдаём повторно.
+              await db.execute("DELETE FROM licenses WHERE key=?", (key,))
+              await db.commit()
       except Exception as _orig_exc:
           # FIX БАГ-8: rollback в отдельном try - не маскирует оригинальную ошибку
           try:
@@ -483,9 +503,28 @@ async def create_license_for_payment(
           raise
 
       db.row_factory = aiosqlite.Row
-      async with db.execute("SELECT * FROM licenses WHERE key=?", (key,)) as cur3:
-          lic = await cur3.fetchone()
-      return dict(lic) if lic else {"key": key}
+      if won:
+          async with db.execute("SELECT * FROM licenses WHERE key=?", (key,)) as cur3:
+              lic = await cur3.fetchone()
+          result = dict(lic) if lic else {"key": key}
+          result["created"] = True
+          return result
+
+      # Проиграли гонку: вернуть ключ победителя (created=False — без повторного
+      # уведомления). Если победитель ещё не зафиксировал ключ — вернуть пустой.
+      async with db.execute(
+          "SELECT license_key FROM payments WHERE invoice_id=?", (invoice_id,)
+      ) as cur_w:
+          row_w = await cur_w.fetchone()
+      if row_w and row_w["license_key"]:
+          async with db.execute(
+              "SELECT * FROM licenses WHERE key=?", (row_w["license_key"],)
+          ) as cur_l:
+              lic_w = await cur_l.fetchone()
+          result = dict(lic_w) if lic_w else {"key": row_w["license_key"]}
+          result["created"] = False
+          return result
+      return {"key": "", "created": False}
 
 async def create_license(
   plan: str,

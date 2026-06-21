@@ -158,4 +158,47 @@ DOWNLOAD_URL: str = os.environ.get("DOWNLOAD_URL", "https://fmail.shop/v1/downlo
 
 # ID Telegram-канала для обязательной подписки (переопределяется через env CHANNEL_ID)
 CHANNEL_ID: int = int(os.environ.get("CHANNEL_ID", "-1003769139793"))
+
+
+# ─── Платёжные провайдеры ─────────────────────────────────────────────────────
+# CryptoBot — основной (обязательный) провайдер. xRocket и LZT опциональны и
+# включаются ТОЛЬКО при наличии токенов в env. Секреты никогда не хардкодятся.
+
+# xRocket Pay — https://pay.xrocket.exchange, заголовок Rocket-Pay-Key
+XROCKET_API_TOKEN: str = os.environ.get("XROCKET_API_TOKEN", "").strip()
+XROCKET_API: str = os.environ.get("XROCKET_API", "https://pay.xrocket.exchange").strip()
+XROCKET_CURRENCY: str = (os.environ.get("XROCKET_CURRENCY", "USDT").strip() or "USDT").upper()
+XROCKET_ENABLED: bool = bool(XROCKET_API_TOKEN)
+if not XROCKET_API_TOKEN:
+    print("[WARN] XROCKET_API_TOKEN не задан — оплата через xRocket отключена.", file=sys.stderr)
+# Цены тарифов номинированы в USD и отправляются в инвойс БЕЗ конвертации.
+# USDT — единственный актив с паритетом к USD; иное значение привело бы к
+# недоплате/переплате, поэтому принудительно используем USDT.
+if XROCKET_CURRENCY != "USDT":
+    print(f"[WARN] XROCKET_CURRENCY='{XROCKET_CURRENCY}' игнорируется: цены в USD, используется USDT.", file=sys.stderr)
+    XROCKET_CURRENCY = "USDT"
+
+# LZT Market — https://prod-api.lzt.market, Bearer-токен (OAuth, scope invoice)
+LZT_TOKEN: str = os.environ.get("LZT_TOKEN", "").strip()
+LZT_API: str = os.environ.get("LZT_API", "https://prod-api.lzt.market").strip()
+LZT_MERCHANT_ID: str = os.environ.get("LZT_MERCHANT_ID", "").strip()
+LZT_CURRENCY: str = (os.environ.get("LZT_CURRENCY", "usd").strip() or "usd").lower()
+# url_success обязателен для создания LZT-инвойса
+PAYMENT_SUCCESS_URL: str = os.environ.get("PAYMENT_SUCCESS_URL", "https://t.me").strip()
+
+_VALID_LZT_CURRENCIES = {"rub", "uah", "kzt", "byn", "usd", "eur", "gbp", "cny", "try", "jpy", "brl"}
+_LZT_FLAG = os.environ.get("LZT_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+# LZT включается ТОЛЬКО при явном LZT_ENABLED=1 + валидных токене, merchant_id и валюте
+LZT_ENABLED: bool = _LZT_FLAG and bool(LZT_TOKEN) and bool(LZT_MERCHANT_ID)
+if _LZT_FLAG and not (LZT_TOKEN and LZT_MERCHANT_ID):
+    print("[WARN] LZT_ENABLED задан, но LZT_TOKEN/LZT_MERCHANT_ID отсутствуют — LZT отключён.", file=sys.stderr)
+if LZT_ENABLED and LZT_CURRENCY not in _VALID_LZT_CURRENCIES:
+    print(f"[WARN] LZT_CURRENCY='{LZT_CURRENCY}' не поддерживается — LZT отключён.", file=sys.stderr)
+    LZT_ENABLED = False
+# Цены номинированы в USD и отправляются в LZT_CURRENCY без конвертации. Любая
+# валюта дешевле USD (rub/uah/…) означала бы недоплату, поэтому при включённом
+# LZT допускается только 'usd'.
+if LZT_ENABLED and LZT_CURRENCY != "usd":
+    print(f"[WARN] LZT_CURRENCY='{LZT_CURRENCY}' != 'usd': цены в USD без конвертации — LZT отключён во избежание недоплаты.", file=sys.stderr)
+    LZT_ENABLED = False
   

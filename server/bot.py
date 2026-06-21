@@ -123,7 +123,7 @@ from pydantic import BaseModel
 import database as db
 from database import set_terms_accepted, get_terms_accepted, set_captcha_passed, get_all_passed_users
 from config import ADMIN_IDS, MODERATOR_IDS, ADMIN_API_KEY, ADMIN_WEB_SECRET, API_HOST, API_PORT, BOT_TOKEN, JWT_SECRET, KEY_PREFIX, PLANS, DOWNLOAD_URL, CHANNEL_ID
-from crypto_pay import crypto_client
+import payment_providers as pay
 
 # ─── Moderator in-memory cache ────────────────────────────────────────────────
 # Совокупность: env MODERATOR_IDS + модераторы добавленные через бот (из БД)
@@ -322,6 +322,16 @@ def kb_payment(pay_url: str, invoice_id: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_pay:{invoice_id}")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_main")],
     ])
+
+
+def kb_provider(plan_id: str, providers) -> InlineKeyboardMarkup:
+    """Выбор способа оплаты (показывается только при >1 доступном провайдере)."""
+    rows = [
+        [InlineKeyboardButton(text=f"💳 {p.label}", callback_data=f"pay_with:{p.key}:{plan_id}")]
+        for p in providers
+    ]
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="menu_buy")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def kb_back_main() -> InlineKeyboardMarkup:
@@ -1486,7 +1496,7 @@ async def cb_buy_plan(query: CallbackQuery, state: FSMContext):
 async def cb_use_hwid(query: CallbackQuery, state: FSMContext):
     hwid = query.data.split(":", 1)[1]
     data = await state.get_data()
-    await _proceed_to_payment(query, state, hwid, data.get("plan_id", "week"))
+    await _choose_provider_or_pay(query, state, hwid, data.get("plan_id", "week"))
 
 
 @dp.callback_query(F.data.startswith("skip_hwid:"))
@@ -1497,8 +1507,7 @@ async def cb_skip_hwid(query: CallbackQuery, state: FSMContext):
     if plan_id not in PLANS or PLANS[plan_id].get("admin_only"):
         await query.answer("Неизвестный план", show_alert=True)
         return
-    await state.clear()
-    await _proceed_to_payment(query, state, "", plan_id)
+    await _choose_provider_or_pay(query, state, "", plan_id)
 
 
 @dp.message(BuyFlow.waiting_hwid)
@@ -1518,23 +1527,70 @@ async def msg_hwid(message: Message, state: FSMContext):
         )
         return
     plan_id = data.get("plan_id", "week")
-    await _proceed_to_payment(message, state, hwid, plan_id)
+    await _choose_provider_or_pay(message, state, hwid, plan_id)
 
 
-async def _proceed_to_payment(event, state: FSMContext, hwid: str, plan_id: str):
+async def _choose_provider_or_pay(event, state: FSMContext, hwid: str, plan_id: str):
+    """Один доступный провайдер → сразу к оплате (UX без изменений).
+    Несколько → показываем выбор способа оплаты."""
+    if plan_id not in PLANS or PLANS[plan_id].get("admin_only"):
+        if isinstance(event, CallbackQuery):
+            await event.answer("Неизвестный план", show_alert=True)
+        return
+    providers = pay.enabled_for_new_payments()
+    if len(providers) <= 1:
+        provider_key = providers[0].key if providers else "crypto"
+        await _proceed_to_payment(event, state, hwid, plan_id, provider_key)
+        return
+    # Несколько провайдеров — снимаем FSM-состояние (чтобы текст не попал в msg_hwid),
+    # но сохраняем данные для шага выбора способа оплаты.
+    await state.set_state(None)
+    await state.update_data(plan_id=plan_id, hwid=hwid)
+    plan = PLANS[plan_id]
+    price = await db.get_plan_price(plan_id)
+    text = (
+        f"📦 <b>{plan['name']}</b> — ${price:.2f} USDT\n\n"
+        f"💻 HWID: <code>{hwid or 'привяжется при первом запуске'}</code>\n\n"
+        f"Выбери способ оплаты:"
+    )
+    if isinstance(event, CallbackQuery):
+        await send_or_edit(event, text, reply_markup=kb_provider(plan_id, providers))
+    else:
+        await event.answer(text, reply_markup=kb_provider(plan_id, providers))
+
+
+@dp.callback_query(F.data.startswith("pay_with:"))
+async def cb_pay_with(query: CallbackQuery, state: FSMContext):
+    parts = query.data.split(":", 2)
+    if len(parts) < 3:
+        await query.answer("Некорректный выбор", show_alert=True)
+        return
+    provider_key, plan_id = parts[1], parts[2]
+    if plan_id not in PLANS or PLANS[plan_id].get("admin_only"):
+        await query.answer("Неизвестный план", show_alert=True)
+        return
+    if provider_key not in {p.key for p in pay.enabled_for_new_payments()}:
+        await query.answer("Этот способ оплаты недоступен.", show_alert=True)
+        return
+    data = await state.get_data()
+    hwid = data.get("hwid", "")
+    await _proceed_to_payment(query, state, hwid, plan_id, provider_key)
+
+
+async def _proceed_to_payment(event, state: FSMContext, hwid: str, plan_id: str, provider_key: str = "crypto"):
     plan = PLANS[plan_id]
     price = await db.get_plan_price(plan_id)
     user_id = event.from_user.id if hasattr(event, "from_user") else event.message.from_user.id
+    provider = pay.get_provider(provider_key) or pay.get_provider("crypto")
     try:
-        invoice = await crypto_client.create_invoice(
+        invoice = await provider.create_invoice(
             amount=price,
-            asset="USDT",
             description=f"FMail Sender — {plan['name']}",
         )
         pay_url = invoice.get("pay_url", "")
         invoice_id = str(invoice.get("invoice_id", ""))
     except Exception as e:
-        logger.error(f"CryptoPay error: {e}")
+        logger.error("Payment create error (%s): %s", provider.key, e)
         err_text = f"❌ Ошибка создания платежа: {e}"
         if isinstance(event, CallbackQuery):
             await send_or_edit(event, err_text, reply_markup=kb_back_main())
@@ -1543,14 +1599,18 @@ async def _proceed_to_payment(event, state: FSMContext, hwid: str, plan_id: str)
         await state.clear()
         return
 
-    await db.save_payment(telegram_id=user_id, invoice_id=invoice_id, plan=plan_id, hwid=hwid, amount=price)
+    await db.save_payment(
+        telegram_id=user_id, invoice_id=invoice_id, plan=plan_id, hwid=hwid,
+        amount=price, currency=provider.currency, provider=provider.key,
+    )
     await state.update_data(invoice_id=invoice_id, hwid=hwid)
     await state.set_state(BuyFlow.waiting_payment)
     text = (
         f"💳 <b>Оплата</b>\n\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
-        f"💰 Сумма: <b>${price:.2f} USDT</b>\n"
-        f"💻 HWID: <code>{hwid}</code>\n\n"
+        f"💰 Сумма: <b>${price:.2f} {provider.currency}</b>\n"
+        f"💳 Способ: <b>{provider.label}</b>\n"
+        f"💻 HWID: <code>{hwid or 'привяжется при первом запуске'}</code>\n\n"
         f"Нажми <b>«Оплатить»</b> и после оплаты нажми «Проверить»."
     )
     if isinstance(event, CallbackQuery):
@@ -1566,11 +1626,23 @@ async def cb_check_pay(query: CallbackQuery, state: FSMContext):
     if not payment:
         await query.answer("❌ Платёж не найден.", show_alert=True)
         return
+    # Защита от IDOR/replay: ключ выдаётся только владельцу платежа.
+    # invoice_id у CryptoBot/xRocket — угадываемые числовые ID, поэтому без
+    # этой проверки чужой пользователь мог бы забрать оплаченный ключ.
+    owner_id = payment.get("telegram_id") or 0
+    if owner_id and owner_id != query.from_user.id and not is_admin(query.from_user.id):
+        await query.answer("❌ Это не ваш платёж.", show_alert=True)
+        return
+    provider_key = payment.get("provider") or "crypto"
+    if not pay.available_for_check(provider_key):
+        await query.answer("⚠️ Этот способ оплаты временно недоступен. Обратитесь в поддержку.", show_alert=True)
+        return
+    provider = pay.get_provider(provider_key)
     try:
-        paid = await crypto_client.check_invoice(
+        paid = await provider.check(
             invoice_id,
             expected_amount=payment.get("amount"),
-            expected_asset="USDT",
+            expected_currency=payment.get("currency"),
         )
     except Exception as e:
         await query.answer(f"Ошибка проверки: {e}", show_alert=True)
@@ -1585,6 +1657,14 @@ async def cb_check_pay(query: CallbackQuery, state: FSMContext):
         hwid=payment.get("hwid", ""),
         telegram_id=payment.get("telegram_id", 0),
     )
+    if not license_data.get("key"):
+        # Редкая гонка: параллельный вызов ещё формирует ключ. Состояние не
+        # сбрасываем, чтобы пользователь мог повторить проверку.
+        await query.answer(
+            "⏳ Платёж подтверждён, ключ формируется. Нажмите «Проверить» ещё раз через несколько секунд.",
+            show_alert=True,
+        )
+        return
     await state.clear()
     text = (
         f"✅ <b>Оплата подтверждена!</b>\n\n"
@@ -3210,11 +3290,15 @@ async def _poll_pending_payments():
                 invoice_id = payment.get("invoice_id", "")
                 if not invoice_id:
                     continue
+                provider_key = payment.get("provider") or "crypto"
+                if not pay.available_for_check(provider_key):
+                    continue
+                _provider = pay.get_provider(provider_key)
                 try:
-                    paid = await crypto_client.check_invoice(
+                    paid = await _provider.check(
                         invoice_id,
                         expected_amount=payment.get("amount"),
-                        expected_asset="USDT",
+                        expected_currency=payment.get("currency"),
                     )
                     if paid:
                         license_data = await db.create_license_for_payment(
@@ -3223,6 +3307,9 @@ async def _poll_pending_payments():
                             hwid=payment.get("hwid", ""),
                             telegram_id=payment.get("telegram_id", 0),
                         )
+                        if not license_data.get("created"):
+                            # уже обработан (например ручной проверкой) — без повторного уведомления
+                            continue
                         user_id = payment.get("telegram_id", 0)
                         plan_name = PLANS.get(payment.get("plan", ""), {}).get("name", payment.get("plan", ""))
                         try:
@@ -3286,7 +3373,7 @@ async def main():
             _poll_pending_payments(),
         )
     finally:
-        await crypto_client.close()
+        await pay.close_all()
 
 
 if __name__ == "__main__":
