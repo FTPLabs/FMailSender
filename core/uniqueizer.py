@@ -299,7 +299,7 @@ def technique_font_stack(html: str) -> str:
             random.shuffle(specific)
             return "font-family: " + ", ".join(specific + [generic])
         return m.group(0)
-    return re.sub(r'font-family:\s*([^;'{}"]+)', _shuffle, html)
+    return re.sub(r"font-family:\s*([^;{}]+)", _shuffle, html)
 
 
 # ============================================================
