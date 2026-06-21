@@ -574,21 +574,21 @@ a {{ color: #6366F1; }}
         if self.preview is not None:
             if _HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
                 # Временный файл → QWebEngineView загружает внешние ресурсы (картинки, шрифты)
-                  try:
-                      with tempfile.NamedTemporaryFile(
-                          mode="w", suffix=".html", delete=False, encoding="utf-8"
-                      ) as tmp:
-                          tmp.write(html)
-                          tmp_path = tmp.name
-                      self.preview.load(QUrl.fromLocalFile(tmp_path))
-                      QTimer.singleShot(
-                          10000,
-                          lambda p=tmp_path: os.unlink(p) if os.path.exists(p) else None
-                      )
-                  except Exception:
-                      self.preview.setHtml(html, QUrl("https://fmail.shop/"))
-              else:
-                  self.preview.setHtml(html)
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".html", delete=False, encoding="utf-8"
+                    ) as tmp:
+                        tmp.write(html)
+                        tmp_path = tmp.name
+                    self.preview.load(QUrl.fromLocalFile(tmp_path))
+                    QTimer.singleShot(
+                        10000,
+                        lambda p=tmp_path: os.unlink(p) if os.path.exists(p) else None
+                    )
+                except Exception:
+                    self.preview.setHtml(html, QUrl("https://fmail.shop/"))
+            else:
+                self.preview.setHtml(html)
 
     def _add_attachment(self):
         paths, _ = QFileDialog.getOpenFileNames(
