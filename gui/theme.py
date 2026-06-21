@@ -261,6 +261,61 @@ QCheckBox::indicator {{
 }}
 QCheckBox::indicator:checked {{ background: {c.ACCENT}; border-color: {c.ACCENT}; }}
 QCheckBox::indicator:unchecked:hover {{ border-color: {c.ACCENT}; }}
+  /* === DIALOGS (popup styling) ========================================= */
+  /* Диалоговые окна — фон поверхности, не чёрный */
+  QDialog {{
+      background-color: {c.BG_BASE};
+  }}
+  QDialog QFrame[objectName="card"] {{
+      background: {c.BG_SURFACE};
+      border: 1px solid {c.BORDER};
+      border-radius: {r.CARD};
+  }}
+  QDialog QLabel {{
+      background: transparent;
+      color: {c.TEXT_PRIMARY};
+  }}
+  QDialog QLabel[objectName="label_muted"] {{
+      color: {c.TEXT_MUTED};
+  }}
+  /* Чекбоксы в диалогах — видимый текст */
+  QDialog QCheckBox {{
+      background: transparent;
+      color: {c.TEXT_PRIMARY};
+      spacing: 8px;
+      padding: 3px 0;
+      font-size: {t.SIZE_SM}px;
+  }}
+  QDialog QCheckBox::indicator {{
+      width: 16px; height: 16px;
+      border: 1px solid {c.BORDER_HOVER};
+      border-radius: 4px;
+      background: rgba(255,255,255,0.04);
+  }}
+  QDialog QCheckBox::indicator:checked {{
+      background: {c.ACCENT};
+      border-color: {c.ACCENT};
+      image: none;
+  }}
+  QDialog QCheckBox::indicator:hover {{
+      border-color: {c.ACCENT};
+      background: {c.ACCENT_DIM};
+  }}
+  /* ScrollArea в диалогах */
+  QDialog QScrollArea {{
+      background: {c.BG_SURFACE};
+      border: 1px solid {c.BORDER};
+      border-radius: {r.CARD};
+  }}
+  QDialog QScrollArea > QWidget > QWidget {{
+      background: transparent;
+  }}
+  /* Кнопки в диалогах */
+  QDialogButtonBox QPushButton {{
+      min-width: 80px;
+  }}
+
+  
 
 /* === TABS =========================================================== */
 QTabBar::tab {{
