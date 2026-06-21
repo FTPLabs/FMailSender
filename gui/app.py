@@ -290,12 +290,14 @@ class MainWindow(QMainWindow):
         inbox      = self._screens.get("inbox")
         dashboard  = self._screens.get("dashboard")
 
-        # accounts → sending + inbox
+        # accounts → sending + inbox + compose (для автоматического теста доставки)
         if hasattr(accounts, "accounts_changed"):
             if hasattr(sending, "set_accounts"):
                 accounts.accounts_changed.connect(sending.set_accounts)
             if hasattr(inbox, "set_accounts"):
                 accounts.accounts_changed.connect(inbox.set_accounts)
+            if hasattr(compose, "set_accounts"):
+                accounts.accounts_changed.connect(compose.set_accounts)
 
         # recipients → sending + inbox
         if hasattr(recipients, "list_ready"):
