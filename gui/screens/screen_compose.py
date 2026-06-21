@@ -517,22 +517,22 @@ class ComposeScreen(QWidget):
           bottom_row.addStretch()
 
           self.spam_check_btn = QPushButton("Проверить спам-балл")
-            self.spam_check_btn.clicked.connect(self._check_spam)
-            bottom_row.addWidget(self.spam_check_btn)
+          self.spam_check_btn.clicked.connect(self._check_spam)
+          bottom_row.addWidget(self.spam_check_btn)
 
-            self.uniqueize_btn = QPushButton("\U0001f500 Уникализировать")
-            self.uniqueize_btn.setObjectName("btn_secondary")
-            self.uniqueize_btn.setToolTip("16 техник уникализации для обхода спам-фильтров")
-            self.uniqueize_btn.clicked.connect(self._uniqueize)
-            bottom_row.addWidget(self.uniqueize_btn)
+          self.uniqueize_btn = QPushButton("\U0001f500 Уникализировать")
+          self.uniqueize_btn.setObjectName("btn_secondary")
+          self.uniqueize_btn.setToolTip("16 техник уникализации для обхода спам-фильтров")
+          self.uniqueize_btn.clicked.connect(self._uniqueize)
+          bottom_row.addWidget(self.uniqueize_btn)
 
-            self.delivery_test_btn = QPushButton("\U0001f4ec Тест доставки")
-            self.delivery_test_btn.setObjectName("btn_secondary")
-            self.delivery_test_btn.setToolTip("Проверить: письмо попадёт во Входящие или Спам?")
-            self.delivery_test_btn.clicked.connect(self._test_delivery)
-            bottom_row.addWidget(self.delivery_test_btn)
+          self.delivery_test_btn = QPushButton("\U0001f4ec Тест доставки")
+          self.delivery_test_btn.setObjectName("btn_secondary")
+          self.delivery_test_btn.setToolTip("Проверить: письмо попадёт во Входящие или Спам?")
+          self.delivery_test_btn.clicked.connect(self._test_delivery)
+          bottom_row.addWidget(self.delivery_test_btn)
 
-            layout.addLayout(bottom_row)
+          layout.addLayout(bottom_row)
 
   
     def _on_content_changed(self):
