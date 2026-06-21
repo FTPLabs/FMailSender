@@ -40,7 +40,11 @@ except ImportError:
     _HAS_AIOSMTPLIB = False
 
 try:
-    from core.oauth2_refresh import get_valid_access_token as _get_oauth_token, is_ms_domain as _is_ms_domain
+    from core.oauth2_refresh import (
+        get_valid_access_token as _get_oauth_token,
+        is_ms_domain as _is_ms_domain,
+        build_xoauth2 as _build_xoauth2,
+    )
     _HAS_OAUTH2 = True
 except ImportError:
     _HAS_OAUTH2 = False
@@ -51,6 +55,10 @@ except ImportError:
             "outlook.com","hotmail.com","live.com","msn.com","windowslive.com",
             "outlook.de","hotmail.de","live.de","outlook.fr","hotmail.fr",
         }
+    def _build_xoauth2(email: str, access_token: str) -> str:
+        import base64 as _b64
+        raw = f"user={email}\x01auth=Bearer {access_token}\x01\x01"
+        return _b64.b64encode(raw.encode()).decode()
 
 
 # BUG FIX #6: заменяем 200+ дублированных записей на паттерн-матчинг.
@@ -574,10 +582,36 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                   if use_tls:
                       s.starttls(context=ctx)
                       s.ehlo()
-              s.login(account.email, account.password)
+              # OAuth2/XOAUTH2 для Microsoft (Outlook/Hotmail/Live) — иначе LOGIN
+              _oauth_tok = ""
+              if _is_ms_domain(account.email) and (
+                  getattr(account, "refresh_token", "")
+                  or getattr(account, "access_token", "")
+                  or getattr(account, "oauth_token", "")
+              ):
+                  _oauth_tok = (
+                      _get_oauth_token(account) if _HAS_OAUTH2
+                      else (getattr(account, "access_token", "") or getattr(account, "oauth_token", ""))
+                  )
+              if _oauth_tok:
+                  s.ehlo()
+                  _xo = _build_xoauth2(account.email, _oauth_tok)
+                  code, resp = s.docmd("AUTH", "XOAUTH2 " + _xo)
+                  if code == 334:  # challenge → авторизация не прошла, завершаем пустой строкой
+                      code, resp = s.docmd("")
+                  if code != 235:
+                      _rmsg = resp.decode("utf-8", "replace") if isinstance(resp, (bytes, bytearray)) else str(resp)
+                      try:
+                          s.quit()
+                      except Exception:
+                          pass
+                      return False, f"OAuth2 отклонён: {_rmsg[:120]}"
+              else:
+                  s.login(account.email, account.password)
               s.quit()
               cert_flag = "" if verify else " (cert-verify=off)"
-              return True, f"OK — {host}:{port}{cert_flag} авторизация успешна"
+              _auth_kind = " (OAuth2)" if _oauth_tok else ""
+              return True, f"OK — {host}:{port}{cert_flag}{_auth_kind} авторизация успешна"
           except _smtplib.SMTPAuthenticationError as e:
               raw = e.smtp_error
               detail = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
