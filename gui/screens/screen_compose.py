@@ -525,10 +525,6 @@ class ComposeScreen(QWidget):
 
           bottom_row.addStretch()
 
-          self.spam_check_btn = QPushButton("Проверить спам-балл")
-          self.spam_check_btn.clicked.connect(self._check_spam)
-          bottom_row.addWidget(self.spam_check_btn)
-
           self.uniqueize_btn = QPushButton("Уникализировать")
           self.uniqueize_btn.setObjectName("btn_secondary")
           self.uniqueize_btn.setIcon(icons.make_icon(icons.ZAP, 16))

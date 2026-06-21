@@ -55,3 +55,17 @@ def strip_html(html_str: str, max_len: int | None = None) -> str:
     if max_len is not None:
         text = text[:max_len]
     return text
+
+
+def resource_path(*parts: str) -> str:
+    """Абсолютный путь к ресурсу. Работает и в dev, и в PyInstaller-бандле.
+
+    В собранном .exe ресурсы лежат в sys._MEIPASS; в dev — относительно корня
+    проекта (core/ -> ..). Используйте для assets/images, assets/sounds и т.п.
+    """
+    import sys
+    from pathlib import Path
+    base = getattr(sys, "_MEIPASS", None)
+    if base is None:
+        base = Path(__file__).resolve().parent.parent  # core/ -> корень проекта
+    return str(Path(base).joinpath(*parts))

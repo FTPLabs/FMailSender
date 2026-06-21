@@ -19,17 +19,30 @@ from gui import icons
 
 # ── Звуковое уведомление ────────────────────────────────────────────────────
 def _play_completion_chime() -> None:
-    """Воспроизводит мелодичный аккорд C-E-G при завершении рассылки (Windows только)."""
-    import threading
+    """Мягкий тихий сигнал о завершении рассылки.
+
+    Воспроизводит заранее сгенерированный нежный колокольчик (assets/sounds/
+    complete.wav) — приятный и негромкий. На не-Windows платформах тихо
+    игнорируется. Громкость заложена в самом файле (~-6 dBFS).
+    """
     def _chime():
         try:
-            import winsound, time as _t
-            # Мажорный аккорд C5-E5-G5 — приятное звуковое уведомление
-            for freq, dur in [(523, 140), (659, 140), (784, 240)]:
-                winsound.Beep(freq, dur)
-                _t.sleep(0.04)
+            import os
+            from core.utils import resource_path
+            wav = resource_path("assets", "sounds", "complete.wav")
+            if os.path.isfile(wav):
+                import winsound
+                winsound.PlaySound(wav, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                return
+        except Exception:
+            pass
+        # Fallback — один мягкий короткий тон
+        try:
+            import winsound
+            winsound.Beep(660, 180)
         except Exception:
             pass  # non-Windows или нет звука — тихо игнорируем
+    import threading
     threading.Thread(target=_chime, daemon=True).start()
 
 

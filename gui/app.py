@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QByteArray, QSize, pyqtSignal
 from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor
+from PyQt6.QtGui import QPixmap, QPainter, QLinearGradient, QColor, QIcon
 
 from gui import icons
 from gui.theme import Colors, Spacing, Typography
@@ -141,7 +141,20 @@ class Sidebar(QFrame):
         lf_layout.setSpacing(10)
 
         icon_lbl = QLabel()
-        pix = _render_svg_icon(LOGO_SVG, 28)
+        pix = None
+        try:
+            from core.utils import resource_path
+            _logo = QPixmap(resource_path("assets", "images", "fmail_logo.png"))
+            if not _logo.isNull():
+                pix = _logo.scaled(
+                    28, 28,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+        except Exception:
+            pix = None
+        if pix is None:  # fallback — встроенный SVG
+            pix = _render_svg_icon(LOGO_SVG, 28)
         icon_lbl.setPixmap(pix)
         icon_lbl.setFixedSize(28, 28)
         icon_lbl.setStyleSheet("background: transparent; border: none;")
@@ -233,6 +246,15 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         except Exception:
             self.setWindowTitle("FMail Sender Pro")
+
+        # Иконка окна — логотип приложения
+        try:
+            from core.utils import resource_path
+            _ico = QIcon(resource_path("assets", "images", "fmail_logo.png"))
+            if not _ico.isNull():
+                self.setWindowIcon(_ico)
+        except Exception:
+            pass
 
         self.setMinimumSize(1024, 660)
         self.resize(1280, 780)
