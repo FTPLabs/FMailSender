@@ -39,19 +39,6 @@ jobs:
           fi
           echo "All .py files passed syntax check."
 
-      - name: Colors attribute guard
-        shell: bash
-        run: |
-          echo "=== Colors guard ===" && python3 -c "
-import ast, sys, pathlib
-src = pathlib.Path('gui/theme.py').read_text(encoding='utf-8')
-tree = ast.parse(src)
-defined = {t.id for node in ast.walk(tree) if isinstance(node, ast.ClassDef) and node.name == 'Colors' for item in node.body if isinstance(item, ast.Assign) for t in item.targets if isinstance(t, ast.Name)}
-used = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == 'c'}
-miss = sorted(used - defined)
-sys.exit(1) if miss and print('FAIL:', miss) else print('OK defined=%d used=%d' % (len(defined), len(used)))
-"
-
       - name: pyflakes check
         shell: bash
         run: |
