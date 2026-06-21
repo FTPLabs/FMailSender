@@ -55,7 +55,7 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "aim.com":           {"host": "smtp.aol.com",          "port": 465, "use_ssl": True,  "use_tls": False},
     "netscape.net":      {"host": "smtp.aol.com",          "port": 465, "use_ssl": True,  "use_tls": False},
     "compuserve.com":    {"host": "smtp.aol.com",          "port": 465, "use_ssl": True,  "use_tls": False},
-    "verizon.net":       {"host": "outgoing.verizon.net",  "port": 465, "use_ssl": True,  "use_tls": False},
+    "verizon.net":       {"host": "smtp.aol.com",          "port": 465, "use_ssl": True,  "use_tls": False},  # FIX: outgoing.verizon.net→smtp.aol.com (Verizon→AOL 2017)
     "att.net":           {"host": "smtp.att.yahoo.com",    "port": 465, "use_ssl": True,  "use_tls": False},
     "sbcglobal.net":     {"host": "smtp.att.yahoo.com",    "port": 465, "use_ssl": True,  "use_tls": False},
     "bellsouth.net":     {"host": "smtp.att.yahoo.com",    "port": 465, "use_ssl": True,  "use_tls": False},
@@ -108,7 +108,7 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "list.ru":           {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
     "bk.ru":             {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
     "internet.ru":       {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
-    "mail.ua":           {"host": "smtp.mail.ua",          "port": 465, "use_ssl": True,  "use_tls": False},  # FIX БАГ-3: mail.ua != mail.ru
+    "mail.ua":           {"host": "smtp.ukr.net",          "port": 465, "use_ssl": True,  "use_tls": False},  # FIX: smtp.mail.ua ENOTFOUND→smtp.ukr.net (mail.ua→ukr.net infrastructure)
     "ro.ru":             {"host": "smtp.mail.ru",          "port": 465, "use_ssl": True,  "use_tls": False},
     "yandex.ru":         {"host": "smtp.yandex.ru",        "port": 465, "use_ssl": True,  "use_tls": False},
     "yandex.com":        {"host": "smtp.yandex.com",       "port": 465, "use_ssl": True,  "use_tls": False},
@@ -126,7 +126,7 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "bigmir.net":        {"host": "smtp.bigmir.net",       "port": 465, "use_ssl": True,  "use_tls": False},
     "email.ua":          {"host": "smtp.email.ua",         "port": 465, "use_ssl": True,  "use_tls": False},
     "inbox.lv":          {"host": "smtp.inbox.lv",         "port": 465, "use_ssl": True,  "use_tls": False},
-    "mail.lt":           {"host": "smtp.mail.lt",          "port": 465, "use_ssl": True,  "use_tls": False},
+    "mail.lt":           {"host": "smtp.domreg.lt",        "port": 587, "use_ssl": False, "use_tls": True},   # FIX: smtp.mail.lt ENOTFOUND→smtp.domreg.lt
     "web.de":            {"host": "smtp.web.de",           "port": 587, "use_ssl": False, "use_tls": True},
     "freenet.de":        {"host": "mx.freenet.de",         "port": 587, "use_ssl": False, "use_tls": True},
     "t-online.de":       {"host": "securesmtp.t-online.de","port": 465, "use_ssl": True,  "use_tls": False},
@@ -150,7 +150,7 @@ _SMTP_CONFIGS: dict[str, dict] = {
     "bbox.fr":           {"host": "smtp.bbox.fr",          "port": 465, "use_ssl": True,  "use_tls": False},
     "btinternet.com":    {"host": "smtp.btinternet.com",   "port": 465, "use_ssl": True,  "use_tls": False},
     "btopenworld.com":   {"host": "smtp.btinternet.com",   "port": 465, "use_ssl": True,  "use_tls": False},
-    "sky.com":           {"host": "smtp.sky.com",          "port": 587, "use_ssl": False, "use_tls": True},
+    "sky.com":           {"host": "smtp.office365.com",    "port": 587, "use_ssl": False, "use_tls": True},  # FIX: smtp.sky.com ENOTFOUND→office365 (Sky UK 2023+)
     "virginmedia.com":   {"host": "smtp.virginmedia.com",  "port": 465, "use_ssl": True,  "use_tls": False},
     "ntlworld.com":      {"host": "smtp.ntlworld.com",     "port": 465, "use_ssl": True,  "use_tls": False},
     "zoho.com":          {"host": "smtp.zoho.com",         "port": 465, "use_ssl": True,  "use_tls": False},

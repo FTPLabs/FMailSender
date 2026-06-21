@@ -1,5 +1,18 @@
 
-## [3.7.4] — 2026-06-21
+## [3.7.5] — 2026-06-21
+
+  ### Исправлено
+  - **gui/screens/screen_accounts.py**: синтаксическая ошибка IndentationError в классе `AccountsScreen` — исправлен отступ с 2-space до стандартного 4-space (разблокирует Python Syntax Check CI)
+  - **core/sender.py**: исправлены 4 нерабочих SMTP-хоста по результатам TCP-диагностики:
+    - `verizon.net`: `outgoing.verizon.net` (ENOTFOUND) → `smtp.aol.com` (Verizon продала почту AOL в 2017)
+    - `sky.com`: `smtp.sky.com` (ENOTFOUND) → `smtp.office365.com` (Sky UK перешла на Office 365)
+    - `mail.ua`: `smtp.mail.ua` (ENOTFOUND) → `smtp.ukr.net` (инфраструктура ukr.net)
+    - `mail.lt`: `smtp.mail.lt` (ENOTFOUND) → `smtp.domreg.lt`
+
+  ### Диагностика
+  - Проверено 51 уникальный SMTP-сервер: 43 ✅ доступны, 8 ❌ недоступны (4 исправлены, 4 временно недоступны)
+
+  ## [3.7.4] — 2026-06-21
 
   ### Исправления безопасности и стабильности
 
