@@ -368,6 +368,7 @@ class SendingScreen(QWidget):
       self._log_queue.put_nowait({"type": "finished", "results": results})
 
   def _flush_log_queue(self):
+      _had_log = False
       while not self._log_queue.empty():
           try:
               item = self._log_queue.get_nowait()
@@ -387,7 +388,10 @@ class SendingScreen(QWidget):
               elif "🚀" in _msg or "═══" in _msg:
                   _wi.setForeground(QColor("#a78bfa"))
               self.log_list.addItem(_wi)
-              self.log_list.scrollToBottom()
+              # Удаляем старые строки если превышен лимит
+              while self.log_list.count() > 1000:
+                  self.log_list.takeItem(0)
+              _had_log = True
           elif t == "progress":
               sent, total = item["sent"], item["total"]
               self._sent = sent
@@ -400,6 +404,8 @@ class SendingScreen(QWidget):
               self._set_kpi(self.kpi_errors_lbl, str(stats.get("errors", 0)))
           elif t == "finished":
               self._on_campaign_done(item["results"])
+      if _had_log:
+          self.log_list.scrollToBottom()
 
   def _set_kpi(self, card, value):
       lbl = card.findChild(QLabel, "_kpi_val")
