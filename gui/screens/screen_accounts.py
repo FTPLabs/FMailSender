@@ -779,19 +779,19 @@ class AccountsScreen(QWidget):
 
           # ── Таблица ───────────────────────────────────────────────────────
           self.table = QTableWidget(0, 3)
-            self.table.setHorizontalHeaderLabels([
-                "Email", "Статус", "Прокси",
-            ])
-            self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-            self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-            self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-            self.table.setColumnWidth(2, 160)
-            self.table.verticalHeader().setVisible(False)
-            self.table.setShowGrid(False)
-            self.table.setAlternatingRowColors(True)
-            self.table.doubleClicked.connect(self._edit_account)
+          self.table.setHorizontalHeaderLabels([
+              "Email", "Статус", "Прокси",
+          ])
+          self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+          self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+          self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+          self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+          self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+          self.table.setColumnWidth(2, 160)
+          self.table.verticalHeader().setVisible(False)
+          self.table.setShowGrid(False)
+          self.table.setAlternatingRowColors(True)
+          self.table.doubleClicked.connect(self._edit_account)
           self.table.itemSelectionChanged.connect(self._update_contextual_buttons)
           layout.addWidget(self.table)
 
