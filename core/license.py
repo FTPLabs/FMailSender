@@ -121,7 +121,11 @@ def _get_fernet_key() -> bytes:
         # FIX КРИТ-4: используем HWID как соль вместо общего хардкода.
         # Это изолирует license.dat между машинами даже без HWID_SALT.
     try:
-        _hwid_for_salt = _hwid_cache or "fmail_hwid_fallback_2024"
+        # FIX RACE: вычисляем HWID если кэш ещё не готов (thread-safe)
+        _cached = _hwid_cache
+        if _cached is None:
+            _cached = generate_hwid()
+        _hwid_for_salt = _cached or "fmail_hwid_fallback_2024"
     except Exception:
         _hwid_for_salt = "fmail_hwid_fallback_2024"
     salt = _hwid_for_salt.encode("utf-8")[:32]
