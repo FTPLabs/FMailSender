@@ -126,13 +126,13 @@ class FieldMappingDialog(QDialog):
 
 
 
-  def _stat_label(text: str, color: str = "") -> "QLabel":
-      """Вспомогательная метка статистики с цветным текстом."""
-      lbl = QLabel(text)
-      lbl.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 600;" if color else "font-size: 11px; font-weight: 600;")
-      return lbl
+def _stat_label(text: str, color: str = "") -> "QLabel":
+    """Вспомогательная метка статистики с цветным текстом."""
+    lbl = QLabel(text)
+    lbl.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 600;" if color else "font-size: 11px; font-weight: 600;")
+    return lbl
 
-  class RecipientsScreen(QWidget):
+class RecipientsScreen(QWidget):
     """Экран управления списками получателей."""
 
     list_ready = pyqtSignal(list)  # List[Recipient]
