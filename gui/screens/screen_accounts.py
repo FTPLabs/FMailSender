@@ -838,15 +838,15 @@ class AccountsScreen(QWidget):
       self.status_label.setText(f"Аккаунтов: {len(self._accounts)} (активных: {active_count})")
 
 
-    def _update_contextual_buttons(self):
-        """Показывает/скрывает контекстные кнопки в зависимости от выбора строк."""
-        selected = len(set(idx.row() for idx in self.table.selectedIndexes()))
-        has_sel = selected > 0
-        self._ctx_test_btn.setVisible(has_sel)
-        self._ctx_del_btn.setVisible(has_sel)
-        if has_sel:
-            self._ctx_test_btn.setText(f"⚡ Проверить ({selected})")
-            self._ctx_del_btn.setText(f"🗑 Удалить ({selected})")
+  def _update_contextual_buttons(self):
+      """Показывает/скрывает контекстные кнопки в зависимости от выбора строк."""
+      selected = len(set(idx.row() for idx in self.table.selectedIndexes()))
+      has_sel = selected > 0
+      self._ctx_test_btn.setVisible(has_sel)
+      self._ctx_del_btn.setVisible(has_sel)
+      if has_sel:
+          self._ctx_test_btn.setText(f"⚡ Проверить ({selected})")
+          self._ctx_del_btn.setText(f"🗑 Удалить ({selected})")
   
   def _add_account(self):
       dlg = AccountDialog(parent=self)
