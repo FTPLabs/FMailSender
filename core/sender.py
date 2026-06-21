@@ -39,6 +39,19 @@ try:
 except ImportError:
     _HAS_AIOSMTPLIB = False
 
+try:
+    from core.oauth2_refresh import get_valid_access_token as _get_oauth_token, is_ms_domain as _is_ms_domain
+    _HAS_OAUTH2 = True
+except ImportError:
+    _HAS_OAUTH2 = False
+    def _get_oauth_token(account) -> str:
+        return getattr(account, "oauth_token", "") or ""
+    def _is_ms_domain(email: str) -> bool:
+        return email.split("@")[-1].lower() in {
+            "outlook.com","hotmail.com","live.com","msn.com","windowslive.com",
+            "outlook.de","hotmail.de","live.de","outlook.fr","hotmail.fr",
+        }
+
 
 # BUG FIX #6: заменяем 200+ дублированных записей на паттерн-матчинг.
 # outlook/hotmail/live/* все используют один сервер — хранить 150 записей бессмысленно.
@@ -338,8 +351,11 @@ class SmtpAccount:
     hourly_limit: int = 50
     is_active: bool = True
     proxy: str = ""
-    oauth_token: str = ""
-    imap_host: str = ""
+    oauth_token: str = ""       # access_token (legacy field — используй access_token)
+      access_token: str = ""     # Актуальный OAuth2 Bearer access_token
+      refresh_token: str = ""    # OAuth2 refresh_token для авто-обновления
+      token_expires_at: float = 0.0  # Unix-timestamp истечения access_token
+      imap_host: str = ""
     imap_port: int = 993
     imap_ssl: bool = True
     last_test_ok: Optional[bool] = field(default=None)
@@ -915,7 +931,8 @@ class SendingEngine:
                       "live.fr", "outlook.ru", "hotmail.ru", "live.ru", "outlook.co.uk",
                       "hotmail.co.uk", "outlook.es", "hotmail.es", "outlook.it", "hotmail.it",
                   })
-                  _oauth = getattr(account, "oauth_token", "")
+                  # Авто-обновление OAuth2 токена через refresh_token
+                  _oauth = _get_oauth_token(account) if _HAS_OAUTH2 else getattr(account, "oauth_token", "")
                   if _oauth and _domain_async in _ms_domains_async:
                       # Для Outlook OAuth2: используем токен как пароль через LOGIN
                       await smtp.login(account.email, _oauth)
@@ -1050,10 +1067,11 @@ class SendingEngine:
                   "outlook.ru","hotmail.ru","live.ru","outlook.co.uk","hotmail.co.uk",
                   "outlook.es","hotmail.es","outlook.it","hotmail.it","outlook.nl",
               })
-              if getattr(account, "oauth_token", "") and _domain in _ms_domains:
+              _current_token = _get_oauth_token(account) if _HAS_OAUTH2 else getattr(account, "oauth_token", "")
+              if _current_token and _domain in _ms_domains:
                   _xoauth2 = base64.b64encode(
                       ("user=" + account.email + "\x01auth=Bearer " +
-                       account.oauth_token + "\x01\x01").encode()
+                       _current_token + "\x01\x01").encode()
                   ).decode()
                   smtp_conn.docmd("AUTH", "XOAUTH2 " + _xoauth2)
               else:
