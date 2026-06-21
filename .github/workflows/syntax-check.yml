@@ -39,6 +39,34 @@ jobs:
           fi
           echo "All .py files passed syntax check."
 
+
+      - name: Colors-guard (проверка атрибутов Colors в theme.py)
+        shell: bash
+        run: |
+          echo "=== Colors attribute guard ==="
+          python3 - << 'PYEOF'
+import ast, sys, pathlib
+src = pathlib.Path("gui/theme.py").read_text(encoding="utf-8")
+tree = ast.parse(src)
+defined = set()
+used = set()
+for node in ast.walk(tree):
+    if isinstance(node, ast.ClassDef) and node.name == "Colors":
+        for item in node.body:
+            if isinstance(item, ast.Assign):
+                for t in item.targets:
+                    if isinstance(t, ast.Name):
+                        defined.add(t.id)
+    if isinstance(node, ast.Attribute):
+        if isinstance(node.value, ast.Name) and node.value.id == "c":
+            used.add(node.attr)
+missing = sorted(used - defined)
+if missing:
+    print("ERROR: Colors attributes used but not defined:", missing)
+    sys.exit(1)
+print("Colors-guard OK. Defined:", len(defined), "Used:", len(used))
+PYEOF
+
       - name: pyflakes check
         shell: bash
         run: |
