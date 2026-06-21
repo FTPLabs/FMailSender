@@ -499,72 +499,83 @@ def _build_message(
 
 
 def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
-    """Sync SMTP test через стандартный smtplib — надёжно работает с любым провайдером."""
-    import ssl as _ssl
-    try:
-        ctx = _ssl.create_default_context()
-        if account.use_ssl:
-            s = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=8)
-        else:
-            s = smtplib.SMTP(account.host, account.port, timeout=8)
-            s.ehlo()
-            if account.use_tls:
-                s.starttls(context=ctx)
-                s.ehlo()  # повторный EHLO после STARTTLS — обязателен по RFC
-        s.login(account.email, account.password)
-        s.quit()
-        return True, f"OK — {account.host}:{account.port} авторизация успешна"
-    except smtplib.SMTPAuthenticationError as e:
-        raw = e.smtp_error
-        detail = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
-        return False, f"Неверный логин или пароль. {detail[:120]}"
-    except (smtplib.SMTPConnectError, ConnectionRefusedError, OSError, TimeoutError) as _conn_err:
-          # FIX: exhaustive port fallback — пробуем ВСЕ комбинации пока не успех
-          _all_combos = [
-              (465,  True,  False),  # SMTPS (implicit SSL)
-              (587,  False, True),   # STARTTLS
-              (25,   False, False),  # Plain SMTP
-              (2525, False, True),   # Альтернативный STARTTLS
-          ]
-          _tried = {account.port}
-          for _fb_port, _fb_ssl, _fb_tls in _all_combos:
-              if _fb_port in _tried:
-                  continue
-              _tried.add(_fb_port)
-              try:
-                  _ctx2 = _ssl.create_default_context()
-                  if _fb_ssl:
-                      _s2 = smtplib.SMTP_SSL(account.host, _fb_port, context=_ctx2, timeout=8)
-                  else:
-                      _s2 = smtplib.SMTP(account.host, _fb_port, timeout=8)
-                      _s2.ehlo()
-                      if _fb_tls:
-                          _s2.starttls(context=_ctx2)
-                          _s2.ehlo()
-                  _s2.login(account.email, account.password)
-                  _s2.quit()
-                  return True, f"OK — {account.host}:{_fb_port} (fallback) авторизация успешна"
-              except smtplib.SMTPAuthenticationError as _auth_e:
-                  _raw2 = _auth_e.smtp_error
-                  _det2 = _raw2.decode("utf-8", errors="replace") if isinstance(_raw2, bytes) else str(_raw2)
-                  return False, f"Неверный логин или пароль (порт {_fb_port}). {_det2[:120]}"
-              except Exception as _exc:
-                  import logging as _lg; _lg.getLogger("sender").warning("Пропущен элемент: %s", _exc); continue
-          return False, f"Не удалось подключиться к {account.host} ни на одном порту (465/587/25/2525)."
-    # (dead code removed — fallback handles this above)
-    except smtplib.SMTPNotSupportedError:
-        return False, "Сервер не поддерживает SMTP AUTH. Outlook/Hotmail — требуется App Password. T-online — нужен пароль для внешних программ."
-    except smtplib.SMTPException as _smtp_ex:
-        _smtp_msg = str(_smtp_ex)
-        if "5.7.139" in _smtp_msg or "basic authentication is disabled" in _smtp_msg.lower():
-            return False, "Microsoft отключил базовую SMTP-аутентификацию. Требуется App Password (outlook.com/account/security)."
-    except smtplib.SMTPServerDisconnected:
-        return False, "Сервер разорвал соединение. Возможно, неверный протокол (SSL/TLS)."
-    except OSError as e:
-        return False, f"Сетевая ошибка: {e}"
-    except Exception as e:
-        return False, f"Ошибка [{type(e).__name__}]: {e}"
+      """
+      Sync SMTP test с автоматическим многоуровневым fallback:
+        1) SSL/TLS с проверкой сертификата
+        2) SSL/TLS без проверки сертификата (для серверов с self-signed cert)
+        3) Перебор портов: 465 → 587 → 25 → 2525 (каждый — с и без cert-verify)
+      Позволяет корректно работать с серверами (Rambler, корпоративные),
+      чьи SSL-сертификаты не проходят стандартную верификацию.
+      """
+      import ssl as _ssl
+      import smtplib as _smtplib
 
+      def _attempt(host: str, port: int, use_ssl: bool, use_tls: bool, verify: bool = True):
+          """Одна попытка подключения. Возвращает (True/False/None, msg).
+          True = успех, False = auth fail (пароль неверен), None = connect/ssl ошибка.
+          """
+          ctx = _ssl.create_default_context()
+          if not verify:
+              ctx.check_hostname = False
+              ctx.verify_mode = _ssl.CERT_NONE
+          try:
+              if use_ssl:
+                  s = _smtplib.SMTP_SSL(host, port, context=ctx, timeout=10)
+              else:
+                  s = _smtplib.SMTP(host, port, timeout=10)
+                  s.ehlo()
+                  if use_tls:
+                      s.starttls(context=ctx)
+                      s.ehlo()
+              s.login(account.email, account.password)
+              s.quit()
+              cert_flag = "" if verify else " (cert-verify=off)"
+              return True, f"OK — {host}:{port}{cert_flag} авторизация успешна"
+          except _smtplib.SMTPAuthenticationError as e:
+              raw = e.smtp_error
+              detail = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+              return False, f"Неверный логин или пароль: {detail[:120]}"
+          except _smtplib.SMTPNotSupportedError:
+              return None, "SMTP AUTH не поддерживается. Требуется App Password (Outlook/T-Online)."
+          except _smtplib.SMTPException as ex:
+              msg = str(ex)
+              if "5.7.139" in msg or "basic authentication is disabled" in msg.lower():
+                  return None, "Microsoft отключил базовую SMTP-аутентификацию. Нужен App Password."
+              return None, f"SMTP: {msg[:100]}"
+          except OSError as e:
+              return None, f"connect/{type(e).__name__}: {e}"
+          except Exception as e:
+              return None, f"err/{type(e).__name__}: {e}"
+
+      # ── Шаг 1: основная конфигурация с cert-verify ────────────────────────────
+      ok, msg = _attempt(account.host, account.port, account.use_ssl, account.use_tls, verify=True)
+      if ok is True:
+          return True, msg
+      if ok is False:
+          return False, msg  # Auth fail — не меняем порт, пароль точно неверен
+
+      # ── Шаг 2: та же конфигурация без cert-verify (self-signed SSL) ──────────
+      ok, msg = _attempt(account.host, account.port, account.use_ssl, account.use_tls, verify=False)
+      if ok is True:
+          return True, msg
+      if ok is False:
+          return False, msg
+
+      # ── Шаг 3: перебор резервных портов (с и без cert-verify) ────────────────
+      _combos = [(465, True, False), (587, False, True), (25, False, False), (2525, False, True)]
+      _tried = {account.port}
+      for _port, _ssl_flag, _tls_flag in _combos:
+          if _port in _tried:
+              continue
+          _tried.add(_port)
+          for _verify in (True, False):
+              ok, msg = _attempt(account.host, _port, _ssl_flag, _tls_flag, verify=_verify)
+              if ok is True:
+                  return True, msg
+              if ok is False:
+                  return False, f"Неверный логин или пароль (резервный порт {_port}). {msg}"
+
+      return False, f"Не удалось подключиться к {account.host}. Проверьте сетевой доступ или прокси."
 
 async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
     """
