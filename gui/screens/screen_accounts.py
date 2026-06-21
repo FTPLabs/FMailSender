@@ -236,6 +236,9 @@ def save_accounts(accounts: list[SmtpAccount]) -> None:
             "imap_host": getattr(a, "imap_host", ""),
             "imap_port": getattr(a, "imap_port", 993),
             "imap_ssl": getattr(a, "imap_ssl", True),
+            "refresh_token": getattr(a, "refresh_token", ""),
+            "access_token": getattr(a, "access_token", "") or getattr(a, "oauth_token", ""),
+            "token_expires_at": getattr(a, "token_expires_at", 0.0),
         }
         if hasattr(a, "proxy_list") and a.proxy_list:
             entry["proxy_list"] = a.proxy_list
@@ -274,6 +277,12 @@ def load_accounts() -> list[SmtpAccount]:
             acc.imap_host = d.get("imap_host", "")
             acc.imap_port = d.get("imap_port", 993)
             acc.imap_ssl = d.get("imap_ssl", True)
+            acc.refresh_token = d.get("refresh_token", "")
+            _saved_at = d.get("access_token", "") or d.get("oauth_token", "")
+            if _saved_at:
+                acc.access_token = _saved_at
+                acc.oauth_token = _saved_at
+            acc.token_expires_at = float(d.get("token_expires_at", 0))
             if "proxy_list" in d:
                 acc.proxy_list = d["proxy_list"]
                 acc.proxy_rotation_random = d.get("proxy_rotation_random", False)
@@ -325,19 +334,29 @@ class BulkImportWorker(QThread):
             skipped = 0
             for i, line in enumerate(lines):
                 self.progress.emit(i + 1, total)
-                # Умное определение разделителя: ; или :
-                # Форматы: email:pass  /  email:pass:token  /  email;pass;alias
-                _sep = ";" if ";" in line and ":" not in line.split(";")[0] else ":"
+                # Умное определение разделителя: | (pipe), ; или :
+                # Форматы:
+                #   email|pass|refresh_token   — Outlook OAuth2 (pipe)
+                #   email:pass:token            — Rambler/прочие
+                #   email;pass;alias            — Google Workspace alias
+                _refresh_token_import = ""
+                if "|" in line and line.count("|") >= 1:
+                    # Pipe-формат: email|password|refresh_token
+                    _sep = "|"
+                elif ";" in line and ":" not in line.split(";")[0]:
+                    _sep = ";"
+                else:
+                    _sep = ":"
                 parts = line.split(_sep)
                 if len(parts) < 2:
                     skipped += 1
                     continue
                 email = parts[0].strip()
                 alias = parts[2].strip() if len(parts) >= 3 and _sep == ";" else ""
-                # БАГ-FIX: для :-разделителя берём ТОЛЬКО parts[1] как пароль.
-                # email:pass:token (Rambler-формат) — третье поле = токен/резерв, НЕ пароль.
-                # Старый код ":".join(parts[1:]) давал "pass:token" → 100% провал AUTH.
                 password = parts[1].strip()
+                # Для pipe-формата третье поле — refresh_token для OAuth2
+                if _sep == "|" and len(parts) >= 3:
+                    _refresh_token_import = parts[2].strip()
                 if not email or "@" not in email:
                     skipped += 1
                     continue
@@ -358,6 +377,10 @@ class BulkImportWorker(QThread):
                 acc.imap_host = cfg.get("imap_host", "")
                 acc.imap_port = cfg.get("imap_port", 993)
                 acc.imap_ssl = cfg.get("imap_ssl", True)
+                if _refresh_token_import:
+                    acc.refresh_token = _refresh_token_import
+                    # Для Outlook: при наличии refresh_token — авто-получим access_token при первой отправке
+                    acc.oauth_token = ""  # будет заполнено oauth2_refresh модулем
                 if alias and "@" in alias:
                     acc.reply_to = alias  # Google Workspace alias
                 self.new_accounts.append(acc)
