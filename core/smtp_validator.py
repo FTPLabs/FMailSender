@@ -472,7 +472,20 @@ def _try_smtp_connect(
                     smtp.login(email, password)
 
 
-# ── Core validator ─────────────────────────────────────────────────────────────
+
+  def _get_mx_host(domain: str) -> str:
+      """Возвращает первый MX-хост для домена или пустую строку если DNS недоступен."""
+      if not _DNS_OK:
+          return ""
+      try:
+          answers = dns.resolver.resolve(domain, "MX", lifetime=5)
+          mx = sorted(answers, key=lambda r: r.preference)[0]
+          return str(mx.exchange).rstrip(".")
+      except Exception:
+          return ""
+
+
+  # ── Core validator ─────────────────────────────────────────────────────────────
 class SmtpValidator:
     """Test SMTP connectivity (via proxy) and DNS health for email accounts."""
 
