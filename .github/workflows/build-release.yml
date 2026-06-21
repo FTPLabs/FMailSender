@@ -74,14 +74,7 @@ jobs:
           body: |
             ## FMail Sender ${{ steps.version.outputs.version }}
 
-            ### Что нового в v3.8.0
-            - Исправлены дублирующиеся SMTP-конфиги (web.de, yandex, zoho, yahoo)
-            - OAuth2/XOAUTH2 добавлен в async-путь отправки (Outlook/Hotmail/Live)
-            - Новые провайдеры: Fastmail, Tutanota/Tuta, Yahoo CA
-            - Лог рассылки ограничен 1000 строк (защита от утечки RAM)
-            - Производительность: scrollToBottom батчами, не на каждую строку
-            - build.py: исправлен невалидный параметр collect_all
-            - Версия: 3.8.0
+            Полный список изменений — в [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md).
 
             ### Установка
             1. Скачайте `FMailSender.exe`
