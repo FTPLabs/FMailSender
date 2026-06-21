@@ -171,27 +171,49 @@ def technique_data_attrs(html: str, ratio: float = 0.6) -> str:
 # ============================================================
 # Technique 7: CSS micro-variation (color shift +/-1, unique meta)
 # ============================================================
-def technique_css_micro(html: str) -> str:
-    """Смещает цвета на ±1 и добавляет уникальный meta-тег."""
-    uid = _rid(16)
-    marker = (
-        f'<meta name="x-uid" content="{uid}">'
-        f'<meta name="x-ts" content="{random.randint(100_000, 999_999)}">'
-    )
+  def technique_css_micro(html: str) -> str:
+      """Смещает цвета на ±1 только внутри CSS (style='' и <style>) + уникальный meta.
+      НЕ трогает URL-якоря и другие hex-строки вне CSS."""
+      uid = _rid(16)
+      marker = (
+          f'<meta name="x-uid" content="{uid}">'
+          f'<meta name="x-ts" content="{random.randint(100_000, 999_999)}">'
+      )
 
-    def _vary(m: re.Match) -> str:
-        c = m.group(1)
-        try:
-            r2 = max(0, min(255, int(c[0:2], 16) + random.randint(-1, 1)))
-            g2 = max(0, min(255, int(c[2:4], 16) + random.randint(-1, 1)))
-            b2 = max(0, min(255, int(c[4:6], 16) + random.randint(-1, 1)))
-            return f"#{r2:02x}{g2:02x}{b2:02x}"
-        except Exception:
-            return m.group(0)
+      def _vary(m: re.Match) -> str:
+          c = m.group(1)
+          try:
+              r2 = max(0, min(255, int(c[0:2], 16) + random.randint(-1, 1)))
+              g2 = max(0, min(255, int(c[2:4], 16) + random.randint(-1, 1)))
+              b2 = max(0, min(255, int(c[4:6], 16) + random.randint(-1, 1)))
+              return f"#{r2:02x}{g2:02x}{b2:02x}"
+          except Exception:
+              return m.group(0)
 
-    html = re.sub(r"#([0-9a-fA-F]{6})\b", _vary, html)
-    html = re.sub(r"(<head[^>]*>)", r"\1" + marker, html, flags=re.IGNORECASE)
-    return html
+      def _vary_css(css_text: str) -> str:
+          """Вариирует цвета только внутри CSS-контента."""
+          return re.sub(r"#([0-9a-fA-F]{6})\b", _vary, css_text)
+
+      # Только внутри <style>...</style> блоков
+      html = re.sub(
+          r"(<style[^>]*>)(.*?)(</style>)",
+          lambda m: m.group(1) + _vary_css(m.group(2)) + m.group(3),
+          html, flags=re.DOTALL | re.IGNORECASE
+      )
+      # Только внутри style="..." (двойные кавычки)
+      html = re.sub(
+          r'(style\s*=\s*")([^"]+)(")',
+          lambda m: m.group(1) + _vary_css(m.group(2)) + m.group(3),
+          html, flags=re.IGNORECASE
+      )
+      # Только внутри style='...' (одинарные кавычки)
+      html = re.sub(
+          r"(style\s*=\s*')([^']+)(')",
+          lambda m: m.group(1) + _vary_css(m.group(2)) + m.group(3),
+          html, flags=re.IGNORECASE
+      )
+      html = re.sub(r"(<head[^>]*>)", r"\1" + marker, html, flags=re.IGNORECASE)
+      return html
 
 
 # ============================================================
@@ -288,18 +310,48 @@ def technique_hidden_text(html: str, count: int = 3) -> str:
 # ============================================================
 # Technique 13: Font-family stack shuffle
 # ============================================================
-def technique_font_stack(html: str) -> str:
-    """Перемешивает порядок шрифтов в font-family."""
-    def _shuffle(m: re.Match) -> str:
-        raw = m.group(1)
-        fonts = [f.strip().strip("'\"") for f in raw.split(',')]
-        if len(fonts) > 2:
-            generic = fonts[-1]
-            specific = fonts[:-1]
-            random.shuffle(specific)
-            return "font-family: " + ", ".join(specific + [generic])
-        return m.group(0)
-    return re.sub(r"font-family:\s*([^;{}]+)", _shuffle, html)
+  def technique_font_stack(html: str) -> str:
+      """Перемешивает порядок шрифтов в font-family, сохраняя quoted-имена с пробелами."""
+      def _shuffle(m: re.Match) -> str:
+          raw = m.group(1).strip().rstrip(';')
+          # Парсим шрифты с учётом кавычек
+          fonts: list[str] = []
+          buf = ""
+          in_quote: str | None = None
+          for ch in raw:
+              if ch in ('"', "'") and not in_quote:
+                  in_quote = ch
+                  buf += ch
+              elif in_quote and ch == in_quote:
+                  in_quote = None
+                  buf += ch
+              elif ch == ',' and not in_quote:
+                  f = buf.strip()
+                  if f:
+                      fonts.append(f)
+                  buf = ""
+              else:
+                  buf += ch
+          if buf.strip():
+              fonts.append(buf.strip())
+
+          if len(fonts) <= 2:
+              return m.group(0)
+
+          generic = fonts[-1]
+          specific = fonts[:-1]
+          random.shuffle(specific)
+          # Восстанавливаем кавычки для имён с пробелами
+          result = []
+          for f in specific + [generic]:
+              f_inner = f.strip().strip("'\"")
+              if ' ' in f_inner and not f.strip().startswith(("'", '"')):
+                  result.append(f"'{f_inner}'")
+              else:
+                  result.append(f)
+          return "font-family: " + ", ".join(result)
+
+      return re.sub(r"font-family:\s*([^;{}]+)", _shuffle, html)
 
 
 # ============================================================
