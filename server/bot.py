@@ -31,15 +31,15 @@ import json
 from pathlib import Path
 
 
-  # ─── Logging (MUST be before JsonFileStorage which uses logger in __init__) ───
-  logging.basicConfig(
-      level=logging.INFO,
-      format="%(asctime)s | %(levelname)-7s | %(name)s: %(message)s",
-      handlers=[logging.StreamHandler(sys.stdout)],
-  )
-  logger = logging.getLogger("bot")
+# ─── Logging (MUST be before JsonFileStorage which uses logger in __init__) ───
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-7s | %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger("bot")
 
-  
+
 # ─── Persistent FSM Storage ──────────────────────────────────────────────────
 
 class JsonFileStorage(BaseStorage):
