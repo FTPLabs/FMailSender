@@ -78,6 +78,7 @@ a = Analysis(
         'core.warmup', 'core.spam_checker', 'core.updater', 'core._version',
         'core.ai_fixer', 'core.utils', 'core.reply_monitor', 'core.smtp_validator',
         'core.smtp_configs_extra',
+        'core.oauth2_refresh',
         'gui', 'gui.app', 'gui.theme', 'gui.icons',
         'gui.screens', 'gui.screens.screen_dashboard', 'gui.screens.screen_accounts',
         'gui.screens.screen_compose', 'gui.screens.screen_recipients',
