@@ -1074,11 +1074,11 @@ class AccountsScreen(QWidget):
                         self.test_all_btn.setText("Проверить все")
                         self.cancel_test_btn.setVisible(False)
                         ok_final = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is True)
+                        fail_final = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is False)
                         self.status_label.setText(
                             f"Аккаунтов: {len(self._accounts)} | "
                             f"Валидных: {ok_final} | "
-                            f"Невалидных: {total - ok_final} | "
-                            f"Активных: {ok_final}"
+                            f"Невалидных: {fail_final}"
                         )
                     else:
                         # Освободился слот — запускаем следующий

@@ -834,12 +834,13 @@ class ComposeScreen(QWidget):
         real_results.setTextFormat(Qt.TextFormat.RichText)
         real_results.setWordWrap(True)
 
-        if len(self._accounts) >= 2:
+        _valid_accs = [a for a in self._accounts if a.is_active and getattr(a, "last_test_ok", False)]
+        if len(_valid_accs) >= 2:
             from PyQt6.QtWidgets import QComboBox as _QCB3
             srow = QHBoxLayout()
             srow.addWidget(QLabel("Отправитель:"))
             sender_combo = _QCB3()
-            for a in self._accounts:
+            for a in _valid_accs:
                 sender_combo.addItem(getattr(a, "email", str(a)))
             srow.addWidget(sender_combo, 1)
             rfl.addLayout(srow)
@@ -854,8 +855,8 @@ class ComposeScreen(QWidget):
 
             def _run_real():
                 si = sender_combo.currentIndex()
-                sender = self._accounts[si]
-                seeds = [a for i, a in enumerate(self._accounts) if i != si]
+                sender = _valid_accs[si]
+                seeds = [a for i, a in enumerate(_valid_accs) if i != si]
                 subj = self.subject_input.text() or "Тест доставки"
                 html_body = self.html_editor.toPlainText().strip() or self.rich_editor.toHtml()
                 run_real_btn.setEnabled(False)
@@ -925,9 +926,13 @@ class ComposeScreen(QWidget):
             rfl.addWidget(need_lbl)
         lay.addWidget(real_frame)
 
-        # ── Автоотправка (если есть аккаунты) ───────────────
-        if self._accounts:
-            acc = self._accounts[0]
+        # ── Автоотправка (только валидные/активные аккаунты) ─
+        _send_accs = [a for a in self._accounts if a.is_active and getattr(a, "last_test_ok", False)]
+        if not _send_accs and self._accounts:
+            # Аккаунты есть, но не проверены — разрешаем использовать все активные
+            _send_accs = [a for a in self._accounts if a.is_active]
+        if _send_accs:
+            acc = _send_accs[0]
             host = getattr(acc, "smtp_host", getattr(acc, "host", "?"))
             login = getattr(acc, "username", getattr(acc, "email", "?"))
             auto_frame = QFrame()
@@ -941,12 +946,12 @@ class ComposeScreen(QWidget):
 
             # Выбор аккаунта если их несколько
             acc_combo = None
-            if len(self._accounts) > 1:
+            if len(_send_accs) > 1:
                 from PyQt6.QtWidgets import QComboBox as _QCB2
                 acc_row = QHBoxLayout()
                 acc_row.addWidget(QLabel("Аккаунт:"))
                 acc_combo = _QCB2()
-                for a in self._accounts:
+                for a in _send_accs:
                     lbl = getattr(a, "username", getattr(a, "email", str(a)))
                     acc_combo.addItem(lbl)
                 acc_row.addWidget(acc_combo, 1)
@@ -961,7 +966,7 @@ class ComposeScreen(QWidget):
 
             def _auto_send():
                 idx = acc_combo.currentIndex() if acc_combo else 0
-                sel = self._accounts[idx]
+                sel = _send_accs[idx]
                 s_host = getattr(sel, "smtp_host", getattr(sel, "host", ""))
                 s_port = int(getattr(sel, "smtp_port", getattr(sel, "port", 587)))
                 s_user = getattr(sel, "username", getattr(sel, "email", ""))

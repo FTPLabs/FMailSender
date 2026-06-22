@@ -241,19 +241,19 @@ class CaptchaFlow(StatesGroup):
 
 # ─── Keyboards ──────────────────────────────────────────────────────────────
 
-def kb_main(is_admin_user: bool = False, is_mod_user: bool = False) -> InlineKeyboardMarkup:
+def kb_main(is_admin_user: bool = False, is_mod_user: bool = False, trial_used: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="👤 Личный кабинет", callback_data="menu_cabinet")],
-        [InlineKeyboardButton(text="🎁 Бесплатный триал", callback_data="claim_trial")],
+    ]
+    if not trial_used:
+        rows.append([InlineKeyboardButton(text="🎁 Бесплатный триал", callback_data="claim_trial")])
+    rows += [
         [
             InlineKeyboardButton(text="💳 Купить лицензию", callback_data="menu_buy"),
             InlineKeyboardButton(text="📥 Скачать", callback_data="menu_download"),
         ],
         [InlineKeyboardButton(text="🎫 Поддержка", callback_data="menu_support")],
-        [
-            InlineKeyboardButton(text="📜 Конфиденциальность", callback_data="show_privacy"),
-            InlineKeyboardButton(text="📋 Оферта", callback_data="show_terms"),
-        ],
+        [InlineKeyboardButton(text="📚 FAQ", callback_data="show_faq")],
     ]
     if is_admin_user:
         rows.append([InlineKeyboardButton(text="⚙️ Панель администратора", callback_data="admin_panel")])
@@ -264,7 +264,9 @@ def kb_main(is_admin_user: bool = False, is_mod_user: bool = False) -> InlineKey
 
 def kb_support() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎫 Написать тикет", callback_data="support_ticket")],
         [InlineKeyboardButton(text="💬 Написать в ЛС", url="https://t.me/ftpdev_sup")],
+        [InlineKeyboardButton(text="📚 FAQ", callback_data="show_faq")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_main")],
     ])
 
@@ -606,7 +608,12 @@ async def _show_main_menu(target, user) -> None:
         f"<b>FMail Sender</b> — профессиональный инструмент для email-рассылок.\n\n"
         f"Выбери действие:"
     )
-    markup = kb_main(is_admin(user.id), is_mod_user=is_moderator(user.id))
+    try:
+        licenses = await db.get_license_by_telegram(user.id)
+    except Exception:
+        licenses = []
+    trial_used = any(lic.get("plan") == "trial" for lic in licenses)
+    markup = kb_main(is_admin(user.id), is_mod_user=is_moderator(user.id), trial_used=trial_used)
     await send_or_edit(target, text, reply_markup=markup)
 
 
@@ -746,7 +753,12 @@ async def cb_accept_terms(query: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "menu_main")
 async def cb_menu_main(query: CallbackQuery, state: FSMContext):
     await state.clear()
-    await send_or_edit(query, "🏠 <b>Главное меню</b>", reply_markup=kb_main(is_admin(query.from_user.id), is_mod_user=is_moderator(query.from_user.id)))
+    try:
+        licenses = await db.get_license_by_telegram(query.from_user.id)
+    except Exception:
+        licenses = []
+    trial_used = any(lic.get("plan") == "trial" for lic in licenses)
+    await send_or_edit(query, "🏠 <b>Главное меню</b>", reply_markup=kb_main(is_admin(query.from_user.id), is_mod_user=is_moderator(query.from_user.id), trial_used=trial_used))
 
 
 # ─── Личный кабинет ─────────────────────────────────────────────────────────
@@ -1143,6 +1155,23 @@ async def cb_show_terms(query: CallbackQuery, state: FSMContext):
     await send_or_edit(query, _TERMS_TEXT, reply_markup=kb_doc_back(accepted=accepted))
 
 
+@dp.callback_query(F.data == "show_faq")
+async def cb_show_faq(query: CallbackQuery, state: FSMContext):
+    """Показывает FAQ с документами."""
+    await state.clear()
+    await send_or_edit(
+        query,
+        "📚 <b>FAQ / Документы</b>\n\nЮридические документы проекта:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📜 Конфиденциальность", callback_data="show_privacy"),
+                InlineKeyboardButton(text="📋 Оферта", callback_data="show_terms"),
+            ],
+            [InlineKeyboardButton(text="◀️ Главное меню", callback_data="menu_main")],
+        ]),
+    )
+
+
 # ─── Поддержка ───────────────────────────────────────────────────────────────
 
 @dp.callback_query(F.data == "menu_support")
@@ -1150,7 +1179,7 @@ async def cb_support(query: CallbackQuery, state: FSMContext):
     await state.clear()
     await send_or_edit(
         query,
-        "🎫 <b>Поддержка</b>\n\nПо всем вопросам пиши в личные сообщения:",
+        "🎫 <b>Поддержка</b>\n\nОткрой тикет или напиши в личные сообщения:",
         reply_markup=kb_support(),
     )
 
