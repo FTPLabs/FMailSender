@@ -1008,7 +1008,7 @@ class ComposeScreen(QWidget):
 
                 def _send_worker():
                     try:
-                        import smtplib, ssl as _ssl
+                        import smtplib, ssl as _ssl, socket as _socket, struct as _struct
                         from email.mime.multipart import MIMEMultipart
                         from email.mime.text import MIMEText as _MIMEText
                         msg = MIMEMultipart("alternative")
@@ -1018,7 +1018,62 @@ class ComposeScreen(QWidget):
                         html_body = self.html_editor.toPlainText().strip() or self.rich_editor.toHtml()
                         msg.attach(_MIMEText(html_body, "html", "utf-8"))
                         ctx = _ssl.create_default_context()
-                        if s_port == 465:
+                        # ── Прокси (SOCKS5) — если задан на аккаунте ─────────────
+                        proxy_url = (getattr(sel, "proxy", "") or "").strip()
+                        if proxy_url:
+                            import urllib.parse as _up
+                            if "://" not in proxy_url:
+                                proxy_url = "socks5://" + proxy_url
+                            pp = _up.urlparse(proxy_url)
+                            ph, pp_port = pp.hostname or "", pp.port or 1080
+                            pu, ppw = pp.username or "", pp.password or ""
+
+                            def _socks5_raw(conn_host, conn_port):
+                                sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+                                sock.settimeout(20)
+                                sock.connect((ph, pp_port))
+                                if pu:
+                                    sock.sendall(b"\x05\x02\x00\x02")
+                                else:
+                                    sock.sendall(b"\x05\x01\x00")
+                                r = sock.recv(2)
+                                if len(r) < 2 or r[0] != 5:
+                                    raise Exception("Не SOCKS5 сервер")
+                                if r[1] == 0xFF:
+                                    raise Exception("SOCKS5 не принял метод аутентификации")
+                                if r[1] == 2:
+                                    un, pw = pu.encode(), ppw.encode()
+                                    sock.sendall(b"\x01" + bytes([len(un)]) + un + bytes([len(pw)]) + pw)
+                                    a = sock.recv(2)
+                                    if len(a) < 2 or a[1] != 0:
+                                        raise Exception("SOCKS5: неверный логин/пароль")
+                                tb = conn_host.encode()
+                                sock.sendall(b"\x05\x01\x00\x03" + bytes([len(tb)]) + tb + _struct.pack(">H", conn_port))
+                                hdr = sock.recv(10)
+                                if len(hdr) < 2 or hdr[1] != 0:
+                                    raise Exception(f"SOCKS5 CONNECT отклонён: код {hdr[1] if len(hdr)>1 else '?'}")
+                                return sock
+
+                            if s_port == 465:
+                                raw_sock = _socks5_raw(s_host, s_port)
+                                ssl_sock = ctx.wrap_socket(raw_sock, server_hostname=s_host)
+                                srv = smtplib.SMTP(s_host, s_port)
+                                srv.sock = ssl_sock
+                                srv._tls_established = True
+                            else:
+                                raw_sock = _socks5_raw(s_host, s_port)
+                                srv = smtplib.SMTP(s_host, s_port)
+                                srv.sock = raw_sock
+                                srv._tls_established = False
+                                if s_tls:
+                                    srv.starttls(context=ctx)
+                            srv.login(s_user, s_pass)
+                            srv.sendmail(s_from, [test_email], msg.as_string())
+                            try:
+                                srv.quit()
+                            except Exception:
+                                pass
+                        elif s_port == 465:
                             with smtplib.SMTP_SSL(s_host, s_port, context=ctx, timeout=20) as srv:
                                 srv.login(s_user, s_pass)
                                 srv.sendmail(s_from, [test_email], msg.as_string())

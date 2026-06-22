@@ -169,24 +169,18 @@ class ProxyCheckWorker(QThread):
         if not host:
             return False, "", "Нет хоста в URL", 0
 
-        # ── SOCKS5 / SOCKS4 — реальное рукопожатие через PySocks ──────────────
+        # ── SOCKS5 / SOCKS4 — реальное рукопожатие, чистый stdlib (без PySocks) ──
         if "socks" in scheme:
             try:
-                import socks as _socks
-            except ImportError:
-                return False, "", "PySocks не установлен (pip install PySocks)", 0
-            try:
-                stype = _socks.SOCKS5 if "socks5" in scheme else _socks.SOCKS4
-                s = _socks.socksocket()
-                s.settimeout(cls.TIMEOUT)
-                s.set_proxy(stype, host, port, True,
-                            uname or None, upass or None)
                 t0 = _time.monotonic()
-                # Подключаемся через прокси к ip-api.com:80 — реальный туннель
-                s.connect(("ip-api.com", 80))
+                s = cls._socks5_connect_raw(
+                    host, port, "ip-api.com", 80,
+                    username=uname, password=upass,
+                    timeout=cls.TIMEOUT,
+                )
                 ping_ms = int((_time.monotonic() - t0) * 1000)
-                # Отправляем HTTP-запрос через туннель
-                s.send(
+                # HTTP через туннель
+                s.sendall(
                     b"GET /json/?fields=status,country,countryCode HTTP/1.0\r\n"
                     b"Host: ip-api.com\r\nUser-Agent: FMailSender/4.0\r\n\r\n"
                 )
@@ -201,13 +195,15 @@ class ProxyCheckWorker(QThread):
                 s.close()
                 if b"\r\n\r\n" in raw:
                     body = raw.split(b"\r\n\r\n", 1)[1].decode("utf-8", "replace").strip()
-                    d = json.loads(body)
-                    if d.get("status") == "success":
-                        cc = d.get("countryCode", "")
-                        ctry = d.get("country", cc)
-                        flag = _cc_flag_emoji(cc)
-                        return True, f"{flag} {ctry}".strip(), "", ping_ms
-                    return True, "", "", ping_ms  # прокси работает, но API не ответил
+                    try:
+                        d = json.loads(body)
+                        if d.get("status") == "success":
+                            cc = d.get("countryCode", "")
+                            ctry = d.get("country", cc)
+                            flag = _cc_flag_emoji(cc)
+                            return True, f"{flag} {ctry}".strip(), "", ping_ms
+                    except Exception:
+                        pass
                 return True, "", "", ping_ms
             except Exception as e:
                 return False, "", str(e)[:80], 0
@@ -236,6 +232,90 @@ class ProxyCheckWorker(QThread):
                     return True, f"{flag} {ctry}".strip(), "", ping_ms
             except Exception as e:
                 return False, "", str(e)[:80], 0
+
+
+    @staticmethod
+    def _socks5_connect_raw(
+        proxy_host: str, proxy_port: int,
+        target_host: str, target_port: int,
+        username: str = "", password: str = "",
+        timeout: int = 7,
+    ):
+        """RFC-1928 SOCKS5 + RFC-1929 user/pass auth — только stdlib, без PySocks.
+
+        Возвращает подключённый socket.socket уже прошедший через прокси.
+        """
+        import socket as _socket
+        import struct as _struct
+
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((proxy_host, proxy_port))
+
+        # ── 1. Приветствие (предлагаем методы аутентификации) ────────────
+        if username:
+            s.sendall(b"\x05\x02\x00\x02")   # no-auth и user/pass
+        else:
+            s.sendall(b"\x05\x01\x00")        # только no-auth
+
+        resp = s.recv(2)
+        if len(resp) < 2 or resp[0] != 0x05:
+            s.close()
+            raise Exception("Не SOCKS5 — сервер вернул неожиданный ответ")
+        if resp[1] == 0xFF:
+            s.close()
+            raise Exception("SOCKS5: сервер отклонил все методы аутентификации")
+
+        # ── 2. Аутентификация user/pass (RFC 1929) ───────────────────────
+        if resp[1] == 0x02:
+            if not username:
+                s.close()
+                raise Exception("SOCKS5: сервер требует логин/пароль, но они не заданы")
+            un = username.encode("utf-8")
+            pw = (password or "").encode("utf-8")
+            s.sendall(b"\x01" + bytes([len(un)]) + un + bytes([len(pw)]) + pw)
+            auth = s.recv(2)
+            if len(auth) < 2 or auth[1] != 0x00:
+                s.close()
+                raise Exception("SOCKS5: неверные учётные данные (auth rejected)")
+
+        # ── 3. CONNECT к цели ─────────────────────────────────────────────
+        tb = target_host.encode("utf-8") if isinstance(target_host, str) else target_host
+        s.sendall(
+            b"\x05\x01\x00\x03"           # VER=5 CMD=CONNECT RSV=0 ATYP=DOMAINNAME
+            + bytes([len(tb)]) + tb
+            + _struct.pack(">H", target_port)
+        )
+
+        hdr = b""
+        while len(hdr) < 4:
+            chunk = s.recv(4 - len(hdr))
+            if not chunk:
+                s.close()
+                raise Exception("SOCKS5: соединение закрыто до получения ответа")
+            hdr += chunk
+
+        if hdr[1] != 0x00:
+            _errs = {
+                1: "общий сбой", 2: "запрещено политикой",
+                3: "сеть недоступна", 4: "хост недоступен",
+                5: "соединение отклонено", 6: "TTL истёк",
+                7: "команда не поддерживается", 8: "тип адреса не поддерживается",
+            }
+            s.close()
+            raise Exception(f"SOCKS5 CONNECT отклонён: {_errs.get(hdr[1], f'код {hdr[1]}')}")
+
+        # Дочитываем BNDADDR/BNDPORT (нам не нужны, но нужно слить буфер)
+        atyp = hdr[3]
+        if atyp == 0x01:
+            s.recv(6)       # IPv4 (4) + port (2)
+        elif atyp == 0x03:
+            n = s.recv(1)[0]
+            s.recv(n + 2)   # domain + port
+        elif atyp == 0x04:
+            s.recv(18)      # IPv6 (16) + port (2)
+
+        return s
 
 
 def _cc_flag_emoji(cc: str) -> str:

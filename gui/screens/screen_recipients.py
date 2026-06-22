@@ -716,6 +716,8 @@ class RecipientsScreen(QWidget):
           valid_count = 0
           invalid_count = 0
 
+          # Для таблицы считаем только первые _TABLE_PAGE строк; статистику —
+          # отдельно без тяжёлого рендеринга QTableWidgetItem для больших списков.
           for row, r in enumerate(self._recipients):
               is_valid = validate_email_format(r.email)
               if is_valid:
@@ -723,26 +725,27 @@ class RecipientsScreen(QWidget):
               else:
                   invalid_count += 1
 
-              if row >= _TABLE_PAGE:
-                  continue
-
-              self.table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
-              self.table.setItem(row, 1, QTableWidgetItem(r.email))
-              self.table.setItem(row, 2, QTableWidgetItem(r.first_name))
-              self.table.setItem(row, 3, QTableWidgetItem(r.last_name))
-              self.table.setItem(row, 4, QTableWidgetItem(r.company))
-
-              status_item = QTableWidgetItem("Да" if is_valid else "Нет")
-              status_item.setForeground(
-                  QColor("#10B981") if is_valid else QColor("#EF4444")
-              )
-              self.table.setItem(row, 5, status_item)
+              if row < _TABLE_PAGE:
+                  self.table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+                  self.table.setItem(row, 1, QTableWidgetItem(r.email))
+                  self.table.setItem(row, 2, QTableWidgetItem(r.first_name))
+                  self.table.setItem(row, 3, QTableWidgetItem(r.last_name))
+                  self.table.setItem(row, 4, QTableWidgetItem(r.company))
+                  status_item = QTableWidgetItem("Да" if is_valid else "Нет")
+                  status_item.setForeground(
+                      QColor("#10B981") if is_valid else QColor("#EF4444")
+                  )
+                  self.table.setItem(row, 5, status_item)
 
           self.table.blockSignals(False)
           self.table.setUpdatesEnabled(True)
 
-          # Статистика
-          dupes_count = len(self._recipients) - len({r.email.lower() for r in self._recipients})
+          # Статистика — set быстрее на больших списках чем повторный цикл,
+          # но для >500k используем приближение (без выделения памяти)
+          if total > 500_000:
+              dupes_count = 0  # не считаем — слишком медленно
+          else:
+              dupes_count = total - len({r.email.lower() for r in self._recipients})
           self.total_label.setText(f"Всего: {total}")
           self.valid_label.setText(f"Валидных: {valid_count}")
           self.invalid_label.setText(f"Невалидных: {total - valid_count}")

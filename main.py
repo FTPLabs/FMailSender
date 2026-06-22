@@ -46,12 +46,54 @@ def _load_icon(target):
             return
 
 
+def _install_global_exception_handler() -> None:
+    """Показывает диалог вместо молчаливого краша при любом необработанном исключении."""
+    import traceback
+
+    def _hook(exc_type, exc_value, exc_tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        # Сначала пишем в stderr (видно в логах)
+        print(f"[FMailSender] НЕОБРАБОТАННОЕ ИСКЛЮЧЕНИЕ:\n{msg}", file=sys.stderr)
+        # Затем пробуем показать QMessageBox если QApplication уже запущен
+        try:
+            from PyQt6.QtWidgets import QApplication, QMessageBox
+            if QApplication.instance():
+                box = QMessageBox()
+                box.setWindowTitle("Ошибка приложения")
+                box.setIcon(QMessageBox.Icon.Critical)
+                box.setText(
+                    f"Произошла необработанная ошибка:\n\n"
+                    f"<b>{exc_type.__name__}</b>: {exc_value}\n\n"
+                    f"Приложение продолжит работу. Подробности в логе."
+                )
+                box.setDetailedText(msg)
+                box.exec()
+        except Exception:
+            pass
+
+    sys.excepthook = _hook
+
+    # Qt-потоки: перехватываем через threading.excepthook (Python 3.8+)
+    import threading
+
+    def _thread_hook(args):
+        if args.exc_type and not issubclass(args.exc_type, SystemExit):
+            _hook(args.exc_type, args.exc_value, args.exc_traceback)
+
+    threading.excepthook = _thread_hook
+
+
 def main():
     if "--check" in sys.argv:
         _check_mode()
     if "--version" in sys.argv:
         print(f"FMailSender v{APP_VERSION}")
         sys.exit(0)
+
+    _install_global_exception_handler()
 
     # Прогрев HWID кэша — запускаем в фоне и ждём завершения до check_license
     from core.license import security_check, generate_hwid
