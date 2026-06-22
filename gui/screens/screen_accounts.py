@@ -785,8 +785,22 @@ class AccountDialog(QDialog):
             self.test_status.setText("Введите email, пароль и SMTP-хост")
             self.test_status.setStyleSheet("color: #F59E0B;")
             return
+
+        # Получаем прокси из формы (обязателен — тест без прокси запрещён)
+        proxy_raw = self.proxy_edit.toPlainText().strip()
+        proxy_lines = [
+            ProxyManager.parse(l.strip())
+            for l in proxy_raw.splitlines()
+            if l.strip() and not l.strip().startswith("#")
+        ]
+        proxy_list = [p for p in proxy_lines if p]
+        if not proxy_list:
+            self.test_status.setText("Добавьте прокси перед тестом — прямые подключения запрещены")
+            self.test_status.setStyleSheet("color: #EF4444;")
+            return
+
         self.test_btn.setEnabled(False)
-        self.test_status.setText("Подключение…")
+        self.test_status.setText("Подключение через прокси…")
         self.test_status.setStyleSheet("color: gray;")
         QApplication.processEvents()
         acc = SmtpAccount(
@@ -796,6 +810,8 @@ class AccountDialog(QDialog):
             use_ssl=self.ssl_check.isChecked(),
             use_tls=self.tls_check.isChecked(),
         )
+        acc.proxy_list = proxy_list
+        acc.proxy = proxy_list[0]
         self._test_worker = TestWorker(acc, parent=self)
 
         @pyqtSlot(bool, str)
@@ -1441,8 +1457,11 @@ class AccountsScreen(QWidget):
 
         def on_use():
             # Назначаем валидные прокси аккаунтам round-robin
+            # Обновляем и proxy_list, и proxy для полной совместимости
             for i, acc in enumerate(self._accounts):
                 acc.proxy = valid_proxies[i % len(valid_proxies)]
+                acc.proxy_list = valid_proxies  # все валидные прокси для ротации
+                acc.proxy_rotation_random = False
             save_accounts(self._accounts)
             self._refresh_table()
             self.accounts_changed.emit(self._accounts)
@@ -1556,8 +1575,11 @@ class AccountsScreen(QWidget):
             self._run_proxy_check_dialog(valid_proxies)
         else:
             # Назначаем без проверки round-robin
+            # Обновляем и proxy_list, и proxy для полной совместимости
             for i, acc in enumerate(self._accounts):
                 acc.proxy = valid_proxies[i % len(valid_proxies)]
+                acc.proxy_list = valid_proxies  # все прокси для ротации
+                acc.proxy_rotation_random = False
             save_accounts(self._accounts)
             self._refresh_table()
             QMessageBox.information(

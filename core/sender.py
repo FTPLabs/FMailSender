@@ -703,8 +703,16 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       import smtplib as _smtplib
       import urllib.parse as _up
 
-      # ── Разбор прокси ──────────────────────────────────────────────────────────
+      # ── Proxy enforcement ─────────────────────────────────────────────────────
+      # Прокси обязателен на уровне SMTP-теста — прямые подключения запрещены.
       _proxy_url = (account.proxy or "").strip()
+      if not _proxy_url:
+          return False, (
+              "Прокси обязателен — прямые SMTP-подключения запрещены.\n"
+              "Добавьте прокси к аккаунту (вкладка «Аккаунты» → редактировать)."
+          )
+
+      # ── Разбор прокси ──────────────────────────────────────────────────────────
       _proxy_parsed = None
       _proxy_auto = False  # True = схема не была задана явно → авто-определение
       if _proxy_url:
