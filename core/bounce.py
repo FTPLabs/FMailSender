@@ -205,7 +205,9 @@ class BounceMonitor:
         self.blacklist_path = blacklist_path or (
             Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "blacklist.json"
         )
-        self.bounce_log_path = bounce_log_path or Path("data/bounces.json")
+        self.bounce_log_path = bounce_log_path or (
+            Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "bounces.json"
+        )
         self._blacklist: Set[str] = self._load_blacklist()
         self._bounce_records: List[BounceRecord] = self._load_bounces()
 
