@@ -499,6 +499,8 @@ def save_accounts(accounts: list[SmtpAccount]) -> None:
             "daily_limit": a.daily_limit,
             "hourly_limit": a.hourly_limit,
             "is_active": a.is_active,
+            "last_test_ok": getattr(a, "last_test_ok", None),
+            "last_test_msg": getattr(a, "last_test_msg", ""),
             "imap_host": getattr(a, "imap_host", ""),
             "imap_port": getattr(a, "imap_port", 993),
             "imap_ssl": getattr(a, "imap_ssl", True),
@@ -540,6 +542,11 @@ def load_accounts() -> list[SmtpAccount]:
                 hourly_limit=d.get("hourly_limit", 50),
                 is_active=d.get("is_active", True),
             )
+            # Восстанавливаем результат последнего теста (чтобы не показывать «Не проверено» после перезапуска)
+            _lto = d.get("last_test_ok")
+            if _lto is not None:
+                acc.last_test_ok = bool(_lto)
+            acc.last_test_msg = d.get("last_test_msg", "")
             acc.imap_host = d.get("imap_host", "")
             acc.imap_port = d.get("imap_port", 993)
             acc.imap_ssl = d.get("imap_ssl", True)
@@ -1265,12 +1272,15 @@ class AccountsScreen(QWidget):
         w.start()
 
     def _fetch_proxy_country(self, row: int, proxy_url: str) -> None:
-        """Запускает CountryWorker для обновления флага страны в таблице."""
+        """Запускает CountryWorker для обновления флага страны в колонке Прокси (2)."""
         w = _CountryWorker(row, proxy_url, parent=self)
         def _on_country(r, flag_text, widget=self.table):
-            item = widget.item(r, 6)
+            item = widget.item(r, 2)  # колонка 2 = «Прокси» (была ошибка: 6)
             if item:
-                item.setText(flag_text)
+                # Показываем: «флаг страна | proxy_url»
+                current = item.text()
+                base = current.split(" | ")[-1] if " | " in current else current
+                item.setText(f"{flag_text} | {base}" if flag_text and flag_text != "—" else base)
                 item.setForeground(QColor("#6C8EBF"))
         w.result_ready.connect(_on_country)
         w.start()
