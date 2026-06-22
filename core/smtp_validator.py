@@ -582,15 +582,15 @@ class SmtpValidator:
                                   "Подключение успешно",
                                   spf_ok, dkim_ok, dmarc_ok, mx_ok)
         except ConnectionError as _ce:
-              _ce_msg = str(_ce)
-              if "PROXY_BLOCKS_SMTP" in _ce_msg:
-                  return ValidateResult(
-                      email, host, port, False, "PROXY_BLOCKED_SMTP",
-                      "Прокси блокирует SMTP-порты. "
-                      "FoxyProxy и datacenter-прокси запрещают SMTP (anti-spam). "
-                      "Используйте прокси с поддержкой портов 465/587.",
-                      spf_ok, dkim_ok, dmarc_ok, mx_ok)
-          except smtplib.SMTPAuthenticationError as e:
+            _ce_msg = str(_ce)
+            if "PROXY_BLOCKS_SMTP" in _ce_msg:
+                return ValidateResult(
+                email, host, port, False, "PROXY_BLOCKED_SMTP",
+                "Прокси блокирует SMTP-порты. "
+                "FoxyProxy и datacenter-прокси запрещают SMTP (anti-spam). "
+                "Используйте прокси с поддержкой портов 465/587.",
+                spf_ok, dkim_ok, dmarc_ok, mx_ok)
+        except smtplib.SMTPAuthenticationError as e:
             err_str = str(e)
             if "535" in err_str:
                 detail = "Неверный пароль или отключена SMTP-авторизация в настройках почты"
