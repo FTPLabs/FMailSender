@@ -1,5 +1,5 @@
 """
-FMailSender SMTP Validator v3.0.0
+FMailSender SMTP Validator v4.3.0
 FIX v3.0.0:
   - Устранён дубль порта 465 в PORT_FALLBACK_CONFIGS + исправлен отступ
   - ОБЯЗАТЕЛЬНЫЙ прокси: если proxy не задан → возврат PROXY_REQUIRED
@@ -427,89 +427,80 @@ def _check_dnsbl(host: str) -> bool:
 
 # ── Core SMTP connect (proxy-aware) ───────────────────────────────────────────
 def _try_smtp_connect(
-    host: str,
-    port: int,
-    use_ssl: bool,
-    use_tls: bool,
-    email: str,
-    password: str,
-    timeout: int,
-    proxy_url: str = "",
-    oauth_token: str = "",
-) -> None:
-    """Attempt SMTP connection. If proxy_url is set, connects through proxy socket.
-    Raises exception on failure.
-    oauth_token: если задан — использует XOAUTH2 вместо LOGIN (Outlook/Hotmail).
-    """
-    ctx = ssl.create_default_context()
-    domain = email.split("@")[-1] if "@" in email else ""
+      host: str,
+      port: int,
+      use_ssl: bool,
+      use_tls: bool,
+      email: str,
+      password: str,
+      timeout: int,
+      proxy_url: str = "",
+      oauth_token: str = "",
+  ) -> None:
+      """Attempt SMTP connection. If proxy_url is set, connects through proxy socket.
+      Raises exception on failure.
+      FIX v4.3.0: replaced broken __new__ hack with proper _get_socket subclass override.
+      Works correctly with Python 3.11/3.12/3.13+.
+      oauth_token: если задан — использует XOAUTH2 вместо LOGIN (Outlook/Hotmail).
+      """
+      ctx = ssl.create_default_context()
+      domain = email.split("@")[-1] if "@" in email else ""
 
-    if proxy_url:
-        # Proxy-wrapped connection
-        raw_sock = _make_proxy_socket(proxy_url, host, port, timeout)
+      def _auth(smtp: smtplib.SMTP) -> None:
+          if oauth_token and domain in _MICROSOFT_DOMAINS:
+              xoauth2 = _build_xoauth2_string(email, oauth_token)
+              smtp.docmd("AUTH", "XOAUTH2 " + xoauth2)
+          else:
+              smtp.login(email, password)
 
-        def _build_smtp_from_sock(sock) -> smtplib.SMTP:
-            """Инициализирует SMTP из готового сокета и читает приветствие (220)."""
-            s = smtplib.SMTP.__new__(smtplib.SMTP)
-            s._host = host
-            s.timeout = timeout
-            s.esmtp_features = {}
-            s.command_encoding = 'ascii'
-            s.source_address = None
-            s.local_hostname = socket.getfqdn()
-            s.helo_resp = None
-            s.ehlo_resp = None
-            s.ehlo_msg = 'ehlo'
-            s.does_esmtp = False
-            s.default_port = smtplib.SMTP_PORT
-            s.debuglevel = 0
-            s.sock = sock
-            s.file = sock.makefile("rb")
-            (code, msg) = s.getreply()  # приветствие сервера 220 ...
-            if code != 220:
-                raise smtplib.SMTPConnectError(code, msg)
-            return s
+      if proxy_url:
+          # Parse proxy once
+          scheme, ph, pp, pu, ppwd = _parse_proxy(proxy_url)
+          proxy_type = _socks_lib.SOCKS5 if "socks5" in scheme else (
+              _socks_lib.SOCKS4 if "socks4" in scheme else _socks_lib.HTTP
+          )
 
-        if use_ssl:
-            ssl_sock = ctx.wrap_socket(raw_sock, server_hostname=host)
-            smtp = _build_smtp_from_sock(ssl_sock)
-            smtp.ehlo()
-        else:
-            smtp = _build_smtp_from_sock(raw_sock)
-            smtp.ehlo()
-            if use_tls:
-                smtp.starttls(context=ctx)
-                smtp.ehlo()
-        # Auth
-        if oauth_token and domain in _MICROSOFT_DOMAINS:
-            xoauth2 = _build_xoauth2_string(email, oauth_token)
-            smtp.docmd("AUTH", "XOAUTH2 " + xoauth2)
-        else:
-            smtp.login(email, password)
-        smtp.quit()
-    else:
-        # Direct connection (no proxy)
-        if use_ssl:
-            with smtplib.SMTP_SSL(host, port, timeout=timeout, context=ctx) as smtp:
-                if oauth_token and domain in _MICROSOFT_DOMAINS:
-                    xoauth2 = _build_xoauth2_string(email, oauth_token)
-                    smtp.docmd("AUTH", "XOAUTH2 " + xoauth2)
-                else:
-                    smtp.login(email, password)
-        else:
-            with smtplib.SMTP(host, port, timeout=timeout) as smtp:
-                smtp.ehlo()
-                if use_tls:
-                    smtp.starttls(context=ctx)
-                    smtp.ehlo()
-                if oauth_token and domain in _MICROSOFT_DOMAINS:
-                    xoauth2 = _build_xoauth2_string(email, oauth_token)
-                    smtp.docmd("AUTH", "XOAUTH2 " + xoauth2)
-                else:
-                    smtp.login(email, password)
+          # Use subclass override of _get_socket — works with Python 3.9–3.13+
+          # This avoids the broken __new__ hack that fails on Python 3.11+ due to
+          # missing internal attributes (_tls_required, etc.) added in newer versions.
+          class _ProxySMTP(smtplib.SMTP):
+              def _get_socket(self, _h, _p, _t):  # type: ignore[override]
+                  s = _socks_lib.socksocket()
+                  s.set_proxy(proxy_type, ph, pp, True, pu, ppwd)
+                  s.settimeout(_t)
+                  s.connect((_h, _p))
+                  return s
 
+          class _ProxySMTP_SSL(smtplib.SMTP_SSL):
+              def _get_socket(self, _h, _p, _t):  # type: ignore[override]
+                  s = _socks_lib.socksocket()
+                  s.set_proxy(proxy_type, ph, pp, True, pu, ppwd)
+                  s.settimeout(_t)
+                  s.connect((_h, _p))
+                  return self.context.wrap_socket(s, server_hostname=_h)
 
-
+          if use_ssl:
+              with _ProxySMTP_SSL(host, port, timeout=timeout, context=ctx) as smtp:
+                  _auth(smtp)
+          else:
+              with _ProxySMTP(host, port, timeout=timeout) as smtp:
+                  smtp.ehlo()
+                  if use_tls:
+                      smtp.starttls(context=ctx)
+                      smtp.ehlo()
+                  _auth(smtp)
+      else:
+          # Direct connection (no proxy)
+          if use_ssl:
+              with smtplib.SMTP_SSL(host, port, timeout=timeout, context=ctx) as smtp:
+                  _auth(smtp)
+          else:
+              with smtplib.SMTP(host, port, timeout=timeout) as smtp:
+                  smtp.ehlo()
+                  if use_tls:
+                      smtp.starttls(context=ctx)
+                      smtp.ehlo()
+                  _auth(smtp)
 def _get_mx_host(domain: str) -> str:
     """Возвращает первый MX-хост для домена или пустую строку если DNS недоступен."""
     if not _DNS_OK:
