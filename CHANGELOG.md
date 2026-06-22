@@ -1,3 +1,29 @@
+## [4.0.0] — 2026-06-22
+
+### Фиксы рассылки
+- **SMTPConnectError → фоллбек порта**: `aiosmtplib` оборачивает таймауты
+  в `SMTPConnectError` (не `OSError`) — теперь этот класс ошибок тоже триггерит
+  автоматический переход 465→587 и обратно. GMX timeout исправлен.
+- **`_pick_account` / счётчик аккаунтов**: экран рассылки теперь показывает
+  ровно те аккаунты, что реально попадут в `_pick_account`
+  (`is_active AND last_test_ok is not False`). Расхождение "67 vs 72" устранено.
+
+### Предпросмотр HTML
+- **Внешние картинки загружаются**: `_update_preview` пишет HTML во временный
+  `.html`-файл и загружает через `file://` URL (`QUrl.fromLocalFile`).
+  При `origin=file://` + `LocalContentCanAccessRemoteUrls=True` Chromium
+  (WebEngine) разрешает CDN-картинки (Twitch, Gmail, etc.) — в отличие от
+  `setHtml()`, который создаёт `origin=null` и блокирует remote даже с флагом.
+- **Настройки профиля WebEngine**: `LocalContentCanAccessRemoteUrls` / `LocalContentCanAccessFileUrls`
+  теперь применяются и к `QWebEngineProfile.defaultProfile()` (раньше только к view).
+
+### Вкладка Аккаунты — статус-бар
+- Добавлено поле **«Не проверено: N»** — видно, сколько аккаунтов ещё не тестировались.
+- Поле **«Готово к рассылке»** заменило «Активных» и показывает то же число,
+  что и экран рассылки.
+
+---
+
 ## [3.9.1] — 2026-06-21
 
 Добавлены два дополнительных способа оплаты помимо CryptoBot: **xRocket Pay** и

@@ -998,14 +998,26 @@ class SendingEngine:
                     await smtp.quit()
                 except Exception as _exc:
                     logging.getLogger("sender").debug("Пропущено исключение: %s", _exc)
-        except (socket.timeout, TimeoutError, ConnectionRefusedError, OSError) as _conn_err:
-            # Port fallback: try alternate port before giving up (465<->587)
+        except Exception as _any_err:
+            # Port fallback: try alternate port before giving up (465<->587).
+            # Catches both OS-level errors (socket.timeout, OSError) AND
+            # aiosmtplib-wrapped errors (SMTPConnectError, SMTPServerDisconnected).
             _fallback_map = {
                 465: (587, False, True),
                 587: (465, True, False),
                 25:  (587, False, True),
             }
-            if account.port in _fallback_map:
+            _err_str = str(_any_err)
+            _err_low = _err_str.lower()
+            _is_conn = (
+                isinstance(_any_err, (socket.timeout, TimeoutError, ConnectionRefusedError, OSError))
+                or any(kw in _err_low for kw in (
+                    "connect", "timed out", "timeout", "connection refused",
+                    "unreachable", "network is", "no route", "errno",
+                ))
+            )
+            # Attempt port fallback only for connection-level errors
+            if _is_conn and account.port in _fallback_map:
                 _fb_port, _fb_ssl, _fb_tls = _fallback_map[account.port]
                 try:
                     import ssl as _ssl2
@@ -1032,14 +1044,7 @@ class SendingEngine:
             return SendResult(
                 recipient_email=recipient.email,
                 success=False,
-                error=str(_conn_err),
-                account_used=account.email,
-            )
-        except Exception as e:
-            return SendResult(
-                recipient_email=recipient.email,
-                success=False,
-                error=str(e),
+                error=_err_str,
                 account_used=account.email,
             )
 

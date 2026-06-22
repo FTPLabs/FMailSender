@@ -299,9 +299,19 @@ class SendingScreen(QWidget):
 
   def set_accounts(self, accounts):
       self._accounts = accounts
-      active = sum(1 for a in accounts if a.is_active)
-      self.accounts_status.setText(f"Аккаунты: {active}/{len(accounts)}")
-      self.accounts_status.setStyleSheet(f"color:{Colors.SUCCESS};" if active > 0 else f"color:{Colors.ERROR};")
+      # Считаем аккаунты точно по критерию _pick_account: is_active + last_test_ok is not False
+      sendable = sum(
+          1 for a in accounts
+          if a.is_active and getattr(a, "last_test_ok", None) is not False
+      )
+      total = len(accounts)
+      self.accounts_status.setText(f"Аккаунты: {sendable}/{total}")
+      self.accounts_status.setToolTip(
+          f"Готово к отправке: {sendable}\n"
+          f"Всего аккаунтов: {total}\n"
+          f"(включает непроверенные — только валидные и непроверенные участвуют в рассылке)"
+      )
+      self.accounts_status.setStyleSheet(f"color:{Colors.SUCCESS};" if sendable > 0 else f"color:{Colors.ERROR};")
 
   def set_recipients(self, recipients):
       self._recipients = recipients

@@ -887,14 +887,19 @@ class AccountsScreen(QWidget):
               if _proxy_raw:
                   QTimer.singleShot(100 + row * 50, lambda r=row, p=_proxy_raw: self._fetch_proxy_country(r, p))
 
-          active_count = sum(1 for a in self._accounts if a.is_active)
           valid_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is True)
           invalid_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is False)
+          untested_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is None)
+          sendable = sum(
+              1 for a in self._accounts
+              if a.is_active and getattr(a, 'last_test_ok', None) is not False
+          )
           self.status_label.setText(
-              f"Аккаунтов: {len(self._accounts)} | "
+              f"Всего: {len(self._accounts)} | "
               f"Валидных: {valid_count} | "
               f"Невалидных: {invalid_count} | "
-              f"Активных: {active_count}"
+              f"Не проверено: {untested_count} | "
+              f"Готово к рассылке: {sendable}"
           )
 
     def _update_contextual_buttons(self):

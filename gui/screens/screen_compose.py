@@ -17,6 +17,8 @@ from PyQt6.QtGui import (
     QTextCharFormat, QFont, QColor, QSyntaxHighlighter,
     QTextDocument, QKeySequence, QIcon, QAction, QTextCursor
 )
+import os as _os
+import tempfile as _tempfile
 try:
     from PyQt6.QtWebEngineWidgets import QWebEngineView
     _HAS_WEBENGINE = True
@@ -473,17 +475,27 @@ class ComposeScreen(QWidget):
           if _HAS_WEBENGINE:
               self.preview = QWebEngineView()
               try:
-                  from PyQt6.QtWebEngineCore import QWebEngineSettings
-                  _ws = self.preview.settings()
-                  _ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-                  _ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
-                  _ws.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+                  from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEngineProfile
+                  # Применяем к профилю И к view — в ряде версий PyQt6-WebEngine
+                  # настройки только на view игнорируются (особенно на Windows).
+                  for _so in [
+                      QWebEngineProfile.defaultProfile().settings(),
+                      self.preview.settings(),
+                  ]:
+                      _so.setAttribute(
+                          QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+                      _so.setAttribute(
+                          QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
+                      _so.setAttribute(
+                          QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
               except Exception:
                   pass
+              self._preview_tmp: str = ""
           else:
-            from PyQt6.QtWidgets import QTextBrowser
-            self.preview = QTextBrowser()
-            self.preview.setOpenExternalLinks(True)
+              from PyQt6.QtWidgets import QTextBrowser
+              self.preview = QTextBrowser()
+              self.preview.setOpenExternalLinks(True)
+              self._preview_tmp = ""
           preview_layout.addWidget(self.preview, 1)
           self.editor_tabs.addTab(preview_container, icons.make_icon(icons.EYE), "Предпросмотр")
 
@@ -565,10 +577,25 @@ class ComposeScreen(QWidget):
 
         if self.preview is not None:
             if _HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-                # https base URL -> браузер грузит внешние ресурсы (картинки CDN, шрифты);
-                # about:blank блокирует их даже при LocalContentCanAccessRemoteUrls=True.
-                self.preview.setHtml(html, QUrl("https://fmail.shop/"))
+                # Записываем HTML во временный файл и загружаем через file:// URL.
+                # Это надёжнее, чем setHtml(): при загрузке через file://
+                # LocalContentCanAccessRemoteUrls=True реально разрешает CDN-картинки.
+                # При setHtml(data:, ...) origin="null" — Chromium часто блокирует remote
+                # даже с установленным флагом, особенно на Windows.
+                try:
+                    if not self._preview_tmp:
+                        _fd, self._preview_tmp = _tempfile.mkstemp(
+                            suffix=".html", prefix="fmail_preview_"
+                        )
+                        _os.close(_fd)
+                    with open(self._preview_tmp, "w", encoding="utf-8") as _f:
+                        _f.write(html)
+                    self.preview.load(QUrl.fromLocalFile(self._preview_tmp))
+                except Exception:
+                    # fallback на setHtml если не удалось записать temp-файл
+                    self.preview.setHtml(html, QUrl("https://fmail.shop/"))
             else:
+                # QTextBrowser: поддерживает только локальные ресурсы
                 self.preview.setHtml(html)
     def _add_attachment(self):
         paths, _ = QFileDialog.getOpenFileNames(
