@@ -260,28 +260,55 @@ class ReplyDialog(QDialog):
             QMessageBox.critical(self, "Ошибка отправки", str(e))
 
     def _do_send(self, acc: dict, to_addr: str, subject: str, body: str):
+        import urllib.parse as _up
+        from core.sender import _proxy_connect  # type: ignore
+
         msg = MIMEMultipart("alternative")
-        msg["From"]       = f"{acc.get('display_name', '')} <{acc.get('login', '')}>"
-        msg["To"]         = to_addr
-        msg["Subject"]    = subject
+        msg["From"]        = f"{acc.get('display_name', '')} <{acc.get('login', '')}>"
+        msg["To"]          = to_addr
+        msg["Subject"]     = subject
         msg["In-Reply-To"] = self._original.get("message_id", "")
         msg["References"]  = self._original.get("message_id", "")
         msg.attach(MIMEText(body, "plain", "utf-8"))
 
-        host     = acc.get("host", "")
-        port     = int(acc.get("port", 587))
-        login    = acc.get("login", "")
-        password = acc.get("password", "")
-        use_ssl  = acc.get("use_ssl", False)
-        use_tls  = acc.get("use_tls", True)
+        host      = acc.get("host", "")
+        port      = int(acc.get("port", 587))
+        login     = acc.get("login", "")
+        password  = acc.get("password", "")
+        use_ssl   = acc.get("use_ssl", False)
+        use_tls   = acc.get("use_tls", True)
+        proxy_url = (acc.get("proxy") or "").strip()
+
+        # Прокси обязателен — прямые SMTP-подключения запрещены.
+        if not proxy_url:
+            raise RuntimeError(
+                "Прокси не задан для аккаунта. "
+                "Прямые SMTP-подключения запрещены. "
+                "Добавьте прокси к аккаунту в разделе «Аккаунты»."
+            )
+
+        proxy_parsed = _up.urlparse(proxy_url if "://" in proxy_url else f"socks5://{proxy_url}")
+        raw_sock = _proxy_connect(proxy_parsed, host, port, timeout=30.0)
 
         ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
         if use_ssl:
-            server = smtplib.SMTP_SSL(host, port, context=ctx)
+            server = smtplib.SMTP(timeout=30)
+            server.sock = ctx.wrap_socket(raw_sock, server_hostname=host)
+            server.file = server.sock.makefile("rb")
+            server._get_socket = lambda *a, **k: server.sock  # type: ignore[method-assign]
+            server.ehlo_or_helo_if_needed()
         else:
-            server = smtplib.SMTP(host, port)
+            server = smtplib.SMTP(timeout=30)
+            server.sock = raw_sock
+            server.file = server.sock.makefile("rb")
+            server._get_socket = lambda *a, **k: server.sock  # type: ignore[method-assign]
+            server.ehlo_or_helo_if_needed()
             if use_tls:
                 server.starttls(context=ctx)
+                server.ehlo()
 
         server.login(login, password)
         server.sendmail(login, [to_addr], msg.as_bytes())
@@ -308,7 +335,7 @@ class InboxScreen(QWidget):
             if isinstance(a, dict):
                 result.append(a)
             else:
-                # SmtpAccount dataclass -> dict
+                # SmtpAccount dataclass -> dict (включаем proxy!)
                 result.append({
                     "login":        getattr(a, "email", ""),
                     "password":     getattr(a, "password", ""),
@@ -321,6 +348,7 @@ class InboxScreen(QWidget):
                     "imap_port":    getattr(a, "imap_port", 993),
                     "imap_ssl":     getattr(a, "imap_ssl", True),
                     "is_active":    getattr(a, "is_active", True),
+                    "proxy":        getattr(a, "proxy", "") or "",
                 })
         self._accounts = result
 
