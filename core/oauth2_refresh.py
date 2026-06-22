@@ -156,12 +156,22 @@ def get_valid_access_token(account) -> str:
     logger.info("Обновляем OAuth2 для %s...", email)
     info = refresh_ms_token(email, _rt)
     if info:
-        account.access_token     = info.access_token
-        account.token_expires_at = info.expires_at
-        if info.refresh_token and info.refresh_token != _rt:
-            account.refresh_token = info.refresh_token
-        # Синхронизируем устаревшее поле oauth_token
-        account.oauth_token = info.access_token
+        # Используем lock аккаунта если он есть (SmtpAccount имеет _lock),
+        # чтобы избежать race condition при параллельных потоках.
+        _acct_lock = getattr(account, "_lock", None)
+        if _acct_lock is not None:
+            with _acct_lock:
+                account.access_token     = info.access_token
+                account.token_expires_at = info.expires_at
+                if info.refresh_token and info.refresh_token != _rt:
+                    account.refresh_token = info.refresh_token
+                account.oauth_token = info.access_token
+        else:
+            account.access_token     = info.access_token
+            account.token_expires_at = info.expires_at
+            if info.refresh_token and info.refresh_token != _rt:
+                account.refresh_token = info.refresh_token
+            account.oauth_token = info.access_token
         return info.access_token
 
     return _at  # fallback — старый токен
