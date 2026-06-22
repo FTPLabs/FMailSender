@@ -462,6 +462,39 @@ def _get_data_dir() -> Path:
 
 
 ACCOUNTS_FILE = _get_data_dir() / "accounts.dat"
+PROXY_FILE    = _get_data_dir() / "proxies.dat"
+
+
+def save_global_proxies(proxies: list[str]) -> None:
+    """Сохраняет глобальный пул прокси — независимо от аккаунтов."""
+    PROXY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PROXY_FILE.write_text(json.dumps(proxies, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_global_proxies() -> list[str]:
+    """Загружает глобальный пул прокси. Возвращает [] если файл отсутствует."""
+    if not PROXY_FILE.exists():
+        return []
+    try:
+        data = json.loads(PROXY_FILE.read_text(encoding="utf-8"))
+        return [p for p in data if isinstance(p, str) and p.strip()]
+    except Exception:
+        return []
+
+
+def distribute_proxies(accounts: "list[SmtpAccount]", proxies: list[str]) -> None:
+    """Распределяет прокси по аккаунтам round-robin (каждый получает свой, циклически).
+
+    Каждый аккаунт получает:
+      - .proxy  — персональный прокси (round-robin из пула)
+      - .proxy_list — весь пул для ротации на уровне отправки
+    """
+    if not proxies:
+        return
+    for i, acc in enumerate(accounts):
+        acc.proxy                = proxies[i % len(proxies)]
+        acc.proxy_list           = proxies
+        acc.proxy_rotation_random = False
 
 
 def _encrypt_password(password: str) -> str:
@@ -1125,6 +1158,18 @@ class AccountsScreen(QWidget):
 
     def _load(self):
         self._accounts = load_accounts()
+        # Авто-назначение прокси из глобального пула аккаунтам без прокси
+        _gproxies = load_global_proxies()
+        if _gproxies:
+            _changed = False
+            for i, acc in enumerate(self._accounts):
+                if not getattr(acc, "proxy", ""):
+                    acc.proxy = _gproxies[i % len(_gproxies)]
+                    acc.proxy_list = _gproxies
+                    acc.proxy_rotation_random = False
+                    _changed = True
+            if _changed:
+                save_accounts(self._accounts)
         self._refresh_table()
         self.accounts_changed.emit(self._accounts)
         # Автопроверка при загрузке отключена — слишком много потоков при большом кол-ве аккаунтов
@@ -1466,19 +1511,18 @@ class AccountsScreen(QWidget):
             use_btn.setEnabled(valid_cnt > 0)
 
         def on_use():
-            # Назначаем валидные прокси аккаунтам round-robin
-            # Обновляем и proxy_list, и proxy для полной совместимости
-            for i, acc in enumerate(self._accounts):
-                acc.proxy = valid_proxies[i % len(valid_proxies)]
-                acc.proxy_list = valid_proxies  # все валидные прокси для ротации
-                acc.proxy_rotation_random = False
+            # Сохраняем в глобальный пул (сохраняется при удалении аккаунтов)
+            save_global_proxies(valid_proxies)
+            # Round-robin распределение по аккаунтам
+            distribute_proxies(self._accounts, valid_proxies)
             save_accounts(self._accounts)
             self._refresh_table()
             self.accounts_changed.emit(self._accounts)
             dlg.accept()
             QMessageBox.information(
                 self, "Прокси назначены",
-                f"{len(valid_proxies)} валидных прокси назначено {len(self._accounts)} аккаунтам."
+                f"{len(valid_proxies)} валидных прокси назначено {len(self._accounts)} аккаунтам.\n"
+                f"Прокси сохранены глобально — при добавлении новых аккаунтов они получат прокси автоматически."
             )
 
         worker.result.connect(on_result)
@@ -1584,17 +1628,16 @@ class AccountsScreen(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             self._run_proxy_check_dialog(valid_proxies)
         else:
-            # Назначаем без проверки round-robin
-            # Обновляем и proxy_list, и proxy для полной совместимости
-            for i, acc in enumerate(self._accounts):
-                acc.proxy = valid_proxies[i % len(valid_proxies)]
-                acc.proxy_list = valid_proxies  # все прокси для ротации
-                acc.proxy_rotation_random = False
+            # Назначаем без проверки round-robin + сохраняем в глобальный пул
+            save_global_proxies(valid_proxies)
+            distribute_proxies(self._accounts, valid_proxies)
             save_accounts(self._accounts)
             self._refresh_table()
+            self.accounts_changed.emit(self._accounts)
             QMessageBox.information(
                 self, "Прокси назначены",
-                f"Назначено {len(valid_proxies)} прокси {len(self._accounts)} аккаунтам."
+                f"Назначено {len(valid_proxies)} прокси {len(self._accounts)} аккаунтам.\n"
+                f"Прокси сохранены глобально — при добавлении новых аккаунтов они получат прокси автоматически."
             )
 
 
@@ -1713,15 +1756,36 @@ class AccountsScreen(QWidget):
 
         def on_finished(imported, errors):
             progress_dlg.close()
-            self._accounts.extend(worker.new_accounts)
+            new_accs = worker.new_accounts
+
+            # Авто-распределение прокси из глобального пула на новые аккаунты
+            _gproxies = load_global_proxies()
+            _proxy_msg = ""
+            if _gproxies and new_accs:
+                # Определяем стартовый индекс — чтобы новые аккаунты продолжили ротацию
+                _start = len(self._accounts)
+                for i, acc in enumerate(new_accs):
+                    acc.proxy = _gproxies[(_start + i) % len(_gproxies)]
+                    acc.proxy_list = _gproxies
+                    acc.proxy_rotation_random = False
+                _proxy_msg = f"\nПрокси из глобального пула ({len(_gproxies)} шт.) назначены автоматически."
+            elif new_accs and not _gproxies:
+                _proxy_msg = "\n⚠ Глобальный пул прокси пуст — импортируйте прокси через «Импорт прокси»."
+
+            self._accounts.extend(new_accs)
             save_accounts(self._accounts)
             self._refresh_table()
             self.accounts_changed.emit(self._accounts)
-            QMessageBox.information(
-                self, "Импорт завершён",
-                f"Импортировано: {imported}\nПропущено: {errors}",
-            )
+
+            _info = f"Импортировано: {imported}\nПропущено: {errors}{_proxy_msg}"
+            if imported > 0 and _gproxies:
+                _info += "\n\nЗапускаю автопроверку всех аккаунтов..."
+            QMessageBox.information(self, "Импорт завершён", _info)
             self._import_worker = None
+
+            # Авто-тест сразу после импорта если есть прокси
+            if imported > 0 and _gproxies:
+                QTimer.singleShot(300, self._test_all)
 
         def on_error(msg):
             progress_dlg.close()
