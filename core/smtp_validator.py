@@ -1,5 +1,5 @@
 """
-FMailSender SMTP Validator v4.3.0
+FMailSender SMTP Validator v4.3.1
 FIX v3.0.0:
   - Устранён дубль порта 465 в PORT_FALLBACK_CONFIGS + исправлен отступ
   - ОБЯЗАТЕЛЬНЫЙ прокси: если proxy не задан → возврат PROXY_REQUIRED
@@ -331,7 +331,7 @@ class ValidateResult:
     host: str
     port: int
     ok: bool
-    code: str  # OK | AUTH_FAIL | SSL_ERROR | TIMEOUT | BLACKLISTED | CONN_ERROR | CANCELLED | PROXY_REQUIRED | PROXY_ERROR
+    code: str  # OK | AUTH_FAIL | SSL_ERROR | TIMEOUT | BLACKLISTED | CONN_ERROR | CANCELLED | PROXY_REQUIRED | PROXY_ERROR | PROXY_BLOCKED_SMTP
     message: str = ""
     spf_ok:   Optional[bool] = None
     dkim_ok:  Optional[bool] = None
@@ -460,6 +460,21 @@ def _try_smtp_connect(
               _socks_lib.SOCKS4 if "socks4" in scheme else _socks_lib.HTTP
           )
 
+          # Pre-check: verify proxy allows SMTP connections (quick TCP test, no auth)
+          # SOCKS5 error code 1 = General Failure = proxy blocks this destination/port
+          try:
+              import socks as _socks_check
+              _probe = _socks_check.socksocket()
+              _probe.set_proxy(proxy_type, ph, pp, True, pu, ppwd)
+              _probe.settimeout(min(timeout, 10))
+              _probe.connect((host, port))
+              _probe.close()
+          except Exception as _pe:
+              _pe_msg = str(_pe).lower()
+              # SOCKS5 General Failure (code 1) = proxy blocks SMTP ports anti-spam
+              if any(x in _pe_msg for x in ("general failure", "rejected connection", "socks5 error", "connection refused", "host unreachable", "network unreachable")):
+                  raise ConnectionError(f"PROXY_BLOCKS_SMTP:{host}:{port}:{_pe_msg[:80]}")
+
           # Use subclass override of _get_socket — works with Python 3.9–3.13+
           # This avoids the broken __new__ hack that fails on Python 3.11+ due to
           # missing internal attributes (_tls_required, etc.) added in newer versions.
@@ -566,7 +581,16 @@ class SmtpValidator:
             return ValidateResult(email, host, port, True, "OK",
                                   "Подключение успешно",
                                   spf_ok, dkim_ok, dmarc_ok, mx_ok)
-        except smtplib.SMTPAuthenticationError as e:
+        except ConnectionError as _ce:
+              _ce_msg = str(_ce)
+              if "PROXY_BLOCKS_SMTP" in _ce_msg:
+                  return ValidateResult(
+                      email, host, port, False, "PROXY_BLOCKED_SMTP",
+                      "Прокси блокирует SMTP-порты. "
+                      "FoxyProxy и datacenter-прокси запрещают SMTP (anti-spam). "
+                      "Используйте прокси с поддержкой портов 465/587.",
+                      spf_ok, dkim_ok, dmarc_ok, mx_ok)
+          except smtplib.SMTPAuthenticationError as e:
             err_str = str(e)
             if "535" in err_str:
                 detail = "Неверный пароль или отключена SMTP-авторизация в настройках почты"
