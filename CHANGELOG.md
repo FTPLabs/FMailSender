@@ -1,3 +1,23 @@
+## [4.0.4] — 2026-06-22
+
+### Багфиксы
+
+#### PySocks полностью удалён из критического пути
+- `_socks5_raw_socket()` — модульная функция в sender.py с RFC-1928 SOCKS5 + RFC-1929
+  user/pass auth на голом stdlib. Вызывается из `_test_smtp_sync` (тест аккаунтов)
+  и `_send_sync` (отправка). Раньше оба места делали `import socks` и немедленно
+  возвращали «PySocks не установлен» — статус «Неверный» на всех аккаунтах с прокси.
+
+#### HTML предпросмотр — внешние картинки теперь загружаются
+- `_update_preview()`: заменён `preview.load(QUrl.fromLocalFile(...))` на
+  `preview.setHtml(html, QUrl("https://email.preview/"))`.
+  Base URL = https:// даёт Chromium-origin=https, что разрешает загрузку
+  внешних CDN-изображений (jtvnw.net, amazonaws.com и т.д.) без ограничений
+  file-origin. Старый способ (file:// + LocalContentCanAccessRemoteUrls=True)
+  на Windows Qt6 игнорировался движком.
+
+---
+
 ## [4.0.3] — 2026-06-22
 
 ### Багфиксы

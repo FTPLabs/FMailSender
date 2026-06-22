@@ -577,23 +577,11 @@ class ComposeScreen(QWidget):
 
         if self.preview is not None:
             if _HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-                # Записываем HTML во временный файл и загружаем через file:// URL.
-                # Это надёжнее, чем setHtml(): при загрузке через file://
-                # LocalContentCanAccessRemoteUrls=True реально разрешает CDN-картинки.
-                # При setHtml(data:, ...) origin="null" — Chromium часто блокирует remote
-                # даже с установленным флагом, особенно на Windows.
-                try:
-                    if not self._preview_tmp:
-                        _fd, self._preview_tmp = _tempfile.mkstemp(
-                            suffix=".html", prefix="fmail_preview_"
-                        )
-                        _os.close(_fd)
-                    with open(self._preview_tmp, "w", encoding="utf-8") as _f:
-                        _f.write(html)
-                    self.preview.load(QUrl.fromLocalFile(self._preview_tmp))
-                except Exception:
-                    # fallback на setHtml если не удалось записать temp-файл
-                    self.preview.setHtml(html, QUrl("https://fmail.shop/"))
+                # setHtml() с base URL = https:// даёт origin=https, что позволяет
+                # Chromium загружать внешние HTTPS-картинки (CDN, jtvnw.net и т.д.)
+                # без ограничений file-origin. Это надёжнее file:// + LocalContentCanAccessRemoteUrls
+                # который на Windows часто игнорируется в Qt6.
+                self.preview.setHtml(html, QUrl("https://email.preview/"))
             else:
                 # QTextBrowser: поддерживает только локальные ресурсы
                 self.preview.setHtml(html)

@@ -553,17 +553,71 @@ def _parse_auth_error(host: str, smtp_code: int, detail: str) -> str:
 
 
 
+def _socks5_raw_socket(
+    proxy_host: str, proxy_port: int,
+    target_host: str, target_port: int,
+    username: str = "", password: str = "",
+    timeout: float = 30.0,
+):
+    """RFC-1928 SOCKS5 + RFC-1929 user/pass auth — только stdlib, PySocks не нужен.
+    Возвращает подключённый socket.socket, туннелированный через SOCKS5-прокси.
+    """
+    import socket as _socket
+    import struct as _struct
+
+    s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    s.connect((proxy_host, proxy_port))
+
+    # 1. Greeting
+    s.sendall(b"\x05\x02\x00\x02" if username else b"\x05\x01\x00")
+    resp = s.recv(2)
+    if len(resp) < 2 or resp[0] != 0x05:
+        s.close(); raise OSError("Не SOCKS5-сервер")
+    if resp[1] == 0xFF:
+        s.close(); raise OSError("SOCKS5: сервер отклонил все методы аутентификации")
+
+    # 2. User/pass auth (RFC 1929)
+    if resp[1] == 0x02:
+        if not username:
+            s.close(); raise OSError("SOCKS5: требуется логин/пароль, но они не заданы")
+        un, pw = username.encode("utf-8"), (password or "").encode("utf-8")
+        s.sendall(b"\x01" + bytes([len(un)]) + un + bytes([len(pw)]) + pw)
+        ar = s.recv(2)
+        if len(ar) < 2 or ar[1] != 0x00:
+            s.close(); raise OSError("SOCKS5: неверный логин/пароль (auth rejected)")
+
+    # 3. CONNECT
+    tb = target_host.encode("utf-8")
+    s.sendall(b"\x05\x01\x00\x03" + bytes([len(tb)]) + tb + _struct.pack(">H", target_port))
+    hdr = b""
+    while len(hdr) < 4:
+        chunk = s.recv(4 - len(hdr))
+        if not chunk:
+            s.close(); raise OSError("SOCKS5: соединение закрыто до ответа")
+        hdr += chunk
+    if hdr[1] != 0x00:
+        _e = {1:"общий сбой",2:"запрещено",3:"сеть недоступна",4:"хост недоступен",5:"отклонено"}
+        s.close(); raise OSError(f"SOCKS5 CONNECT отклонён: {_e.get(hdr[1], f'код {hdr[1]}')}")
+    # Drain BNDADDR/BNDPORT
+    atyp = hdr[3]
+    if atyp == 0x01: s.recv(6)
+    elif atyp == 0x03:
+        n = s.recv(1)[0]; s.recv(n + 2)
+    elif atyp == 0x04: s.recv(18)
+    return s
+
+
 def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       """
       Sync SMTP test с автоматическим многоуровневым fallback.
-      Поддерживает SOCKS4/SOCKS5/HTTP прокси через PySocks.
+      Поддерживает SOCKS5/SOCKS4/HTTP прокси через stdlib-сокет (PySocks не нужен).
 
       Стратегия:
         1) Основная конфигурация аккаунта (с cert-verify)
         2) Та же конфигурация без cert-verify (self-signed SSL)
         3) Fallback порты: 465 → 587 (только если прокси НЕ используется)
-           При прокси fallback-перебор портов бессмысленен — прокси и так может
-           не пустить, а каждая попытка = +5с таймаута.
+           При прокси fallback-перебор портов бессмысленен.
       """
       import ssl as _ssl
       import smtplib as _smtplib
@@ -572,15 +626,10 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       # ── Разбор прокси ──────────────────────────────────────────────────────────
       _proxy_url = (account.proxy or "").strip()
       _proxy_parsed = None
-      _socks_lib = None
       if _proxy_url:
           if "://" not in _proxy_url:
               _proxy_url = "socks5://" + _proxy_url
           _proxy_parsed = _up.urlparse(_proxy_url)
-          try:
-              import socks as _socks_lib  # PySocks
-          except ImportError:
-              return False, "PySocks не установлен (pip install PySocks) — прокси недоступен"
 
       # ── OAuth2 детектор ────────────────────────────────────────────────────────
       _is_oauth_acct = _is_ms_domain(account.email) and bool(
@@ -594,19 +643,15 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
           """Создаёт SMTP-соединение (прямое или через прокси)."""
           TIMEOUT = 5  # сек на попытку — быстро определяем недоступность
 
-          if _proxy_parsed and _socks_lib:
-              # ── SOCKS/HTTP прокси via PySocks ──────────────────────────────────
-              _scheme = _proxy_parsed.scheme.lower()
-              _ptype = (
-                  _socks_lib.SOCKS5 if "socks5" in _scheme else
-                  _socks_lib.SOCKS4 if "socks4" in _scheme else
-                  _socks_lib.HTTP
+          if _proxy_parsed:
+              # ── SOCKS5 через raw stdlib-сокет (PySocks не нужен) ───────────────
+              raw = _socks5_raw_socket(
+                  _proxy_parsed.hostname, _proxy_parsed.port or 1080,
+                  host, port,
+                  username=_proxy_parsed.username or "",
+                  password=_proxy_parsed.password or "",
+                  timeout=TIMEOUT,
               )
-              raw = _socks_lib.socksocket()
-              raw.set_proxy(_ptype, _proxy_parsed.hostname, _proxy_parsed.port or 1080,
-                            True, _proxy_parsed.username, _proxy_parsed.password)
-              raw.settimeout(TIMEOUT)
-              raw.connect((host, port))
               if use_ssl:
                   raw = ctx.wrap_socket(raw, server_hostname=host)
               s = _smtplib.SMTP.__new__(_smtplib.SMTP)
@@ -1107,22 +1152,14 @@ class SendingEngine:
                   proxy_url = "socks5://" + proxy_url
               import urllib.parse as _urlparse
               _p = _urlparse.urlparse(proxy_url)
-              _scheme = _p.scheme.lower()
-              try:
-                  import socks as _socks_lib
-              except ImportError:
-                  return SendResult(
-                      recipient_email=recipient.email, success=False,
-                      error="PySocks не установлен. Выполните: pip install PySocks",
-                      account_used=account.email,
-                  )
-              _proxy_type = _socks_lib.SOCKS5 if "socks5" in _scheme else (
-                  _socks_lib.SOCKS4 if "socks4" in _scheme else _socks_lib.HTTP)
-              _raw = _socks_lib.socksocket()
-              _raw.set_proxy(_proxy_type, _p.hostname, _p.port or 1080,
-                             True, _p.username, _p.password)
-              _raw.settimeout(30)
-              _raw.connect((account.host, account.port))
+              # ── SOCKS5 через raw stdlib-сокет (PySocks не нужен) ────────────
+              _raw = _socks5_raw_socket(
+                  _p.hostname, _p.port or 1080,
+                  account.host, account.port,
+                  username=_p.username or "",
+                  password=_p.password or "",
+                  timeout=30.0,
+              )
               if account.use_ssl:
                   _raw = ctx.wrap_socket(_raw, server_hostname=account.host)
               smtp_conn = smtplib.SMTP.__new__(smtplib.SMTP)
