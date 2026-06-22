@@ -689,28 +689,28 @@ class SmtpValidator:
                                           spf_ok, dkim_ok, dmarc_ok, mx_ok)
                 except Exception:
                     continue
-        # ── Прямое соединение: fallback если прокси не помог ────────────────
-          if proxy_url:
-              for _dp, _ds, _dt in [(port, use_ssl, use_tls), (465, True, False), (587, False, True)]:
-                  try:
-                      _try_smtp_connect(host, _dp, _ds, _dt, email, password, timeout, "", oauth_token)
-                      return ValidateResult(email, host, _dp, True, "OK",
-                                            f"Подключено напрямую порт {_dp} (прокси не работает с SMTP)",
-                                            spf_ok, dkim_ok, dmarc_ok, mx_ok)
-                  except smtplib.SMTPAuthenticationError as _dae2:
-                      _das2 = str(_dae2)
-                      if "535" in _das2:
-                          _dd2 = "Неверный пароль или SMTP отключён в настройках аккаунта"
-                      elif "534" in _das2:
-                          _dd2 = "Требуется App Password (включена 2FA)"
-                      else:
-                          _dd2 = f"AUTH: {_das2[:80]}"
-                      return ValidateResult(email, host, _dp, False, "AUTH_FAIL",
-                                            _dd2, spf_ok, dkim_ok, dmarc_ok, mx_ok)
-                  except Exception:
-                      continue
+        # ── Прямое соединение: fallback если прокси не помог ────────────────
+        if proxy_url:
+            for _dp, _ds, _dt in [(port, use_ssl, use_tls), (465, True, False), (587, False, True)]:
+                try:
+                    _try_smtp_connect(host, _dp, _ds, _dt, email, password, timeout, "", oauth_token)
+                    return ValidateResult(email, host, _dp, True, "OK",
+                                          f"Подключено напрямую порт {_dp} (прокси не работает с SMTP)",
+                                          spf_ok, dkim_ok, dmarc_ok, mx_ok)
+                except smtplib.SMTPAuthenticationError as _dae2:
+                    _das2 = str(_dae2)
+                    if "535" in _das2:
+                        _dd2 = "Неверный пароль или SMTP отключён в настройках аккаунта"
+                    elif "534" in _das2:
+                        _dd2 = "Требуется App Password (включена 2FA)"
+                    else:
+                        _dd2 = f"AUTH: {_das2[:80]}"
+                    return ValidateResult(email, host, _dp, False, "AUTH_FAIL",
+                                          _dd2, spf_ok, dkim_ok, dmarc_ok, mx_ok)
+                except Exception:
+                    continue
 
-          return ValidateResult(email, host, port, False, "CONN_ERROR",
+        return ValidateResult(email, host, port, False, "CONN_ERROR",
                                 f"Не удалось подключиться к {host} ни через один порт (465/587/25/2525). "
                                 f"Проверьте: 1) SMTP включён в настройках; "
                                 f"2) Используйте App Password; 3) Прокси не блокирует порт; "
