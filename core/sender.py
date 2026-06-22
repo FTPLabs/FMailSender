@@ -980,10 +980,18 @@ class SendingEngine:
     ) -> SendResult:
         personalized = template.personalize(recipient)
         async with sem:
-            if _HAS_AIOSMTPLIB:
-                return await self._send_aiosmtp(account, recipient, personalized)
-            return await asyncio.get_running_loop().run_in_executor(
-                None, self._send_sync, account, recipient, personalized
+            # Если прокси задан — ВСЕГДА используем sync-путь (aiosmtplib не поддерживает SOCKS).
+            # Если прокси НЕ задан — отправка заблокирована: IP клиента не должен утекать.
+            if account.proxy and account.proxy.strip():
+                return await asyncio.get_running_loop().run_in_executor(
+                    None, self._send_sync, account, recipient, personalized
+                )
+            # Нет прокси → блокируем отправку
+            return SendResult(
+                recipient_email=recipient.email,
+                success=False,
+                error="Прокси не настроен для этого аккаунта — отправка без прокси заблокирована (защита IP)",
+                account_used=account.email,
             )
 
     async def _send_aiosmtp(
@@ -1066,38 +1074,9 @@ class SendingEngine:
             }
             _err_str = str(_any_err)
             _err_low = _err_str.lower()
-            _is_conn = (
-                isinstance(_any_err, (socket.timeout, TimeoutError, ConnectionRefusedError, OSError))
-                or any(kw in _err_low for kw in (
-                    "connect", "timed out", "timeout", "connection refused",
-                    "unreachable", "network is", "no route", "errno",
-                ))
-            )
-            # Attempt port fallback only for connection-level errors
-            if _is_conn and account.port in _fallback_map:
-                _fb_port, _fb_ssl, _fb_tls = _fallback_map[account.port]
-                try:
-                    import ssl as _ssl2
-                    _ctx2 = _ssl2.create_default_context()
-                    if _fb_ssl:
-                        _s2 = smtplib.SMTP_SSL(account.host, _fb_port, context=_ctx2, timeout=30)
-                    else:
-                        _s2 = smtplib.SMTP(account.host, _fb_port, timeout=30)
-                        _s2.ehlo()
-                        if _fb_tls:
-                            _s2.starttls(context=_ctx2)
-                            _s2.ehlo()
-                    _s2.login(account.email, account.password)
-                    _s2.send_message(msg)
-                    _s2.quit()
-                    return SendResult(
-                        recipient_email=recipient.email,
-                        success=True,
-                        account_used=account.email,
-                        message_id=msg.get("Message-ID", ""),
-                    )
-                except Exception as _exc:
-                    logging.getLogger("sender").debug("Пропущено исключение: %s", _exc)
+            # НЕ делаем fallback на прямое соединение — это вызвало бы утечку IP.
+            # aiosmtplib не поддерживает SOCKS — эта ветка вызывается только если
+            # прокси не задан, что теперь блокируется в _send_one.
             return SendResult(
                 recipient_email=recipient.email,
                 success=False,
@@ -1112,32 +1091,17 @@ class SendingEngine:
           template: EmailTemplate,
       ) -> SendResult:
           import ssl as _ssl_mod
-          # БАГ-2 FIX: прокси опционален — при отсутствии прокси используем прямое SMTP-соединение
           msg = _build_message(account, recipient, template)
           try:
               ctx = _ssl_mod.create_default_context()
               proxy_url = account.proxy.strip() if account.proxy else ""
               if not proxy_url:
-                  # Прямое подключение без прокси
-                  if account.use_ssl:
-                      _direct = smtplib.SMTP_SSL(account.host, account.port, context=ctx, timeout=30)
-                  else:
-                      _direct = smtplib.SMTP(account.host, account.port, timeout=30)
-                      _direct.ehlo()
-                      if account.use_tls:
-                          _direct.starttls(context=ctx)
-                          _direct.ehlo()
-                  _direct.login(account.email, account.password)
-                  _direct.send_message(msg)
-                  try:
-                      _direct.quit()
-                  except Exception:
-                      pass
+                  # Прокси не настроен — блокируем отправку во избежание утечки реального IP
                   return SendResult(
                       recipient_email=recipient.email,
-                      success=True,
+                      success=False,
+                      error="Прокси не настроен — отправка без прокси заблокирована (защита IP клиента)",
                       account_used=account.email,
-                      message_id=msg.get("Message-ID", ""),
                   )
               if "://" not in proxy_url:
                   proxy_url = "socks5://" + proxy_url

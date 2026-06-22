@@ -121,9 +121,11 @@ class ProxyManager:
 
 
 class ProxyCheckWorker(QThread):
-    """TCP-проверка прокси + определение страны через ip-api.com (бесплатно)."""
-    result = pyqtSignal(int, bool, str, str)  # index, valid, country_info, error
-    finished = pyqtSignal(int, int)           # valid_count, total
+    """Реальная проверка прокси: SOCKS5/SOCKS4/HTTP рукопожатие + пинг + страна через ip-api.com."""
+    result = pyqtSignal(int, bool, str, str, int)  # index, valid, country, error, ping_ms
+    finished = pyqtSignal(int, int)                 # valid_count, total
+
+    TIMEOUT = 7  # сек на каждую попытку
 
     def __init__(self, proxies: list[str], parent=None):
         super().__init__(parent)
@@ -138,45 +140,114 @@ class ProxyCheckWorker(QThread):
         for i, proxy_url in enumerate(self._proxies):
             if self._cancelled:
                 break
-            try:
-                parsed = urllib.parse.urlparse(proxy_url)
-                host = parsed.hostname
-                port = parsed.port
-                if not host or not port:
-                    self.result.emit(i, False, "", "Невалидный URL")
-                    continue
-                # TCP connect test (5 сек таймаут)
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5)
-                err_code = sock.connect_ex((str(host), int(port)))
-                sock.close()
-                if err_code != 0:
-                    self.result.emit(i, False, "", f"Порт закрыт (err {err_code})")
-                    continue
-                # Определение страны
-                country_info = self._get_country(str(host))
+            valid, country, error, ping_ms = self._check_one(proxy_url)
+            if valid:
                 valid_count += 1
-                self.result.emit(i, True, country_info, "")
-            except Exception as e:
-                self.result.emit(i, False, "", str(e)[:60])
+            self.result.emit(i, valid, country, error, ping_ms)
         self.finished.emit(valid_count, len(self._proxies))
 
-    @staticmethod
-    def _get_country(ip: str) -> str:
-        try:
-            req = urllib.request.Request(
-                f"http://ip-api.com/json/{ip}?fields=country,countryCode",
-                headers={"User-Agent": "FMailSender/3.0"},
-            )
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                geo = json.loads(resp.read().decode())
-                if geo.get("status") == "success":
-                    code = geo.get("countryCode", "")
-                    name = geo.get("country", "")
-                    return f"{code} {name}".strip()
-        except Exception:
-            pass
+    @classmethod
+    def _check_one(cls, proxy_url: str) -> tuple[bool, str, str, int]:
+        """Реальная проверка через SOCKS5/SOCKS4/HTTP.
+        Возвращает (valid, country, error, ping_ms).
+        """
+        import time as _time
+
+        if not proxy_url or not proxy_url.strip():
+            return False, "", "Пустой URL", 0
+
+        if "://" not in proxy_url:
+            proxy_url = "socks5://" + proxy_url
+
+        parsed = urllib.parse.urlparse(proxy_url)
+        host = parsed.hostname or ""
+        port = parsed.port or 1080
+        scheme = (parsed.scheme or "socks5").lower()
+        uname = parsed.username or ""
+        upass = parsed.password or ""
+
+        if not host:
+            return False, "", "Нет хоста в URL", 0
+
+        # ── SOCKS5 / SOCKS4 — реальное рукопожатие через PySocks ──────────────
+        if "socks" in scheme:
+            try:
+                import socks as _socks
+            except ImportError:
+                return False, "", "PySocks не установлен (pip install PySocks)", 0
+            try:
+                stype = _socks.SOCKS5 if "socks5" in scheme else _socks.SOCKS4
+                s = _socks.socksocket()
+                s.settimeout(cls.TIMEOUT)
+                s.set_proxy(stype, host, port, True,
+                            uname or None, upass or None)
+                t0 = _time.monotonic()
+                # Подключаемся через прокси к ip-api.com:80 — реальный туннель
+                s.connect(("ip-api.com", 80))
+                ping_ms = int((_time.monotonic() - t0) * 1000)
+                # Отправляем HTTP-запрос через туннель
+                s.send(
+                    b"GET /json/?fields=status,country,countryCode HTTP/1.0\r\n"
+                    b"Host: ip-api.com\r\nUser-Agent: FMailSender/4.0\r\n\r\n"
+                )
+                raw = b""
+                while True:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    raw += chunk
+                    if len(raw) > 32768:
+                        break
+                s.close()
+                if b"\r\n\r\n" in raw:
+                    body = raw.split(b"\r\n\r\n", 1)[1].decode("utf-8", "replace").strip()
+                    d = json.loads(body)
+                    if d.get("status") == "success":
+                        cc = d.get("countryCode", "")
+                        ctry = d.get("country", cc)
+                        flag = _cc_flag_emoji(cc)
+                        return True, f"{flag} {ctry}".strip(), "", ping_ms
+                    return True, "", "", ping_ms  # прокси работает, но API не ответил
+                return True, "", "", ping_ms
+            except Exception as e:
+                return False, "", str(e)[:80], 0
+
+        # ── HTTP/HTTPS прокси ──────────────────────────────────────────────────
+        else:
+            auth = ""
+            if uname:
+                auth = f"{urllib.parse.quote(uname,safe='')}:{urllib.parse.quote(upass,safe='')}@"
+            proxy_full = f"http://{auth}{host}:{port}"
+            handler = urllib.request.ProxyHandler({"http": proxy_full, "https": proxy_full})
+            opener = urllib.request.build_opener(handler)
+            try:
+                import time as _time2
+                t0 = _time2.monotonic()
+                req = urllib.request.Request(
+                    "http://ip-api.com/json/?fields=status,country,countryCode",
+                    headers={"User-Agent": "FMailSender/4.0"},
+                )
+                with opener.open(req, timeout=cls.TIMEOUT) as resp:
+                    ping_ms = int((_time2.monotonic() - t0) * 1000)
+                    d = json.loads(resp.read().decode())
+                    cc = d.get("countryCode", "")
+                    ctry = d.get("country", cc)
+                    flag = _cc_flag_emoji(cc)
+                    return True, f"{flag} {ctry}".strip(), "", ping_ms
+            except Exception as e:
+                return False, "", str(e)[:80], 0
+
+
+def _cc_flag_emoji(cc: str) -> str:
+    """Преобразует 2-буквенный код страны (ISO 3166-1 alpha-2) в emoji-флаг.
+    Пример: 'US' → '🇺🇸', 'RU' → '🇷🇺', 'DE' → '🇩🇪'
+    Использует Unicode Regional Indicator Symbols (U+1F1E6–U+1F1FF).
+    """
+    cc = (cc or "").strip().upper()
+    if len(cc) != 2 or not cc.isalpha():
         return ""
+    # Regional Indicator 'A' = U+1F1E6
+    return chr(0x1F1E6 + ord(cc[0]) - ord("A")) + chr(0x1F1E6 + ord(cc[1]) - ord("A"))
 
 
 try:
@@ -643,9 +714,7 @@ class _CountryWorker(QThread):
 
     @staticmethod
     def _cc_flag(cc: str) -> str:
-        if len(cc) == 2:
-            return cc.upper()
-        return ""
+        return _cc_flag_emoji(cc)
 
     @staticmethod
     def _resolve(proxy_url: str) -> str:
@@ -1121,9 +1190,11 @@ class AccountsScreen(QWidget):
         stat_lbl.setObjectName("label_muted")
         lay.addWidget(stat_lbl)
 
-        table = QTableWidget(len(proxies), 4)
-        table.setHorizontalHeaderLabels(["Прокси", "Статус", "Страна", "Ошибка"])
+        table = QTableWidget(len(proxies), 5)
+        table.setHorizontalHeaderLabels(["Прокси", "Статус", "Страна", "Пинг (мс)", "Ошибка"])
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         for i, p in enumerate(proxies):
             table.setItem(i, 0, QTableWidgetItem(p))
@@ -1132,6 +1203,7 @@ class AccountsScreen(QWidget):
             table.setItem(i, 1, item)
             table.setItem(i, 2, QTableWidgetItem(""))
             table.setItem(i, 3, QTableWidgetItem(""))
+            table.setItem(i, 4, QTableWidgetItem(""))
         lay.addWidget(table)
 
         btn_row = QHBoxLayout()
@@ -1150,18 +1222,22 @@ class AccountsScreen(QWidget):
         valid_proxies = []
         worker = ProxyCheckWorker(proxies, dlg)
 
-        def on_result(idx, valid, country, error):
+        def on_result(idx, valid, country, error, ping_ms):
             progress.setValue(idx + 1)
             s_item = table.item(idx, 1)
             c_item = table.item(idx, 2)
-            e_item = table.item(idx, 3)
+            p_item = table.item(idx, 3)
+            e_item = table.item(idx, 4)
             if valid:
-                s_item.setText("OK")
+                s_item.setText("✓ OK")
                 s_item.setForeground(QColor(Colors.SUCCESS))
                 c_item.setText(country or "—")
+                ping_color = Colors.SUCCESS if ping_ms < 300 else ("#F59E0B" if ping_ms < 800 else Colors.ERROR)
+                p_item.setText(f"{ping_ms} мс")
+                p_item.setForeground(QColor(ping_color))
                 valid_proxies.append(proxies[idx])
             else:
-                s_item.setText("Ошибка")
+                s_item.setText("✗ Ошибка")
                 s_item.setForeground(QColor(Colors.ERROR))
                 e_item.setText(error)
 
