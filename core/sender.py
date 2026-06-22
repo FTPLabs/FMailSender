@@ -839,13 +839,17 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       if ok is False:
           return False, msg
 
-      # ── Шаг 3: fallback порты — только без прокси ─────────────────────────────
-      # При прокси каждая попытка добавляет 5с задержки и всё равно не помогает —
-      # прокси либо работает (тогда шаги 1-2 уже прошли), либо нет.
-      if _proxy_parsed:
-          return False, f"Не удалось подключиться через прокси к {account.host}:{account.port}. Проверьте прокси."
-
-      _combos = [(465, True, False), (587, False, True)]  # 25/2525 убраны — почти никогда не нужны
+      # ── Шаг 3: fallback — перебираем ВСЕ стандартные порты (и с прокси, и без) ─
+      # Ошибка соединения на одном порту ≠ «прокси не работает» или «хост недоступен» —
+      # нужно проверить 465/587/25/2525 прежде чем сдаваться.
+      _combos = [
+          (465,  True,  False),   # SMTPS  — SSL напрямую
+          (587,  False, True),    # Submission — STARTTLS
+          (25,   False, False),   # SMTP plain (большинство серверов)
+          (2525, False, False),   # SMTP plain (альтернативный, часто открыт прокси)
+          (465,  False, True),    # 465 + STARTTLS (нестандартно, но встречается)
+          (587,  True,  False),   # 587 + SSL (нестандартно)
+      ]
       _tried = {account.port}
       for _port, _ssl_flag, _tls_flag in _combos:
           if _port in _tried:
@@ -854,11 +858,23 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
           for _verify in (True, False):
               ok, msg = _attempt(account.host, _port, _ssl_flag, _tls_flag, verify=_verify)
               if ok is True:
-                  return True, msg
+                  # Найдена рабочая конфигурация — обновляем аккаунт на месте, чтобы
+                  # последующие отправки сразу использовали правильный порт.
+                  account.port    = _port
+                  account.use_ssl = _ssl_flag
+                  account.use_tls = _tls_flag
+                  _pfx = f" через прокси {_proxy_parsed.hostname}" if _proxy_parsed else ""
+                  return True, f"{msg} [авто-порт {_port}{_pfx}]"
               if ok is False:
                   return False, f"Неверный логин или пароль (порт {_port}). {msg}"
 
-      return False, f"Не удалось подключиться к {account.host}. Проверьте сетевой доступ."
+      _via = f" через прокси {_proxy_parsed.hostname}" if _proxy_parsed else ""
+      _ports = ", ".join(str(p) for p in sorted(_tried))
+      return False, (
+          f"Не удалось подключиться к {account.host}{_via}. "
+          f"Проверено портов: {_ports}. "
+          f"Проверьте прокси и учётные данные."
+      )
 
 async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
     """
