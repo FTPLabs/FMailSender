@@ -466,14 +466,20 @@ def _try_smtp_connect(
               import socks as _socks_check
               _probe = _socks_check.socksocket()
               _probe.set_proxy(proxy_type, ph, pp, True, pu, ppwd)
-              _probe.settimeout(min(timeout, 10))
+              _probe.settimeout(min(timeout, 8))
               _probe.connect((host, port))
               _probe.close()
           except Exception as _pe:
               _pe_msg = str(_pe).lower()
-              # SOCKS5 General Failure (code 1) = proxy blocks SMTP ports anti-spam
-              if any(x in _pe_msg for x in ("general failure", "rejected connection", "socks5 error", "connection refused", "host unreachable", "network unreachable", "timed out", "timeout", "could not connect", "unreachable")):
+              # ТОЛЬКО явный SOCKS5 General Failure (код 1) → прокси блокирует SMTP.
+              # Таймауты, connection refused, host unreachable — НЕ являются признаком
+              # блокировки SMTP прокси. Это медленный/недоступный прокси или хост.
+              # Не классифицируем их как PROXY_BLOCKS_SMTP — иначе будет ложный
+              # fallback на direct, который тоже упадёт → «Не удалось подключиться».
+              _SOCKS5_BLOCK_SIGNALS = ("general failure", "socks5 error", "not allowed by ruleset")
+              if any(x in _pe_msg for x in _SOCKS5_BLOCK_SIGNALS):
                   raise ConnectionError(f"PROXY_BLOCKS_SMTP:{host}:{port}:{_pe_msg[:80]}")
+              # Остальные ошибки pre-check: игнорируем, основное подключение продолжается.
 
           # Use subclass override of _get_socket — works with Python 3.9–3.13+
           # This avoids the broken __new__ hack that fails on Python 3.11+ due to

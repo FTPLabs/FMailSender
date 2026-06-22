@@ -444,6 +444,14 @@ def _cc_flag_emoji(cc: str) -> str:
     return chr(0x1F1E6 + ord(cc[0]) - ord("A")) + chr(0x1F1E6 + ord(cc[1]) - ord("A"))
 
 
+# ── Кэш стран/флагов прокси: proxy_url → "🇷🇺 Russia" ───────────────────────
+# Персистентен на время сессии — страна не теряется при _refresh_table()
+_proxy_country_cache: dict[str, str] = {}
+
+# Семафор ограничивает одновременные запросы к ip-api.com (45 req/min free tier)
+_country_api_semaphore = threading.Semaphore(3)
+
+
 try:
     from cryptography.fernet import Fernet
     _HAS_FERNET = True
@@ -959,7 +967,16 @@ class _CountryWorker(QThread):
         self._proxy_url = proxy_url
 
     def run(self):
-        flag = self._resolve(self._proxy_url)
+        # Проверяем кэш — не дёргаем ip-api.com повторно для одного прокси
+        cached = _proxy_country_cache.get(self._proxy_url)
+        if cached is not None:
+            self.result_ready.emit(self._row, cached)
+            return
+        # Rate-limit: не более 3 одновременных запросов к ip-api.com
+        with _country_api_semaphore:
+            flag = self._resolve(self._proxy_url)
+        # Кэшируем результат на всю сессию
+        _proxy_country_cache[self._proxy_url] = flag
         self.result_ready.emit(self._row, flag)
 
     @staticmethod
@@ -1209,14 +1226,20 @@ class AccountsScreen(QWidget):
                   status_item.setToolTip("Нажмите «Проверить» для проверки аккаунта")
               self.table.setItem(row, 1, status_item)
 
-              # Колонка 2: Прокси
+              # Колонка 2: Прокси (страна из кэша — не теряется при _refresh_table)
               _proxy_raw = (acc.proxy or "").strip()
-              proxy_item = QTableWidgetItem(_proxy_raw if _proxy_raw else "—")
+              _cached_country = _proxy_country_cache.get(_proxy_raw, "") if _proxy_raw else ""
+              if _cached_country and _cached_country != "—":
+                  _proxy_display = f"{_cached_country} | {_proxy_raw}"
+              else:
+                  _proxy_display = _proxy_raw if _proxy_raw else "—"
+              proxy_item = QTableWidgetItem(_proxy_display)
               proxy_item.setForeground(QColor("#6C8EBF" if _proxy_raw else Colors.TEXT_MUTED))
               proxy_item.setToolTip(_proxy_raw or "Прокси не назначен")
               self.table.setItem(row, 2, proxy_item)
-              if _proxy_raw:
-                  QTimer.singleShot(100 + row * 50, lambda r=row, p=_proxy_raw: self._fetch_proxy_country(r, p))
+              # Запускаем определение страны ТОЛЬКО если ещё нет в кэше
+              if _proxy_raw and not _cached_country:
+                  QTimer.singleShot(100 + row * 80, lambda r=row, p=_proxy_raw: self._fetch_proxy_country(r, p))
 
           valid_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is True)
           invalid_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is False)
@@ -1302,34 +1325,54 @@ class AccountsScreen(QWidget):
         def on_result(ok, msg, r=row):
             if 0 <= r < len(self._accounts):
                 self._accounts[r].last_test_ok = ok
-                self._accounts[r].last_test_msg = msg  # сохраняем полный текст ошибки
+                self._accounts[r].last_test_msg = msg
                 self._accounts[r].is_active = ok
                 save_accounts(self._accounts)
-            # Обновляем ячейку статуса (колонка 1)
+            # Обновляем таблицу (кэш страны сохранится — не теряется)
             self._refresh_table()
-            # FIX: прокси-детект всегда
-            _px = (self._accounts[r].proxy or "") if 0 <= r < len(self._accounts) else ""
-            if _px.strip():
-                self._fetch_proxy_country(r, _px.strip())
+            # Страну показываем только если ещё не определена
+            _px = (self._accounts[r].proxy or "").strip() if 0 <= r < len(self._accounts) else ""
+            if _px and _px not in _proxy_country_cache:
+                self._fetch_proxy_country(r, _px)
+            # Очищаем завершённые воркеры
+            self._test_workers = [x for x in self._test_workers if x.isRunning()]
 
         w.result_ready.connect(on_result)
         self._test_workers.append(w)
         w.start()
 
     def _fetch_proxy_country(self, row: int, proxy_url: str) -> None:
-        """Запускает CountryWorker для обновления флага страны в колонке Прокси (2)."""
-        w = _CountryWorker(row, proxy_url, parent=self)
-        def _on_country(r, flag_text, widget=self.table):
-            item = widget.item(r, 2)  # колонка 2 = «Прокси» (была ошибка: 6)
+        """Запускает CountryWorker для обновления флага страны в колонке Прокси (2).
+        Проверяет кэш — не запускает воркер если страна уже известна.
+        Держит сильную ссылку на воркер в _test_workers чтобы Qt/GC его не удалил.
+        """
+        # Используем кэш — если страна уже определена, просто обновляем ячейку
+        cached = _proxy_country_cache.get(proxy_url)
+        if cached:
+            item = self.table.item(row, 2)
             if item:
-                # Показываем: «флаг страна | proxy_url»
+                raw = item.toolTip() or proxy_url
+                if cached != "—":
+                    item.setText(f"{cached} | {raw}")
+                item.setForeground(QColor("#6C8EBF"))
+            return
+        w = _CountryWorker(row, proxy_url, parent=self)
+
+        def _on_country(r: int, flag_text: str, widget=self.table):
+            item = widget.item(r, 2)
+            if item:
                 current = item.text()
                 base = current.split(" | ")[-1] if " | " in current else current
-                item.setText(f"{flag_text} | {base}" if flag_text and flag_text != "—" else base)
+                if flag_text and flag_text != "—":
+                    item.setText(f"{flag_text} | {base}")
                 item.setForeground(QColor("#6C8EBF"))
+            # Удаляем воркер из списка после завершения (cleanup)
+            self._test_workers = [x for x in self._test_workers if x.isRunning()]
+
         w.result_ready.connect(_on_country)
+        # Держим сильную ссылку — иначе Python GC удалит объект до завершения потока
+        self._test_workers.append(w)
         w.start()
-        # Не держим ссылку — QThread удалится сам после finished
 
     def _test_all(self) -> None:
         """Проверяет все аккаунты батчами (MAX_CONCURRENT=4).
@@ -1342,7 +1385,7 @@ class AccountsScreen(QWidget):
         if not self._accounts:
             return
 
-        MAX_CONCURRENT = 10  # одновременных проверок
+        MAX_CONCURRENT = 4  # одновременных проверок (больше → rate-limit GMX/Rambler)
 
         self._test_cancel_event.clear()
         self.cancel_test_btn.setVisible(True)
