@@ -555,64 +555,116 @@ def _parse_auth_error(host: str, smtp_code: int, detail: str) -> str:
 
 def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       """
-      Sync SMTP test с автоматическим многоуровневым fallback:
-        1) SSL/TLS с проверкой сертификата
-        2) SSL/TLS без проверки сертификата (для серверов с self-signed cert)
-        3) Перебор портов: 465 → 587 → 25 → 2525 (каждый — с и без cert-verify)
-      Позволяет корректно работать с серверами (Rambler, корпоративные),
-      чьи SSL-сертификаты не проходят стандартную верификацию.
+      Sync SMTP test с автоматическим многоуровневым fallback.
+      Поддерживает SOCKS4/SOCKS5/HTTP прокси через PySocks.
+
+      Стратегия:
+        1) Основная конфигурация аккаунта (с cert-verify)
+        2) Та же конфигурация без cert-verify (self-signed SSL)
+        3) Fallback порты: 465 → 587 (только если прокси НЕ используется)
+           При прокси fallback-перебор портов бессмысленен — прокси и так может
+           не пустить, а каждая попытка = +5с таймаута.
       """
       import ssl as _ssl
       import smtplib as _smtplib
+      import urllib.parse as _up
 
-      def _attempt(host: str, port: int, use_ssl: bool, use_tls: bool, verify: bool = True):
-          """Одна попытка подключения. Возвращает (True/False/None, msg).
-          True = успех, False = auth fail (пароль неверен), None = connect/ssl ошибка.
-          """
-          ctx = _ssl.create_default_context()
-          if not verify:
-              ctx.check_hostname = False
-              ctx.verify_mode = _ssl.CERT_NONE
-          # OAuth2-аккаунт Microsoft? (refresh/access token присутствует)
-          _is_oauth_acct = _is_ms_domain(account.email) and bool(
-              getattr(account, "refresh_token", "")
-              or getattr(account, "access_token", "")
-              or getattr(account, "oauth_token", "")
-          )
-          s = None
+      # ── Разбор прокси ──────────────────────────────────────────────────────────
+      _proxy_url = (account.proxy or "").strip()
+      _proxy_parsed = None
+      _socks_lib = None
+      if _proxy_url:
+          if "://" not in _proxy_url:
+              _proxy_url = "socks5://" + _proxy_url
+          _proxy_parsed = _up.urlparse(_proxy_url)
           try:
+              import socks as _socks_lib  # PySocks
+          except ImportError:
+              return False, "PySocks не установлен (pip install PySocks) — прокси недоступен"
+
+      # ── OAuth2 детектор ────────────────────────────────────────────────────────
+      _is_oauth_acct = _is_ms_domain(account.email) and bool(
+          getattr(account, "refresh_token", "")
+          or getattr(account, "access_token", "")
+          or getattr(account, "oauth_token", "")
+      )
+
+      def _make_smtp(host: str, port: int, use_ssl: bool, use_tls: bool,
+                     ctx: "_ssl.SSLContext") -> "_smtplib.SMTP":
+          """Создаёт SMTP-соединение (прямое или через прокси)."""
+          TIMEOUT = 5  # сек на попытку — быстро определяем недоступность
+
+          if _proxy_parsed and _socks_lib:
+              # ── SOCKS/HTTP прокси via PySocks ──────────────────────────────────
+              _scheme = _proxy_parsed.scheme.lower()
+              _ptype = (
+                  _socks_lib.SOCKS5 if "socks5" in _scheme else
+                  _socks_lib.SOCKS4 if "socks4" in _scheme else
+                  _socks_lib.HTTP
+              )
+              raw = _socks_lib.socksocket()
+              raw.set_proxy(_ptype, _proxy_parsed.hostname, _proxy_parsed.port or 1080,
+                            True, _proxy_parsed.username, _proxy_parsed.password)
+              raw.settimeout(TIMEOUT)
+              raw.connect((host, port))
               if use_ssl:
-                  s = _smtplib.SMTP_SSL(host, port, context=ctx, timeout=10)
+                  raw = ctx.wrap_socket(raw, server_hostname=host)
+              s = _smtplib.SMTP.__new__(_smtplib.SMTP)
+              s._host = host
+              s.sock = raw
+              s.file = raw.makefile("rb")
+              s.ehlo_or_helo_if_needed()
+              if not use_ssl and use_tls:
+                  s.starttls(context=ctx)
+                  s.ehlo()
+          else:
+              # ── Прямое подключение ─────────────────────────────────────────────
+              if use_ssl:
+                  s = _smtplib.SMTP_SSL(host, port, context=ctx, timeout=TIMEOUT)
               else:
-                  s = _smtplib.SMTP(host, port, timeout=10)
+                  s = _smtplib.SMTP(host, port, timeout=TIMEOUT)
                   s.ehlo()
                   if use_tls:
                       s.starttls(context=ctx)
                       s.ehlo()
-              # OAuth2/XOAUTH2 для Microsoft (Outlook/Hotmail/Live) — иначе LOGIN
+          return s
+
+      def _attempt(host: str, port: int, use_ssl: bool, use_tls: bool, verify: bool = True):
+          """Одна попытка. True=успех, False=неверный пароль, None=ошибка соединения."""
+          ctx = _ssl.create_default_context()
+          if not verify:
+              ctx.check_hostname = False
+              ctx.verify_mode = _ssl.CERT_NONE
+          s = None
+          try:
+              s = _make_smtp(host, port, use_ssl, use_tls, ctx)
+
+              # ── Аутентификация ─────────────────────────────────────────────────
               _oauth_tok = ""
               if _is_oauth_acct:
                   _oauth_tok = (
                       _get_oauth_token(account) if _HAS_OAUTH2
                       else (getattr(account, "access_token", "") or getattr(account, "oauth_token", ""))
                   )
-                  # Для OAuth-аккаунта отказ токена — окончательный, без отката на пароль
                   if not _oauth_tok:
-                      return False, "OAuth2: не удалось получить access token (проверьте refresh_token и доступ к интернету)"
+                      return False, "OAuth2: не удалось получить access token"
               if _oauth_tok:
                   s.ehlo()
                   _xo = _build_xoauth2(account.email, _oauth_tok)
                   code, resp = s.docmd("AUTH", "XOAUTH2 " + _xo)
-                  if code == 334:  # challenge → авторизация не прошла, завершаем пустой строкой
+                  if code == 334:
                       code, resp = s.docmd("")
                   if code != 235:
                       _rmsg = resp.decode("utf-8", "replace") if isinstance(resp, (bytes, bytearray)) else str(resp)
                       return False, f"OAuth2 отклонён: {_rmsg[:120]}"
               else:
                   s.login(account.email, account.password)
-              cert_flag = "" if verify else " (cert-verify=off)"
-              _auth_kind = " (OAuth2)" if _oauth_tok else ""
-              return True, f"OK — {host}:{port}{cert_flag}{_auth_kind} авторизация успешна"
+
+              _cv = "" if verify else " (no-cert)"
+              _ak = " (OAuth2)" if _oauth_tok else ""
+              _px = f" via {_proxy_parsed.scheme}://{_proxy_parsed.hostname}" if _proxy_parsed else ""
+              return True, f"OK — {host}:{port}{_cv}{_ak}{_px}"
+
           except _smtplib.SMTPAuthenticationError as e:
               raw = e.smtp_error
               detail = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
@@ -620,7 +672,7 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                   return False, f"OAuth2 отклонён сервером: {detail[:120]}"
               return False, f"Неверный логин или пароль: {detail[:120]}"
           except _smtplib.SMTPNotSupportedError:
-              return None, "SMTP AUTH не поддерживается. Требуется App Password (Outlook/T-Online)."
+              return None, "SMTP AUTH не поддерживается. Требуется App Password."
           except _smtplib.SMTPException as ex:
               msg = str(ex)
               if "5.7.139" in msg or "basic authentication is disabled" in msg.lower():
@@ -645,7 +697,7 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       if ok is True:
           return True, msg
       if ok is False:
-          return False, msg  # Auth fail — не меняем порт, пароль точно неверен
+          return False, msg  # Пароль неверен — дальше пробовать бессмысленно
 
       # ── Шаг 2: та же конфигурация без cert-verify (self-signed SSL) ──────────
       ok, msg = _attempt(account.host, account.port, account.use_ssl, account.use_tls, verify=False)
@@ -654,8 +706,13 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       if ok is False:
           return False, msg
 
-      # ── Шаг 3: перебор резервных портов (с и без cert-verify) ────────────────
-      _combos = [(465, True, False), (587, False, True), (25, False, False), (2525, False, True)]
+      # ── Шаг 3: fallback порты — только без прокси ─────────────────────────────
+      # При прокси каждая попытка добавляет 5с задержки и всё равно не помогает —
+      # прокси либо работает (тогда шаги 1-2 уже прошли), либо нет.
+      if _proxy_parsed:
+          return False, f"Не удалось подключиться через прокси к {account.host}:{account.port}. Проверьте прокси."
+
+      _combos = [(465, True, False), (587, False, True)]  # 25/2525 убраны — почти никогда не нужны
       _tried = {account.port}
       for _port, _ssl_flag, _tls_flag in _combos:
           if _port in _tried:
@@ -666,9 +723,9 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
               if ok is True:
                   return True, msg
               if ok is False:
-                  return False, f"Неверный логин или пароль (резервный порт {_port}). {msg}"
+                  return False, f"Неверный логин или пароль (порт {_port}). {msg}"
 
-      return False, f"Не удалось подключиться к {account.host}. Проверьте сетевой доступ или прокси."
+      return False, f"Не удалось подключиться к {account.host}. Проверьте сетевой доступ."
 
 async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
     """

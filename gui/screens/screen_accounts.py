@@ -1008,7 +1008,7 @@ class AccountsScreen(QWidget):
         if not self._accounts:
             return
 
-        MAX_CONCURRENT = 4  # одновременных проверок — не слишком много для rate-limit
+        MAX_CONCURRENT = 10  # одновременных проверок
 
         self._test_cancel_event.clear()
         self.cancel_test_btn.setVisible(True)
@@ -1080,10 +1080,17 @@ class AccountsScreen(QWidget):
                         self.cancel_test_btn.setVisible(False)
                         ok_final = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is True)
                         fail_final = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is False)
+                        untested_final = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is None)
+                        sendable_final = sum(
+                            1 for a in self._accounts
+                            if a.is_active and getattr(a, "last_test_ok", None) is not False
+                        )
                         self.status_label.setText(
-                            f"Аккаунтов: {len(self._accounts)} | "
+                            f"Всего: {len(self._accounts)} | "
                             f"Валидных: {ok_final} | "
-                            f"Невалидных: {fail_final}"
+                            f"Невалидных: {fail_final} | "
+                            f"Не проверено: {untested_final} | "
+                            f"Готово к рассылке: {sendable_final}"
                         )
                     else:
                         # Освободился слот — запускаем следующий
