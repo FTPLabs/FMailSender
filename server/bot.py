@@ -763,12 +763,12 @@ async def cb_cabinet(query: CallbackQuery):
         return
     active_lic = _get_active_license(licenses)
 
-    # HWID мог быть привязан при активации в приложении — он пишется в
-    # licenses.hwid (через /v1/activate), а в users.hwid попадает не всегда.
-    # Если users.hwid пуст, берём привязку из активной лицензии, чтобы кабинет
-    # не показывал «не привязан» для уже активированного триала/ключа.
-    if not hwid and active_lic:
-        hwid = active_lic.get("hwid") or ""
+    # Источник истины о привязке — licenses.hwid (пишется при активации в
+    # приложении через /v1/activate). users.hwid синхронизируется не всегда,
+    # поэтому при наличии активной лицензии с HWID показываем именно её
+    # привязку — иначе кабинет мог бы показать «не привязан» или устаревший HWID.
+    if active_lic and active_lic.get("hwid"):
+        hwid = active_lic["hwid"]
 
     lines = [f"👤 <b>Личный кабинет</b>\n"]
     lines.append(f"🆔 ID: <code>{user.id}</code>")
