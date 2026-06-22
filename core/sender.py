@@ -608,6 +608,86 @@ def _socks5_raw_socket(
     return s
 
 
+def _http_connect_raw_socket(
+    proxy_host: str, proxy_port: int,
+    target_host: str, target_port: int,
+    username: str = "", password: str = "",
+    timeout: float = 30.0,
+):
+    """HTTP CONNECT туннель — stdlib only, PySocks не нужен.
+    Возвращает подключённый socket уже туннелированный через прокси.
+    """
+    import socket as _socket, base64 as _b64
+    s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    s.connect((proxy_host, proxy_port))
+    lines = [
+        f"CONNECT {target_host}:{target_port} HTTP/1.1",
+        f"Host: {target_host}:{target_port}",
+        "Proxy-Connection: Keep-Alive",
+    ]
+    if username:
+        cred = _b64.b64encode(
+            f"{username}:{password or ''}".encode("utf-8")
+        ).decode()
+        lines.append(f"Proxy-Authorization: Basic {cred}")
+    s.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("utf-8"))
+    resp = b""
+    while b"\r\n\r\n" not in resp and len(resp) < 8192:
+        chunk = s.recv(256)
+        if not chunk:
+            break
+        resp += chunk
+    first = resp.split(b"\r\n")[0].decode("utf-8", "replace") if resp else ""
+    parts = first.split(" ", 2)
+    code = parts[1] if len(parts) >= 2 else "?"
+    reason = parts[2].strip() if len(parts) >= 3 else ""
+    if code != "200":
+        s.close()
+        raise OSError(f"HTTP прокси отклонил CONNECT {target_host}:{target_port}: {code} {reason[:80]}")
+    return s
+
+
+def _proxy_connect(
+    proxy_parsed,
+    target_host: str,
+    target_port: int,
+    *,
+    timeout: float = 30.0,
+    auto_detect: bool = False,
+):
+    """
+    Универсальный прокси-туннель. Выбирает протокол по scheme.
+
+    Схема `http://` / `https://` → HTTP CONNECT (RFC 7231).
+    Схема `socks5://` / `socks4://` → SOCKS5 (RFC 1928).
+    Нет схемы (auto_detect=True) → SOCKS5 (3 с), при неудаче → HTTP CONNECT.
+    """
+    scheme = (getattr(proxy_parsed, "scheme", "") or "").lower()
+    host = proxy_parsed.hostname or ""
+    port = proxy_parsed.port or (1080 if "socks" in scheme else 3128)
+    uname = proxy_parsed.username or ""
+    upass = proxy_parsed.password or ""
+
+    if "http" in scheme and "socks" not in scheme:
+        # Явный HTTP/HTTPS-прокси — только HTTP CONNECT
+        return _http_connect_raw_socket(host, port, target_host, target_port,
+                                        uname, upass, timeout)
+    elif "socks" in scheme and not auto_detect:
+        # Явный SOCKS5/SOCKS4 — только SOCKS5
+        return _socks5_raw_socket(host, port, target_host, target_port,
+                                   uname, upass, timeout)
+    else:
+        # auto_detect или неизвестная схема: пробуем SOCKS5 с коротким таймаутом,
+        # при любой ошибке переключаемся на HTTP CONNECT
+        try:
+            return _socks5_raw_socket(host, port, target_host, target_port,
+                                       uname, upass, min(timeout, 3.0))
+        except OSError:
+            return _http_connect_raw_socket(host, port, target_host, target_port,
+                                             uname, upass, timeout)
+
+
 def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       """
       Sync SMTP test с автоматическим многоуровневым fallback.
@@ -626,9 +706,11 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       # ── Разбор прокси ──────────────────────────────────────────────────────────
       _proxy_url = (account.proxy or "").strip()
       _proxy_parsed = None
+      _proxy_auto = False  # True = схема не была задана явно → авто-определение
       if _proxy_url:
           if "://" not in _proxy_url:
-              _proxy_url = "socks5://" + _proxy_url
+              _proxy_url = "socks5://" + _proxy_url  # для urlparse; авто-детект ниже
+              _proxy_auto = True
           _proxy_parsed = _up.urlparse(_proxy_url)
 
       # ── OAuth2 детектор ────────────────────────────────────────────────────────
@@ -644,13 +726,11 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
           TIMEOUT = 5  # сек на попытку — быстро определяем недоступность
 
           if _proxy_parsed:
-              # ── SOCKS5 через raw stdlib-сокет (PySocks не нужен) ───────────────
-              raw = _socks5_raw_socket(
-                  _proxy_parsed.hostname, _proxy_parsed.port or 1080,
-                  host, port,
-                  username=_proxy_parsed.username or "",
-                  password=_proxy_parsed.password or "",
+              # ── SOCKS5 или HTTP CONNECT через raw stdlib-сокет ─────────────────
+              raw = _proxy_connect(
+                  _proxy_parsed, host, port,
                   timeout=TIMEOUT,
+                  auto_detect=_proxy_auto,
               )
               if use_ssl:
                   raw = ctx.wrap_socket(raw, server_hostname=host)
@@ -1148,17 +1228,16 @@ class SendingEngine:
                       error="Прокси не настроен — отправка без прокси заблокирована (защита IP клиента)",
                       account_used=account.email,
                   )
-              if "://" not in proxy_url:
+              _proxy_auto_send = "://" not in proxy_url
+              if _proxy_auto_send:
                   proxy_url = "socks5://" + proxy_url
               import urllib.parse as _urlparse
               _p = _urlparse.urlparse(proxy_url)
-              # ── SOCKS5 через raw stdlib-сокет (PySocks не нужен) ────────────
-              _raw = _socks5_raw_socket(
-                  _p.hostname, _p.port or 1080,
-                  account.host, account.port,
-                  username=_p.username or "",
-                  password=_p.password or "",
+              # ── SOCKS5 или HTTP CONNECT через raw stdlib-сокет ───────────────
+              _raw = _proxy_connect(
+                  _p, account.host, account.port,
                   timeout=30.0,
+                  auto_detect=_proxy_auto_send,
               )
               if account.use_ssl:
                   _raw = ctx.wrap_socket(_raw, server_hostname=account.host)

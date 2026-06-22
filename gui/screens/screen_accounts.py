@@ -156,8 +156,9 @@ class ProxyCheckWorker(QThread):
         if not proxy_url or not proxy_url.strip():
             return False, "", "Пустой URL", 0
 
-        if "://" not in proxy_url:
-            proxy_url = "socks5://" + proxy_url
+        _auto_detect = "://" not in proxy_url
+        if _auto_detect:
+            proxy_url = "socks5://" + proxy_url   # временно для urlparse
 
         parsed = urllib.parse.urlparse(proxy_url)
         host = parsed.hostname or ""
@@ -170,7 +171,7 @@ class ProxyCheckWorker(QThread):
             return False, "", "Нет хоста в URL", 0
 
         # ── SOCKS5 / SOCKS4 — реальное рукопожатие, чистый stdlib (без PySocks) ──
-        if "socks" in scheme:
+        if "socks" in scheme and not _auto_detect:
             try:
                 t0 = _time.monotonic()
                 s = cls._socks5_connect_raw(
@@ -208,30 +209,119 @@ class ProxyCheckWorker(QThread):
             except Exception as e:
                 return False, "", str(e)[:80], 0
 
-        # ── HTTP/HTTPS прокси ──────────────────────────────────────────────────
-        else:
-            auth = ""
-            if uname:
-                auth = f"{urllib.parse.quote(uname,safe='')}:{urllib.parse.quote(upass,safe='')}@"
-            proxy_full = f"http://{auth}{host}:{port}"
-            handler = urllib.request.ProxyHandler({"http": proxy_full, "https": proxy_full})
-            opener = urllib.request.build_opener(handler)
+        # ── HTTP/HTTPS прокси ИЛИ авто-определение ────────────────────────────
+        # При авто-определении: сначала пробуем SOCKS5 (короткий таймаут),
+        # при неудаче — HTTP CONNECT. Это прозрачно работает для любого типа.
+        def _try_http_connect_check():
+            import base64 as _b64
+            import ssl as _ssl_mod
+            s2 = None
             try:
-                import time as _time2
-                t0 = _time2.monotonic()
-                req = urllib.request.Request(
-                    "http://ip-api.com/json/?fields=status,country,countryCode",
-                    headers={"User-Agent": "FMailSender/4.0"},
+                t0 = _time.monotonic()
+                s2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s2.settimeout(cls.TIMEOUT)
+                s2.connect((host, port))
+                lines = [
+                    "CONNECT ip-api.com:443 HTTP/1.1",
+                    "Host: ip-api.com:443",
+                    "Proxy-Connection: Keep-Alive",
+                ]
+                if uname:
+                    cred = _b64.b64encode(f"{uname}:{upass}".encode()).decode()
+                    lines.append(f"Proxy-Authorization: Basic {cred}")
+                s2.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
+                resp = b""
+                while b"\r\n\r\n" not in resp and len(resp) < 4096:
+                    chunk = s2.recv(256)
+                    if not chunk:
+                        break
+                    resp += chunk
+                if b"200" not in resp.split(b"\r\n")[0]:
+                    first = resp.split(b"\r\n")[0].decode("utf-8", "replace")
+                    return False, "", f"HTTP прокси: {first[:80]}", 0
+                # HTTPS через туннель
+                ctx = _ssl_mod.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = _ssl_mod.CERT_NONE
+                s2 = ctx.wrap_socket(s2, server_hostname="ip-api.com")
+                ping_ms = int((_time.monotonic() - t0) * 1000)
+                req = (
+                    "GET /json/?fields=status,country,countryCode HTTP/1.0\r\n"
+                    "Host: ip-api.com\r\nUser-Agent: FMailSender/4.0\r\n\r\n"
                 )
-                with opener.open(req, timeout=cls.TIMEOUT) as resp:
-                    ping_ms = int((_time2.monotonic() - t0) * 1000)
-                    d = json.loads(resp.read().decode())
-                    cc = d.get("countryCode", "")
-                    ctry = d.get("country", cc)
-                    flag = _cc_flag_emoji(cc)
-                    return True, f"{flag} {ctry}".strip(), "", ping_ms
+                s2.sendall(req.encode())
+                raw = b""
+                while True:
+                    chunk = s2.recv(4096)
+                    if not chunk:
+                        break
+                    raw += chunk
+                    if len(raw) > 32768:
+                        break
+                s2.close()
+                if b"\r\n\r\n" in raw:
+                    body = raw.split(b"\r\n\r\n", 1)[1].decode("utf-8", "replace").strip()
+                    try:
+                        d = json.loads(body)
+                        if d.get("status") == "success":
+                            cc = d.get("countryCode", "")
+                            ctry = d.get("country", cc)
+                            flag = _cc_flag_emoji(cc)
+                            return True, f"{flag} {ctry}".strip(), "", ping_ms
+                    except Exception:
+                        pass
+                return True, "", "", ping_ms
             except Exception as e:
+                if s2:
+                    try:
+                        s2.close()
+                    except Exception:
+                        pass
                 return False, "", str(e)[:80], 0
+
+        if _auto_detect:
+            # Пробуем SOCKS5 (3 с) → при неудаче HTTP CONNECT
+            try:
+                t0 = _time.monotonic()
+                s = cls._socks5_connect_raw(
+                    host, port, "ip-api.com", 80,
+                    username=uname, password=upass,
+                    timeout=min(cls.TIMEOUT, 3),
+                )
+                ping_ms = int((_time.monotonic() - t0) * 1000)
+                s.sendall(
+                    b"GET /json/?fields=status,country,countryCode HTTP/1.0\r\n"
+                    b"Host: ip-api.com\r\nUser-Agent: FMailSender/4.0\r\n\r\n"
+                )
+                raw = b""
+                while True:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    raw += chunk
+                    if len(raw) > 32768:
+                        break
+                s.close()
+                if b"\r\n\r\n" in raw:
+                    body = raw.split(b"\r\n\r\n", 1)[1].decode("utf-8", "replace").strip()
+                    try:
+                        d = json.loads(body)
+                        if d.get("status") == "success":
+                            cc = d.get("countryCode", "")
+                            ctry = d.get("country", cc)
+                            flag = _cc_flag_emoji(cc)
+                            return True, f"{flag} {ctry}".strip(), "", ping_ms
+                    except Exception:
+                        pass
+                return True, "", "", ping_ms
+            except OSError:
+                # SOCKS5 не ответил или не тот протокол — пробуем HTTP CONNECT
+                return _try_http_connect_check()
+            except Exception:
+                return _try_http_connect_check()
+        else:
+            # Явный http:// или https://
+            return _try_http_connect_check()
 
 
     @staticmethod
