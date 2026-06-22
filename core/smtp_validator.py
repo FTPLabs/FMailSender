@@ -57,12 +57,15 @@ _MICROSOFT_DOMAINS = frozenset({
 
 # ── PORT fallback — УНИКАЛЬНЫЕ конфигурации (без дублей!) ────────────────────
 # (port, use_ssl, use_tls, label)
+# Все SMTP-конфигурации для полного перебора портов (port, ssl, starttls, label)
 PORT_FALLBACK_CONFIGS = [
     (465,  True,  False, "SSL/465"),
     (587,  False, True,  "STARTTLS/587"),
     (25,   False, False, "Plain/25"),
     (2525, False, True,  "STARTTLS/2525"),
-    # (993) IMAP-порт исключён — не является SMTP-портом
+    (587,  True,  False, "SSL/587"),
+    (465,  False, True,  "STARTTLS/465"),
+    (2525, True,  False, "SSL/2525"),
 ]
 
 # ── SMTP CONFIGS: 300+ доменов ────────────────────────────────────────────────
@@ -236,13 +239,31 @@ SMTP_CONFIGS: dict[str, dict] = {
 
 
 # ── Proxy helpers ─────────────────────────────────────────────────────────────
+# Порты, характерные для HTTP-прокси (автоопределение при отсутствии схемы)
+_HTTP_PROXY_PORTS = frozenset({80, 8080, 8088, 8118, 3128, 3129, 8443, 8888, 8889, 9999})
+
+
+def _detect_proxy_scheme_by_port(port: int) -> str:
+    """HTTP-характерные порты → 'http'; остальные → 'socks5'."""
+    return "http" if port in _HTTP_PROXY_PORTS else "socks5"
+
+
 def _parse_proxy(proxy_url: str) -> tuple[str, int, str, str | None, str | None]:
     """Parse proxy URL → (scheme, host, port, user, pass).
-    Supported: socks5://user:pass@host:port  socks4://  http://
+    Supported: socks5://user:pass@host:port  socks4://  http://  https://
+    Без схемы — тип определяется по порту:
+      80/8080/3128/8888/8118/... → http; иначе → socks5.
     """
-    if "://" not in proxy_url:
-        proxy_url = "socks5://" + proxy_url
-    p = urllib.parse.urlparse(proxy_url)
+    raw = proxy_url.strip()
+    if "://" not in raw:
+        try:
+            hostport = raw.rsplit("@", 1)[1] if "@" in raw else raw
+            detected_port = int(hostport.rsplit(":", 1)[1])
+            scheme_guess = _detect_proxy_scheme_by_port(detected_port)
+        except (ValueError, IndexError):
+            scheme_guess = "socks5"
+        raw = f"{scheme_guess}://{raw}"
+    p = urllib.parse.urlparse(raw)
     scheme = p.scheme.lower()
     host = p.hostname or ""
     port = p.port or (1080 if "socks" in scheme else 8080)
@@ -426,20 +447,36 @@ def _try_smtp_connect(
     if proxy_url:
         # Proxy-wrapped connection
         raw_sock = _make_proxy_socket(proxy_url, host, port, timeout)
+
+        def _build_smtp_from_sock(sock) -> smtplib.SMTP:
+            """Инициализирует SMTP из готового сокета и читает приветствие (220)."""
+            s = smtplib.SMTP.__new__(smtplib.SMTP)
+            s._host = host
+            s.timeout = timeout
+            s.esmtp_features = {}
+            s.command_encoding = 'ascii'
+            s.source_address = None
+            s.local_hostname = socket.getfqdn()
+            s.helo_resp = None
+            s.ehlo_resp = None
+            s.ehlo_msg = 'ehlo'
+            s.does_esmtp = False
+            s.default_port = smtplib.SMTP_PORT
+            s.debuglevel = 0
+            s.sock = sock
+            s.file = sock.makefile("rb")
+            (code, msg) = s.getreply()  # приветствие сервера 220 ...
+            if code != 220:
+                raise smtplib.SMTPConnectError(code, msg)
+            return s
+
         if use_ssl:
-            raw_sock = ctx.wrap_socket(raw_sock, server_hostname=host)
-            smtp = smtplib.SMTP.__new__(smtplib.SMTP)
-            smtp._host = host
-            smtp.sock = raw_sock
-            smtp.file = smtp.sock.makefile("rb")
-            smtp._get_socket = lambda *a, **kw: raw_sock
-            smtp.ehlo_or_helo_if_needed()
+            ssl_sock = ctx.wrap_socket(raw_sock, server_hostname=host)
+            smtp = _build_smtp_from_sock(ssl_sock)
+            smtp.ehlo()
         else:
-            smtp = smtplib.SMTP.__new__(smtplib.SMTP)
-            smtp._host = host
-            smtp.sock = raw_sock
-            smtp.file = smtp.sock.makefile("rb")
-            smtp.ehlo_or_helo_if_needed()
+            smtp = _build_smtp_from_sock(raw_sock)
+            smtp.ehlo()
             if use_tls:
                 smtp.starttls(context=ctx)
                 smtp.ehlo()
@@ -589,7 +626,7 @@ class SmtpValidator:
             if fb_port != port:
                 fb_tries.append((fb_port, fb_ssl, fb_tls))
 
-        for fb_port, fb_ssl, fb_tls in fb_tries[:3]:  # max 3 fallbacks
+        for fb_port, fb_ssl, fb_tls in fb_tries:  # перебираем ВСЕ fallback-порты
             try:
                 _try_smtp_connect(host, fb_port, fb_ssl, fb_tls, email, password,
                                   timeout, proxy_url, oauth_token)

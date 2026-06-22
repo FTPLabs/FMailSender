@@ -38,17 +38,32 @@ from gui import icons
 import random
 
 
+# Порты, характерные для HTTP-прокси (автоопределение типа при отсутствии схемы)
+_HTTP_PROXY_PORTS_SET: frozenset = frozenset({80, 8080, 8088, 8118, 3128, 3129, 8443, 8888, 8889, 9999})
+
+
+def _guess_proxy_scheme_by_port(port_str: str) -> str:
+    """Определяет схему прокси по порту при отсутствии явной схемы."""
+    try:
+        return "http" if int(port_str) in _HTTP_PROXY_PORTS_SET else "socks5"
+    except (ValueError, TypeError):
+        return "socks5"
+
+
 class ProxyManager:
     """Менеджер прокси с ротацией: round_robin или random.
 
     Поддерживаемые форматы:
-      socks5://user:pass@host:port   — уже URL
-      socks4://host:port             — уже URL
-      http://host:port               — уже URL
-      user:pass@host:port            — без схемы -> socks5://user:pass@host:port
-      host:port                      -> socks5://host:port
-      host:port:user:pass            -> socks5://user:pass@host:port
-      user:pass:host:port            -> socks5://user:pass@host:port
+      socks5://user:pass@host:port   — SOCKS5 (явная схема)
+      socks4://host:port             — SOCKS4 (явная схема)
+      http://host:port               — HTTP (явная схема)
+      https://host:port              — HTTPS (явная схема)
+      user:pass@host:port            — автоопределение типа по порту
+      host:port                      — автоопределение типа по порту
+      host:port:user:pass            — автоопределение типа по порту
+      user:pass:host:port            — автоопределение типа по порту
+
+    Автоопределение: 8080/3128/8888/8118/... → http://; остальные → socks5://
     """
 
     def __init__(self, raw_list: list[str] | None = None, mode: str = "round_robin"):
@@ -63,11 +78,16 @@ class ProxyManager:
 
     @staticmethod
     def parse(raw: str) -> str | None:
-        """Нормализует строку прокси в URL-формат. None если невалидно."""
+        """Нормализует строку прокси в URL-формат. None если невалидно.
+
+        Если схема не указана явно — тип определяется по порту:
+          80, 8080, 3128, 8888, 8118, 3129, 8443, 8889, 9999 → http://
+          Все остальные порты → socks5://
+        """
         raw = raw.strip()
         if not raw or raw.startswith("#"):
             return None
-        # Уже URL-формат (есть схема вида socks5:// http:// etc.)
+        # Уже URL-формат (есть схема вида socks5:// http:// https:// socks4://)
         if "://" in raw:
             return raw
         # Формат user:pass@host:port (без схемы, но есть @)
@@ -77,27 +97,31 @@ class ProxyManager:
                 host, port_str = hostport.rsplit(":", 1)
                 int(port_str)
                 if host and creds:
-                    return f"socks5://{creds}@{host}:{port_str}"
+                    scheme = _guess_proxy_scheme_by_port(port_str)
+                    return f"{scheme}://{creds}@{host}:{port_str}"
             except (ValueError, AttributeError):
                 return None
         parts = raw.split(":")
         if len(parts) == 2:
             try:
                 int(parts[1])
-                return f"socks5://{parts[0]}:{parts[1]}"
+                scheme = _guess_proxy_scheme_by_port(parts[1])
+                return f"{scheme}://{parts[0]}:{parts[1]}"
             except ValueError:
                 return None
         if len(parts) == 4:
             # host:port:user:pass
             try:
                 int(parts[1])
-                return f"socks5://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
+                scheme = _guess_proxy_scheme_by_port(parts[1])
+                return f"{scheme}://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
             except ValueError:
                 pass
             # user:pass:host:port
             try:
                 int(parts[3])
-                return f"socks5://{parts[0]}:{parts[1]}@{parts[2]}:{parts[3]}"
+                scheme = _guess_proxy_scheme_by_port(parts[3])
+                return f"{scheme}://{parts[0]}:{parts[1]}@{parts[2]}:{parts[3]}"
             except ValueError:
                 pass
         return None
