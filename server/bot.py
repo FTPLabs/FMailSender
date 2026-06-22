@@ -264,12 +264,7 @@ def kb_main(is_admin_user: bool = False, is_mod_user: bool = False) -> InlineKey
 
 def kb_support() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Написать в ЛС @ftpdev_sup", url="https://t.me/ftpdev_sup")],
-        [InlineKeyboardButton(text="🎫 Оставить тикет", callback_data="support_ticket")],
-        [
-            InlineKeyboardButton(text="📜 Конфиденциальность", callback_data="show_privacy"),
-            InlineKeyboardButton(text="📋 Оферта", callback_data="show_terms"),
-        ],
+        [InlineKeyboardButton(text="💬 Написать в ЛС", url="https://t.me/ftpdev_sup")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_main")],
     ])
 
@@ -768,6 +763,13 @@ async def cb_cabinet(query: CallbackQuery):
         return
     active_lic = _get_active_license(licenses)
 
+    # HWID мог быть привязан при активации в приложении — он пишется в
+    # licenses.hwid (через /v1/activate), а в users.hwid попадает не всегда.
+    # Если users.hwid пуст, берём привязку из активной лицензии, чтобы кабинет
+    # не показывал «не привязан» для уже активированного триала/ключа.
+    if not hwid and active_lic:
+        hwid = active_lic.get("hwid") or ""
+
     lines = [f"👤 <b>Личный кабинет</b>\n"]
     lines.append(f"🆔 ID: <code>{user.id}</code>")
     lines.append(f"💻 HWID: <code>{hwid or 'не привязан'}</code>")
@@ -1148,7 +1150,7 @@ async def cb_support(query: CallbackQuery, state: FSMContext):
     await state.clear()
     await send_or_edit(
         query,
-        "🎫 <b>Поддержка</b>\n\nКак хочешь обратиться?",
+        "🎫 <b>Поддержка</b>\n\nПо всем вопросам пиши в личные сообщения:",
         reply_markup=kb_support(),
     )
 
@@ -2656,6 +2658,18 @@ async def activate(req: ActivateRequest):
         if bound:
             # Не блокируем активацию на отправке уведомления в Telegram
             asyncio.create_task(_notify_hwid_bound(lic, key, hwid))
+
+    # Синхронизируем users.hwid с подтверждённой привязкой лицензии, чтобы
+    # личный кабинет и flow покупки («использовать текущий HWID») видели
+    # актуальную привязку. Источник истины — licenses.hwid (этот эндпоинт).
+    tg_id = lic.get("telegram_id")
+    if tg_id:
+        try:
+            current_user_hwid = await db.get_user_hwid(tg_id)
+            if (current_user_hwid or "").upper() != hwid.upper():
+                await db.set_user_hwid(tg_id, hwid)
+        except Exception as e:
+            logger.warning("activate: failed to sync users.hwid for tg=%s: %s", tg_id, e)
 
     payload = {
         "plan": lic.get("plan", ""),
