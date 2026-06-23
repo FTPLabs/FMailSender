@@ -1323,13 +1323,22 @@ class AccountsScreen(QWidget):
 
         @pyqtSlot(bool, str)
         def on_result(ok, msg, r=row):
-            if 0 <= r < len(self._accounts):
-                self._accounts[r].last_test_ok = ok
-                self._accounts[r].last_test_msg = msg
-                self._accounts[r].is_active = ok
-                save_accounts(self._accounts)
+            # BUG FIX v4.4.4: RuntimeError guard (QPushButton deleted on table refresh)
+            try:
+                if 0 <= r < len(self._accounts):
+                    self._accounts[r].last_test_ok = ok
+                    self._accounts[r].last_test_msg = msg
+                    self._accounts[r].is_active = ok
+                    save_accounts(self._accounts)
+            except RuntimeError:
+                return
             # Обновляем таблицу (кэш страны сохранится — не теряется)
             self._refresh_table()
+            # BUG FIX v4.4.4: уведомляем SendingScreen об обновлённом аккаунте
+            try:
+                self.accounts_changed.emit(self._accounts)
+            except RuntimeError:
+                pass
             # Страну показываем только если ещё не определена
             _px = (self._accounts[r].proxy or "").strip() if 0 <= r < len(self._accounts) else ""
             if _px and _px not in _proxy_country_cache:
@@ -1452,6 +1461,11 @@ class AccountsScreen(QWidget):
                         )
                         save_accounts(self._accounts)
                         self._refresh_table()
+                        # BUG FIX v4.4.4: уведомляем SendingScreen об обновлённых аккаунтах
+                        try:
+                            self.accounts_changed.emit(self._accounts)
+                        except RuntimeError:
+                            pass
                         self.test_all_btn.setEnabled(True)
                         self.test_all_btn.setText("Проверить все")
                         self.cancel_test_btn.setVisible(False)
