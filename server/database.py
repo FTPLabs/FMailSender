@@ -640,6 +640,43 @@ async def delete_all_licenses() -> int:
 
 
 
+  async def reset_all_trials() -> int:
+    """Сбрасывает trial_used_at для ВСЕХ пользователей (админ-команда).
+    После этого каждый пользователь сможет снова взять триал.
+    Returns: количество сброшенных записей.
+    """
+    async with _db() as db:
+        cur = await db.execute(
+            "UPDATE users SET trial_used_at='' WHERE trial_used_at IS NOT NULL AND trial_used_at != ''"
+        )
+        await db.commit()
+        count = cur.rowcount
+        logger.info("reset_all_trials: сброшено триалов для %d пользователей", count)
+        return count
+
+
+  async def get_maintenance_mode() -> bool:
+    """True если сервер находится на техработах (техобслуживании)."""
+    async with _db() as db:
+        async with db.execute(
+            "SELECT value FROM settings WHERE key='maintenance_mode'"
+        ) as cur:
+            row = await cur.fetchone()
+            return row is not None and row[0] == "1"
+
+
+  async def set_maintenance_mode(enabled: bool) -> None:
+    """Включает или выключает режим техработ."""
+    async with _db() as db:
+        await db.execute(
+            "INSERT INTO settings (key, value) VALUES ('maintenance_mode', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            ("1" if enabled else "0",),
+        )
+        await db.commit()
+        logger.info("maintenance_mode set to %s", enabled)
+
+
   async def auto_expire_licenses() -> int:
     """Автоматически деактивирует лицензии с истёкшим сроком.
     Вызывается фоновым планировщиком каждые 5 минут.
