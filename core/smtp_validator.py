@@ -240,7 +240,7 @@ SMTP_CONFIGS: dict[str, dict] = {
 
 # ── Proxy helpers ─────────────────────────────────────────────────────────────
 # Порты, характерные для HTTP-прокси (автоопределение при отсутствии схемы)
-_HTTP_PROXY_PORTS = frozenset({80, 8080, 8088, 8118, 3128, 3129, 8443, 8888, 8889, 9999})
+_HTTP_PROXY_PORTS = frozenset({80, 8080, 8088, 8118, 3128, 3129, 8443, 8888, 8889, 8899, 9999})
 
 
 def _detect_proxy_scheme_by_port(port: int) -> str:
