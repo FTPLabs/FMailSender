@@ -1,4 +1,36 @@
-## [4.4.4] — 2026-06-23
+## [4.4.5] — 2026-06-23
+
+  ### Критическое исправление + Уникализация писем
+
+  #### Исправлено: IndentationError в sender.py (крэш при запуске v4.4.4 EXE)
+
+  `core/sender.py` — тег v4.4.4 был создан ДО коммита с исправлением отступов
+  в блоке `except smtplib.SMTPServerDisconnected`. EXE крэшился на старте с
+  `IndentationError: unindent does not match any outer indentation level (line 1481)`.
+  Исправлено: правильные отступы в новом except-блоке (14-space, 2-space от except).
+
+  #### Добавлено: Уникализация каждого письма (core/uniqueizer.py v2)
+
+  `_build_message()` теперь вызывает `core.uniqueizer` для каждого письма перед отправкой.
+  Новый параметр `uniqueize: bool = True` в `CampaignConfig` (включён по умолчанию).
+
+  **Применяемые техники (HTML-safe, deliverability-positive):**
+  - `technique_spintax` — раскрытие {вариант1|вариант2} в теме и теле письма
+  - `technique_subject` — spintax в теме письма
+  - `technique_css_micro` — ±1 к каждому hex-цвету в CSS (fingerprint без визуальных изменений)
+  - `technique_css_custom_props` — уникальный `--x-uid` в `:root` CSS
+  - `technique_data_attrs` — `data-mid`/`data-ts` на блочных HTML-элементах
+  - `technique_font_stack` — случайная перестановка font-family (generic в конце)
+  - `technique_nbsp` — `&nbsp;` после пунктуации с вероятностью 15%
+  - `technique_random_comments` — 4 случайных HTML-комментария после закрывающих тегов
+
+  **Все техники работают только через текстовые узлы (HTML-safe tokenizer).**
+  Структура тегов инвариантна. При любой ошибке в uniqueizer — отправка продолжается
+  без уникализации (`except Exception: pass`).
+
+  ---
+
+  ## [4.4.4] — 2026-06-23
 
 ### Три критических исправления: 50/50 в рассылке, GMX SMTPServerDisconnected, RuntimeError QPushButton
 
