@@ -2865,8 +2865,24 @@ async def admin_web_panel(
          for lic in licenses:
             plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", "—"))
             exp = lic.get("expires_at", "")[:10]
-            sc = "ok" if lic.get("is_active") else "rev"
-            st = "✅ Активна" if lic.get("is_active") else "❌ Отозвана"
+            # FIX EXPIRE-2: проверяем expires_at, не только is_active
+              from datetime import datetime as _dt2, timezone as _tz2
+              _now_utc = _dt2.now(_tz2.utc)
+              _exp_str = lic.get("expires_at", "")
+              _is_expired = False
+              try:
+                  _exp_dt = _dt2.fromisoformat(_exp_str.replace("Z", "+00:00"))
+                  if _exp_dt.tzinfo is None:
+                      _exp_dt = _exp_dt.replace(tzinfo=_tz2.utc)
+                  _is_expired = _now_utc > _exp_dt
+              except Exception:
+                  pass
+              if not lic.get("is_active"):
+                  sc = "rev"; st = "❌ Отозвана"
+              elif _is_expired:
+                  sc = "exp"; st = "⏰ Истекла"
+              else:
+                  sc = "ok"; st = "✅ Активна"
             key = lic.get("key", "—")
             uid = lic.get("telegram_id") or "—"
             hwid_v = lic.get("hwid") or "—"
@@ -2942,6 +2958,7 @@ code{{background:#2d2d44;padding:2px 4px;border-radius:3px;font-size:.72rem;curs
 code:hover{{background:#3d3d5c;color:#90cdf4}}
 .b{{padding:2px 7px;border-radius:20px;font-size:.7rem;font-weight:600;white-space:nowrap}}
 .b.ok{{background:rgba(72,187,120,.15);color:#68d391}}
+.b.exp{{background:rgba(237,137,54,.15);color:#ed8936}}
 .b.rev{{background:rgba(252,129,129,.15);color:#fc8181}}
 .em{{text-align:center;color:#718096;padding:18px}}
 .form-row{{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px}}
@@ -3396,7 +3413,21 @@ async def main():
     _terms_accepted.update(_terms)
     logger.info("Loaded from DB: captcha_passed=%d, terms_accepted=%d", len(_cap), len(_terms))
     logger.info("Starting FMail Sender Bot + API v%s...", APP_VERSION)
-
+    # FIX EXPIRE-3: фоновый планировщик авто-истечения лицензий (каждые 5 минут)
+      async def _auto_expire_loop():
+          while True:
+              try:
+                  await asyncio.sleep(300)  # 5 минут
+                  expired = await db.auto_expire_licenses()
+                  if expired:
+                      logger.info("auto_expire_loop: деактивировано %d лицензий", expired)
+              except asyncio.CancelledError:
+                  break
+              except Exception as _e:
+                  logger.warning("auto_expire_loop error: %s", _e)
+      asyncio.create_task(_auto_expire_loop())
+      logger.info("Auto-expire background task started (interval: 5 min)")
+  
     # NO_SSL=1 → nginx/Cloudflare обрабатывает TLS (рекомендуется в production)
     # NO_SSL не задан → uvicorn использует self-signed сертификат из ssl/
     _use_ssl = not os.environ.get("NO_SSL")
