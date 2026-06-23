@@ -694,7 +694,7 @@ async def delete_all_licenses() -> int:
         return count
 
 
-  async def get_all_licenses(limit: int = 50, offset: int = 0) -> list:
+async def get_all_licenses(limit: int = 50, offset: int = 0) -> list:
   async with _db() as db:
       db.row_factory = aiosqlite.Row
       async with db.execute(
