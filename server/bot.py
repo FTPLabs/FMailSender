@@ -4,6 +4,7 @@ FMail Sender — Telegram Bot + FastAPI License Server v3.0.0
 Поддержка: тикеты с диалогом, медиафайлы, голосовые, ответы обеих сторон.
 """
 import asyncio
+import copy
 import hmac
 import html
 import logging
@@ -76,9 +77,12 @@ class JsonFileStorage(BaseStorage):
         tmp.replace(self._path)
 
     async def _dump(self) -> None:
-        """Async dump — snapshot в event loop, запись в thread pool (FIX: устраняет data race)."""
+        """Async dump — snapshot в event loop, запись в thread pool (FIX: устраняет data race).
+        FIX v4.4.2: deepcopy вместо dict() — предотвращает гонку при сериализации
+        вложенных dict в asyncio.to_thread пока другая корутина изменяет вложенный dict.
+        """
         async with self._lock:
-            snapshot = dict(self._data)
+            snapshot = copy.deepcopy(self._data)
         await asyncio.to_thread(self._dump_sync, snapshot)
 
     def _key(self, key: StorageKey) -> str:

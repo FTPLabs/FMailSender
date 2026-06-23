@@ -1,3 +1,20 @@
+## [4.4.2] — 2026-06-23
+
+### Исправления: data race в FSM-хранилище + дополнительный аудит
+
+#### Исправлено: `JsonFileStorage._dump` — shallow copy → deepcopy
+
+**Проблема:** `snapshot = dict(self._data)` создавал поверхностную копию. Вложенные
+dict (state + data каждого пользователя) оставались shared-ссылками. После
+освобождения `asyncio.Lock` другая корутина могла изменить вложенный dict
+пока `asyncio.to_thread(json.dumps(snapshot, ...))` выполнялся в thread pool —
+результирующий JSON мог содержать гонку состояния между двумя пользователями.
+
+**Решение:** Заменён `dict(self._data)` → `copy.deepcopy(self._data)` под `async with self._lock:`.
+Добавлен `import copy` в заголовок `server/bot.py`.
+
+---
+
 ## [4.4.1] — 2026-06-23
 
 ### Критические исправления SMTP-движка
