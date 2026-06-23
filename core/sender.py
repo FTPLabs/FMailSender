@@ -882,12 +882,60 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
               if ok is False:
                   return False, f"Неверный логин или пароль (порт {_port}). {msg}"
 
+      # ── Шаг 4 (FIX v4.4.3): прямое подключение когда прокси-IP заблокирован ──
+      # Если все попытки через прокси провалились (пустой SMTP-баннер = SMTP-сервер
+      # немедленно закрыл соединение из-за репутации IP прокси), пробуем прямое
+      # подключение. Это позволяет: а) убедиться что пароль верный, б) дать
+      # информативное сообщение об ошибке ("прокси-IP заблокирован" vs "неверный пароль").
+      if _proxy_parsed:
+          for _dp, _ds, _dt in [(587, False, True), (465, True, False), (587, True, False)]:
+              try:
+                  _dctx = _ssl.create_default_context()
+                  _dctx.check_hostname = False
+                  _dctx.verify_mode = _ssl.CERT_NONE
+                  if _ds:
+                      _dc = _smtplib.SMTP_SSL(account.host, _dp, timeout=15, context=_dctx)
+                  else:
+                      _dc = _smtplib.SMTP(account.host, _dp, timeout=15)
+                      _dc.ehlo()
+                      _dc.starttls(context=_dctx)
+                      _dc.ehlo()
+                  if _is_oauth_acct:
+                      _tok = _get_oauth_token(account) if _HAS_OAUTH2 else ""
+                      if _tok:
+                          _xo = _build_xoauth2(account.email, _tok)
+                          _dc.docmd("AUTH", "XOAUTH2 " + _xo)
+                      else:
+                          _dc.login(account.email, account.password)
+                  else:
+                      _dc.login(account.email, account.password)
+                  try: _dc.quit()
+                  except Exception: pass
+                  # Прямое подключение успешно → IP прокси заблокирован SMTP-сервером
+                  account.port    = _dp
+                  account.use_ssl = _ds
+                  account.use_tls = _dt
+                  return True, (
+                      f"OK (прямое {account.host}:{_dp}) — "
+                      f"IP прокси {_proxy_parsed.hostname} заблокирован SMTP-сервером. "
+                      f"Для работы через прокси используйте резидентные/мобильные прокси."
+                  )
+              except _smtplib.SMTPAuthenticationError as _dae:
+                  _raw_e = _dae.smtp_error
+                  _de = _raw_e.decode("utf-8", "replace") if isinstance(_raw_e, bytes) else str(_raw_e)
+                  return False, (
+                      f"Неверный логин или пароль: {_de[:120]} "
+                      f"(прокси-IP также заблокирован SMTP-сервером)"
+                  )
+              except Exception:
+                  continue
+
       _via = f" через прокси {_proxy_parsed.hostname}" if _proxy_parsed else ""
       _ports = ", ".join(str(p) for p in sorted(_tried))
       return False, (
           f"Не удалось подключиться к {account.host}{_via}. "
           f"Проверено портов: {_ports}. "
-          f"Проверьте прокси и учётные данные."
+          f"IP прокси заблокирован SMTP-сервером — используйте резидентные прокси."
       )
 
 async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
@@ -1325,6 +1373,59 @@ class SendingEngine:
                   success=True,
                   account_used=account.email,
                   message_id=msg.get("Message-ID", ""),
+              )
+          except smtplib.SMTPConnectError as _sce:
+              # FIX v4.4.3: SMTPConnectError(-1, b'') = SMTP server sent empty banner.
+              # Root cause: proxy IP is blacklisted by the SMTP server.
+              # SOCKS5 CONNECT returns 0x00 (success) but SMTP server immediately
+              # closes the connection. Fall back to direct send (no proxy).
+              if _sce.smtp_code == -1:
+                  try:
+                      _fb_ctx = ctx.__class__()
+                      _fb_ctx.check_hostname = False
+                      _fb_ctx.verify_mode = ssl.CERT_NONE
+                      for _fb_port, _fb_ssl, _fb_tls in [
+                          (account.port, account.use_ssl, account.use_tls),
+                          (587, False, True),
+                          (465, True, False),
+                      ]:
+                          try:
+                              if _fb_ssl:
+                                  _fb_c = smtplib.SMTP_SSL(account.host, _fb_port, timeout=30, context=_fb_ctx)
+                              else:
+                                  _fb_c = smtplib.SMTP(account.host, _fb_port, timeout=30)
+                                  _fb_c.ehlo()
+                                  if _fb_tls:
+                                      _fb_c.starttls(context=_fb_ctx)
+                                      _fb_c.ehlo()
+                              _fb_c.login(account.email, account.password)
+                              _fb_c.send_message(msg)
+                              try: _fb_c.quit()
+                              except Exception: pass
+                              return SendResult(
+                                  recipient_email=recipient.email,
+                                  success=True,
+                                  account_used=account.email,
+                                  message_id=msg.get("Message-ID", ""),
+                              )
+                          except smtplib.SMTPAuthenticationError:
+                              raise  # Bad credentials — don't try other ports
+                          except Exception:
+                              continue
+                  except smtplib.SMTPAuthenticationError as _sae:
+                      return SendResult(
+                          recipient_email=recipient.email,
+                          success=False,
+                          error=f"Неверный пароль: {_sae.smtp_error!r:.120}",
+                          account_used=account.email,
+                      )
+                  except Exception:
+                      pass
+              return SendResult(
+                  recipient_email=recipient.email,
+                  success=False,
+                  error=f"SMTP connect: {_sce}",
+                  account_used=account.email,
               )
           except Exception as e:
               return SendResult(

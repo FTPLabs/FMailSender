@@ -468,7 +468,30 @@ def _try_smtp_connect(
               _probe.set_proxy(proxy_type, ph, pp, True, pu, ppwd)
               _probe.settimeout(min(timeout, 8))
               _probe.connect((host, port))
+              # FIX v4.4.3: SOCKS5 CONNECT returns 0x00 (success) even when the SMTP
+              # server immediately closes the connection because the proxy IP is on its
+              # blacklist. The pre-check only tested TCP-level CONNECT; we now try to
+              # read the SMTP welcome banner. EOF (b'') = server rejected proxy IP.
+              # This is the root cause of "all ports tried, all failed" with datacenter
+              # proxies — the proxy tunnels fine but SMTP servers drop the connection.
+              try:
+                  _probe.settimeout(2.5)
+                  _banner_peek = _probe.recv(4)
+                  if _banner_peek == b'':
+                      # Server sent TCP RST / immediate EOF after SOCKS5 CONNECT.
+                      # The proxy IP is blacklisted by this SMTP server.
+                      _probe.close()
+                      raise ConnectionError(
+                          f"PROXY_BLOCKS_SMTP:{host}:{port}:"
+                          f"smtp_server_closed_connection_immediately_(proxy_ip_blacklisted)"
+                      )
+              except ConnectionError:
+                  raise  # propagate our detection error
+              except OSError:
+                  pass  # recv timeout = server is slow but not definitively blocking
               _probe.close()
+          except ConnectionError:
+              raise  # propagate PROXY_BLOCKS_SMTP
           except Exception as _pe:
               _pe_msg = str(_pe).lower()
               # ТОЛЬКО явный SOCKS5 General Failure (код 1) → прокси блокирует SMTP.
