@@ -345,6 +345,7 @@ def kb_admin(maintenance: bool = False) -> InlineKeyboardMarkup:
       maint_text = "🔧 Техработы: ВКЛ ✅" if maintenance else "🔧 Техработы: ВЫКЛ ❌"
       return InlineKeyboardMarkup(inline_keyboard=[
           [InlineKeyboardButton(text=maint_text,                callback_data="admin_maintenance_toggle")],
+          [InlineKeyboardButton(text="🔄 Сбросить все триалы",   callback_data="admin_reset_trials")],
           [InlineKeyboardButton(text="🎟 Выдать ключ",          callback_data="admin_issue")],
           [InlineKeyboardButton(text="📋 Все лицензии",          callback_data="admin_list")],
           [InlineKeyboardButton(text="📊 Статистика",            callback_data="admin_stats")],
@@ -833,6 +834,18 @@ async def cb_claim_trial(query: CallbackQuery):
     после чего открывается скачивание (ключ привяжется к HWID при первом запуске).
     """
     if not await _require_onboarding(query):
+        return
+    # FIX MAINT-1: блокируем триал во время техработ
+    try:
+        _maint_trial = (await db.get_setting("maintenance_mode") or "0") == "1"
+    except Exception:
+        _maint_trial = False
+    if _maint_trial:
+        await send_or_edit(
+            query,
+            "⚙️ <b>Технические работы</b>\n\nВыдача триала временно недоступна. Попробуйте позже.",
+            reply_markup=kb_main(is_admin(query.from_user.id), is_mod_user=is_moderator(query.from_user.id)),
+        )
         return
     user = query.from_user
     try:
@@ -1776,6 +1789,37 @@ async def cb_admin_maintenance_toggle(query: CallbackQuery):
     )
     await send_or_edit(query, text, reply_markup=kb_admin(maintenance))
 
+
+
+  @dp.callback_query(F.data == "admin_reset_trials")
+  async def cb_admin_reset_trials(query: CallbackQuery):
+      """Сброс trial_used_at для всех пользователей — они смогут снова взять триал."""
+      if not is_admin(query.from_user.id):
+          return
+      try:
+          count = await db.reset_all_trials()
+      except Exception as e:
+          logger.error("reset_all_trials error: %s", e)
+          await query.answer("⚠️ Ошибка при сбросе триалов", show_alert=True)
+          return
+      await query.answer(f"✅ Сброшено триалов: {count}", show_alert=True)
+      try:
+          maintenance = (await db.get_setting("maintenance_mode") or "0") == "1"
+      except Exception:
+          maintenance = False
+      try:
+          stats = await db.get_stats()
+      except Exception:
+          stats = {}
+      tickets_note = f"\n🎫 Открытых тикетов: <b>{stats.get('open_tickets', 0)}</b>" if stats.get("open_tickets") else ""
+      await send_or_edit(
+          query,
+          f"🔄 <b>Триалы сброшены</b>\n\n"
+          f"👥 Пользователей сброшено: <b>{count}</b>\n"
+          f"Теперь каждый пользователь может снова взять бесплатный триал.{tickets_note}",
+          reply_markup=kb_admin(maintenance),
+      )
+      logger.info("Admin %d reset all trials (%d users affected)", query.from_user.id, count)
 
 @dp.callback_query(F.data == "admin_list")
 async def cb_admin_list(query: CallbackQuery):
