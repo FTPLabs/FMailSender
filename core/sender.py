@@ -740,16 +740,30 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                   timeout=TIMEOUT,
                   auto_detect=_proxy_auto,
               )
+              # FIX v4.4.1: _ProxySMTP subclass вместо __new__ хака.
+              # SMTP.__new__() пропускает _tls_required, ehlo_resp и другие
+              # атрибуты Python 3.11+, что вызывало AttributeError в
+              # ehlo_or_helo_if_needed(). _get_socket override корректен для 3.9-3.13+.
               if use_ssl:
-                  raw = ctx.wrap_socket(raw, server_hostname=host)
-              s = _smtplib.SMTP.__new__(_smtplib.SMTP)
-              s._host = host
-              s.sock = raw
-              s.file = raw.makefile("rb")
-              s.ehlo_or_helo_if_needed()
-              if not use_ssl and use_tls:
-                  s.starttls(context=ctx)
-                  s.ehlo()
+                  _raw_ssl = raw  # замкнуть в closure
+                  _ctx_ssl = ctx
+
+                  class _ProxySMTP_SSL(_smtplib.SMTP_SSL):  # noqa: E501
+                      def _get_socket(self, _h, _p, _t):
+                          return _ctx_ssl.wrap_socket(_raw_ssl, server_hostname=_h)
+
+                  s = _ProxySMTP_SSL(host, port, timeout=TIMEOUT, context=ctx)
+              else:
+                  _raw_plain = raw
+
+                  class _ProxySMTP(_smtplib.SMTP):  # noqa: E501
+                      def _get_socket(self, _h, _p, _t):
+                          return _raw_plain
+
+                  s = _ProxySMTP(host, port, timeout=TIMEOUT)
+                  if use_tls:
+                      s.starttls(context=ctx)
+                      s.ehlo()
           else:
               # ── Прямое подключение ─────────────────────────────────────────────
               if use_ssl:
@@ -1263,16 +1277,27 @@ class SendingEngine:
                   timeout=30.0,
                   auto_detect=_proxy_auto_send,
               )
+              # FIX v4.4.1: _ProxySMTP subclass вместо __new__ хака (см. _make_smtp).
               if account.use_ssl:
-                  _raw = ctx.wrap_socket(_raw, server_hostname=account.host)
-              smtp_conn = smtplib.SMTP.__new__(smtplib.SMTP)
-              smtp_conn._host = account.host
-              smtp_conn.sock = _raw
-              smtp_conn.file = _raw.makefile("rb")
-              smtp_conn.ehlo_or_helo_if_needed()
-              if not account.use_ssl and account.use_tls:
-                  smtp_conn.starttls(context=ctx)
-                  smtp_conn.ehlo()
+                  _raw_ssl2 = _raw
+                  _ctx2 = ctx
+
+                  class _SendProxySMTP_SSL(smtplib.SMTP_SSL):  # noqa: E501
+                      def _get_socket(self, _h, _p, _t):
+                          return _ctx2.wrap_socket(_raw_ssl2, server_hostname=_h)
+
+                  smtp_conn = _SendProxySMTP_SSL(account.host, account.port, timeout=30, context=ctx)
+              else:
+                  _raw2 = _raw
+
+                  class _SendProxySMTP(smtplib.SMTP):  # noqa: E501
+                      def _get_socket(self, _h, _p, _t):
+                          return _raw2
+
+                  smtp_conn = _SendProxySMTP(account.host, account.port, timeout=30)
+                  if account.use_tls:
+                      smtp_conn.starttls(context=ctx)
+                      smtp_conn.ehlo()
               # OAuth2/XOAUTH2 для Microsoft или обычный LOGIN
               _domain = account.email.split("@")[-1].lower() if "@" in account.email else ""
               _ms_domains = frozenset({

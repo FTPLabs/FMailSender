@@ -178,7 +178,7 @@ SMTP_CONFIGS: dict[str, dict] = {
     # UK
     "btinternet.com":    {"host": "smtp.btinternet.com",      "port": 465, "use_ssl": True,  "use_tls": False},
     "btopenworld.com":   {"host": "smtp.btinternet.com",      "port": 465, "use_ssl": True,  "use_tls": False},
-    "sky.com":           {"host": "smtp.sky.com",             "port": 587, "use_ssl": False, "use_tls": True},
+    "sky.com":           {"host": "smtp.office365.com",       "port": 587, "use_ssl": False, "use_tls": True},
     "virginmedia.com":   {"host": "smtp.virginmedia.com",     "port": 465, "use_ssl": True,  "use_tls": False},
     "ntlworld.com":      {"host": "smtp.ntlworld.com",        "port": 465, "use_ssl": True,  "use_tls": False},
     "talktalk.net":      {"host": "smtp.talktalk.net",        "port": 587, "use_ssl": False, "use_tls": True},
@@ -204,10 +204,10 @@ SMTP_CONFIGS: dict[str, dict] = {
     "i.ua":              {"host": "smtp.i.ua",                "port": 465, "use_ssl": True,  "use_tls": False},
     "ukr.net":           {"host": "smtp.ukr.net",             "port": 465, "use_ssl": True,  "use_tls": False},
     "meta.ua":           {"host": "smtp.meta.ua",             "port": 465, "use_ssl": True,  "use_tls": False},
-    "mail.ua":           {"host": "smtp.mail.ua",             "port": 465, "use_ssl": True,  "use_tls": False},
+    "mail.ua":           {"host": "smtp.ukr.net",             "port": 465, "use_ssl": True,  "use_tls": False},
     # Baltics
     "inbox.lv":          {"host": "smtp.inbox.lv",            "port": 465, "use_ssl": True,  "use_tls": False},
-    "mail.lt":           {"host": "smtp.mail.lt",             "port": 465, "use_ssl": True,  "use_tls": False},
+    "mail.lt":           {"host": "smtp.domreg.lt",           "port": 465, "use_ssl": True,  "use_tls": False},
     # Zoho
     "zoho.com":          {"host": "smtp.zoho.com",            "port": 465, "use_ssl": True,  "use_tls": False},
     "zohomail.com":      {"host": "smtp.zoho.com",            "port": 465, "use_ssl": True,  "use_tls": False},
@@ -223,7 +223,7 @@ SMTP_CONFIGS: dict[str, dict] = {
     "sbcglobal.net":     {"host": "smtp.att.yahoo.com",       "port": 465, "use_ssl": True,  "use_tls": False},
     "bellsouth.net":     {"host": "smtp.att.yahoo.com",       "port": 465, "use_ssl": True,  "use_tls": False},
     "ameritech.net":     {"host": "smtp.att.yahoo.com",       "port": 465, "use_ssl": True,  "use_tls": False},
-    "verizon.net":       {"host": "outgoing.verizon.net",     "port": 465, "use_ssl": True,  "use_tls": False},
+    "verizon.net":       {"host": "smtp.aol.com",             "port": 465, "use_ssl": True,  "use_tls": False},
     # Eastern Europe / Poland
     "wp.pl":             {"host": "smtp.wp.pl",               "port": 465, "use_ssl": True,  "use_tls": False},
     "o2.pl":             {"host": "poczta.o2.pl",             "port": 465, "use_ssl": True,  "use_tls": False},
