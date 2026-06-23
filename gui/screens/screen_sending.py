@@ -298,21 +298,27 @@ class SendingScreen(QWidget):
       rl.addWidget(save_btn, 0, Qt.AlignmentFlag.AlignRight)
 
   def set_accounts(self, accounts):
-      self._accounts = accounts
-      # Считаем аккаунты точно по критерию _pick_account: is_active + last_test_ok is not False
-      sendable = sum(
-          1 for a in accounts
-          if a.is_active and getattr(a, "last_test_ok", None) is not False
-      )
-      total = len(accounts)
-      self.accounts_status.setText(f"Аккаунты: {sendable}/{total}")
-      self.accounts_status.setToolTip(
-          f"Готово к отправке: {sendable}\n"
-          f"Всего аккаунтов: {total}\n"
-          f"(включает непроверенные — только валидные и непроверенные участвуют в рассылке)"
-      )
-      self.accounts_status.setStyleSheet(f"color:{Colors.SUCCESS};" if sendable > 0 else f"color:{Colors.ERROR};")
-
+        self._accounts = accounts
+        # BUG FIX v4.4.4: показываем только валидные (last_test_ok is True) как "готово к рассылке"
+        # Непроверенные (last_test_ok=None) и невалидные (last_test_ok=False) разделены
+        valid_cnt    = sum(1 for a in accounts if a.is_active and getattr(a, "last_test_ok", None) is True)
+        untested_cnt = sum(1 for a in accounts if getattr(a, "last_test_ok", None) is None)
+        total = len(accounts)
+        # Если ни один не проверен — режим первого запуска, показываем всех активных
+        all_tested = (untested_cnt == 0 and total > 0)
+        sendable = valid_cnt if all_tested else sum(1 for a in accounts if a.is_active)
+        self.accounts_status.setText(f"Аккаунты: {sendable}/{total}")
+        self.accounts_status.setToolTip(
+            f"Валидных (проверено): {valid_cnt}
+"
+            f"Непроверено: {untested_cnt}
+"
+            f"Всего аккаунтов: {total}
+"
+            f"Невалидные (last_test_ok=False) НЕ участвуют в рассылке."
+        )
+        self.accounts_status.setStyleSheet(f"color:{Colors.SUCCESS};" if sendable > 0 else f"color:{Colors.ERROR};")
+  
   def set_recipients(self, recipients):
       self._recipients = recipients
       self.recipients_status.setText(f"Получатели: {len(recipients)}")
@@ -364,7 +370,16 @@ class SendingScreen(QWidget):
           pause_duration_sec=self.pause_duration_spin.value(),
           max_threads=self.threads_slider.value(),
       )
-      self._engine = SendingEngine(accounts=self._accounts, config=config, log_queue=self._log_queue)
+      # BUG FIX v4.4.4: только валидные аккаунты (is_active + last_test_ok is not False)
+        _sendable_accounts = [
+            a for a in self._accounts
+            if a.is_active and getattr(a, "last_test_ok", None) is not False
+        ]
+        if not _sendable_accounts:
+            QMessageBox.warning(self, "Нет валидных аккаунтов",
+                "Нет аккаунтов готовых к отправке.\nПроверьте аккаунты во вкладке «Аккаунты».")
+            return
+        self._engine = SendingEngine(accounts=_sendable_accounts, config=config, log_queue=self._log_queue)
       self._total = len(self._recipients)
       self._sent = 0
       self._start_time = time.time()
@@ -480,12 +495,16 @@ class SendingScreen(QWidget):
           )
 
   def _finish_ui(self):
-      self._is_running = False
-      self.start_btn.setEnabled(True)
-      self.pause_btn.setEnabled(False)
-      self.stop_btn.setEnabled(False)
-      self._speed_timer.stop()
-
+        self._is_running = False
+        # BUG FIX v4.4.4: guard против RuntimeError — виджеты могут быть удалены
+        try:
+            self.start_btn.setEnabled(True)
+            self.pause_btn.setEnabled(False)
+            self.stop_btn.setEnabled(False)
+        except RuntimeError:
+            pass
+        self._speed_timer.stop()
+  
 
   def _export_log(self):
       """Экспортирует лог событий в .txt файл для отправки администратору."""
