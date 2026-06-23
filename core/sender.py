@@ -1427,7 +1427,58 @@ class SendingEngine:
                   error=f"SMTP connect: {_sce}",
                   account_used=account.email,
               )
-          except Exception as e:
+          except smtplib.SMTPServerDisconnected as _ssd:
+                # BUG FIX v4.4.4: SMTPServerDisconnected во время STARTTLS/AUTH (часто GMX порт 587).
+                # Прокси-IP вызывает подозрение у сервера после установки соединения → он сбрасывает TCP.
+                # Fallback: пробуем прямое подключение без прокси (может работать если IP клиента чист).
+                try:
+                    _fb_ctx2 = ssl.create_default_context()
+                    _fb_ctx2.check_hostname = False
+                    _fb_ctx2.verify_mode = ssl.CERT_NONE
+                    for _p2, _s2, _t2 in [
+                        (account.port, account.use_ssl, account.use_tls),
+                        (587, False, True),
+                        (465, True, False),
+                    ]:
+                        try:
+                            if _s2:
+                                _fc2 = smtplib.SMTP_SSL(account.host, _p2, timeout=30, context=_fb_ctx2)
+                            else:
+                                _fc2 = smtplib.SMTP(account.host, _p2, timeout=30)
+                                _fc2.ehlo()
+                                if _t2:
+                                    _fc2.starttls(context=_fb_ctx2)
+                                    _fc2.ehlo()
+                            _fc2.login(account.email, account.password)
+                            _fc2.send_message(msg)
+                            try: _fc2.quit()
+                            except Exception: pass
+                            return SendResult(
+                                recipient_email=recipient.email,
+                                success=True,
+                                account_used=account.email,
+                                message_id=msg.get("Message-ID", ""),
+                            )
+                        except smtplib.SMTPAuthenticationError:
+                            raise
+                        except Exception:
+                            continue
+                except smtplib.SMTPAuthenticationError as _sae2:
+                    return SendResult(
+                        recipient_email=recipient.email,
+                        success=False,
+                        error=f"Неверный пароль: {_sae2.smtp_error!r:.120}",
+                        account_used=account.email,
+                    )
+                except Exception:
+                    pass
+                return SendResult(
+                    recipient_email=recipient.email,
+                    success=False,
+                    error=f"Сервер разорвал соединение (SMTPServerDisconnected): {_ssd}",
+                    account_used=account.email,
+                )
+            except Exception as e:
               return SendResult(
                   recipient_email=recipient.email,
                   success=False,
