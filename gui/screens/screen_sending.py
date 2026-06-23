@@ -309,12 +309,9 @@ class SendingScreen(QWidget):
         sendable = valid_cnt if all_tested else sum(1 for a in accounts if a.is_active)
         self.accounts_status.setText(f"Аккаунты: {sendable}/{total}")
         self.accounts_status.setToolTip(
-            f"Валидных (проверено): {valid_cnt}
-"
-            f"Непроверено: {untested_cnt}
-"
-            f"Всего аккаунтов: {total}
-"
+            f"Валидных (проверено): {valid_cnt}\n"
+            f"Непроверено: {untested_cnt}\n"
+            f"Всего аккаунтов: {total}\n"
             f"Невалидные (last_test_ok=False) НЕ участвуют в рассылке."
         )
         self.accounts_status.setStyleSheet(f"color:{Colors.SUCCESS};" if sendable > 0 else f"color:{Colors.ERROR};")
