@@ -1791,35 +1791,35 @@ async def cb_admin_maintenance_toggle(query: CallbackQuery):
 
 
 
-  @dp.callback_query(F.data == "admin_reset_trials")
-  async def cb_admin_reset_trials(query: CallbackQuery):
-      """Сброс trial_used_at для всех пользователей — они смогут снова взять триал."""
-      if not is_admin(query.from_user.id):
-          return
-      try:
-          count = await db.reset_all_trials()
-      except Exception as e:
-          logger.error("reset_all_trials error: %s", e)
-          await query.answer("⚠️ Ошибка при сбросе триалов", show_alert=True)
-          return
-      await query.answer(f"✅ Сброшено триалов: {count}", show_alert=True)
-      try:
-          maintenance = (await db.get_setting("maintenance_mode") or "0") == "1"
-      except Exception:
-          maintenance = False
-      try:
-          stats = await db.get_stats()
-      except Exception:
-          stats = {}
-      tickets_note = f"\n🎫 Открытых тикетов: <b>{stats.get('open_tickets', 0)}</b>" if stats.get("open_tickets") else ""
-      await send_or_edit(
-          query,
-          f"🔄 <b>Триалы сброшены</b>\n\n"
-          f"👥 Пользователей сброшено: <b>{count}</b>\n"
-          f"Теперь каждый пользователь может снова взять бесплатный триал.{tickets_note}",
-          reply_markup=kb_admin(maintenance),
-      )
-      logger.info("Admin %d reset all trials (%d users affected)", query.from_user.id, count)
+@dp.callback_query(F.data == "admin_reset_trials")
+async def cb_admin_reset_trials(query: CallbackQuery):
+    """Сброс trial_used_at для всех пользователей — они смогут снова взять триал."""
+    if not is_admin(query.from_user.id):
+        return
+    try:
+        count = await db.reset_all_trials()
+    except Exception as e:
+        logger.error("reset_all_trials error: %s", e)
+        await query.answer("⚠️ Ошибка при сбросе триалов", show_alert=True)
+        return
+    await query.answer(f"✅ Сброшено триалов: {count}", show_alert=True)
+    try:
+        maintenance = (await db.get_setting("maintenance_mode") or "0") == "1"
+    except Exception:
+        maintenance = False
+    try:
+        stats = await db.get_stats()
+    except Exception:
+        stats = {}
+    tickets_note = f"\n🎫 Открытых тикетов: <b>{stats.get('open_tickets', 0)}</b>" if stats.get("open_tickets") else ""
+    await send_or_edit(
+        query,
+        f"🔄 <b>Триалы сброшены</b>\n\n"
+        f"👥 Пользователей сброшено: <b>{count}</b>\n"
+        f"Теперь каждый пользователь может снова взять бесплатный триал.{tickets_note}",
+        reply_markup=kb_admin(maintenance),
+    )
+    logger.info("Admin %d reset all trials (%d users affected)", query.from_user.id, count)
 
 @dp.callback_query(F.data == "admin_list")
 async def cb_admin_list(query: CallbackQuery):
@@ -2910,23 +2910,23 @@ async def admin_web_panel(
             plan_name = PLANS.get(lic.get("plan", ""), {}).get("name", lic.get("plan", "—"))
             exp = lic.get("expires_at", "")[:10]
             # FIX EXPIRE-2: проверяем expires_at, не только is_active
-              from datetime import datetime as _dt2, timezone as _tz2
-              _now_utc = _dt2.now(_tz2.utc)
-              _exp_str = lic.get("expires_at", "")
-              _is_expired = False
-              try:
-                  _exp_dt = _dt2.fromisoformat(_exp_str.replace("Z", "+00:00"))
-                  if _exp_dt.tzinfo is None:
-                      _exp_dt = _exp_dt.replace(tzinfo=_tz2.utc)
-                  _is_expired = _now_utc > _exp_dt
-              except Exception:
-                  pass
-              if not lic.get("is_active"):
-                  sc = "rev"; st = "❌ Отозвана"
-              elif _is_expired:
-                  sc = "exp"; st = "⏰ Истекла"
-              else:
-                  sc = "ok"; st = "✅ Активна"
+            from datetime import datetime as _dt2, timezone as _tz2
+            _now_utc = _dt2.now(_tz2.utc)
+            _exp_str = lic.get("expires_at", "")
+            _is_expired = False
+            try:
+                _exp_dt = _dt2.fromisoformat(_exp_str.replace("Z", "+00:00"))
+                if _exp_dt.tzinfo is None:
+                    _exp_dt = _exp_dt.replace(tzinfo=_tz2.utc)
+                _is_expired = _now_utc > _exp_dt
+            except Exception:
+                pass
+            if not lic.get("is_active"):
+                sc = "rev"; st = "❌ Отозвана"
+            elif _is_expired:
+                sc = "exp"; st = "⏰ Истекла"
+            else:
+                sc = "ok"; st = "✅ Активна"
             key = lic.get("key", "—")
             uid = lic.get("telegram_id") or "—"
             hwid_v = lic.get("hwid") or "—"
@@ -3458,20 +3458,20 @@ async def main():
     logger.info("Loaded from DB: captcha_passed=%d, terms_accepted=%d", len(_cap), len(_terms))
     logger.info("Starting FMail Sender Bot + API v%s...", APP_VERSION)
     # FIX EXPIRE-3: фоновый планировщик авто-истечения лицензий (каждые 5 минут)
-      async def _auto_expire_loop():
-          while True:
-              try:
-                  await asyncio.sleep(300)  # 5 минут
-                  expired = await db.auto_expire_licenses()
-                  if expired:
-                      logger.info("auto_expire_loop: деактивировано %d лицензий", expired)
-              except asyncio.CancelledError:
-                  break
-              except Exception as _e:
-                  logger.warning("auto_expire_loop error: %s", _e)
-      asyncio.create_task(_auto_expire_loop())
-      logger.info("Auto-expire background task started (interval: 5 min)")
-  
+    async def _auto_expire_loop():
+        while True:
+            try:
+                await asyncio.sleep(300)  # 5 минут
+                expired = await db.auto_expire_licenses()
+                if expired:
+                    logger.info("auto_expire_loop: деактивировано %d лицензий", expired)
+            except asyncio.CancelledError:
+                break
+            except Exception as _e:
+                logger.warning("auto_expire_loop error: %s", _e)
+    asyncio.create_task(_auto_expire_loop())
+    logger.info("Auto-expire background task started (interval: 5 min)")
+
     # NO_SSL=1 → nginx/Cloudflare обрабатывает TLS (рекомендуется в production)
     # NO_SSL не задан → uvicorn использует self-signed сертификат из ssl/
     _use_ssl = not os.environ.get("NO_SSL")
