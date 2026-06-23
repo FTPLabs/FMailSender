@@ -368,15 +368,15 @@ class SendingScreen(QWidget):
           max_threads=self.threads_slider.value(),
       )
       # BUG FIX v4.4.4: только валидные аккаунты (is_active + last_test_ok is not False)
-        _sendable_accounts = [
-            a for a in self._accounts
-            if a.is_active and getattr(a, "last_test_ok", None) is not False
-        ]
-        if not _sendable_accounts:
-            QMessageBox.warning(self, "Нет валидных аккаунтов",
-                "Нет аккаунтов готовых к отправке.\nПроверьте аккаунты во вкладке «Аккаунты».")
-            return
-        self._engine = SendingEngine(accounts=_sendable_accounts, config=config, log_queue=self._log_queue)
+      _sendable_accounts = [
+          a for a in self._accounts
+          if a.is_active and getattr(a, "last_test_ok", None) is not False
+      ]
+      if not _sendable_accounts:
+          QMessageBox.warning(self, "Нет валидных аккаунтов",
+              "Нет аккаунтов готовых к отправке.\nПроверьте аккаунты во вкладке «Аккаунты».")
+          return
+      self._engine = SendingEngine(accounts=_sendable_accounts, config=config, log_queue=self._log_queue)
       self._total = len(self._recipients)
       self._sent = 0
       self._start_time = time.time()
