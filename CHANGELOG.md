@@ -1,3 +1,15 @@
+## [4.4.4] — 2026-06-23
+
+### Три критических исправления: 50/50 в рассылке, GMX SMTPServerDisconnected, RuntimeError QPushButton
+
+**Bug 1:** `screen_sending.py` — счётчик аккаунтов показывал всех (50/50) вместо валидных (30/50). Причина: `last_test_ok=None` считался "готово". Добавлен `accounts_changed.emit()` в screen_accounts после test_all и одиночного теста.
+
+**Bug 2:** `core/sender.py` — `SMTPServerDisconnected` (GMX STARTTLS разрывает после баннера) не перехватывался → fallback не срабатывал. Добавлен `except smtplib.SMTPServerDisconnected` с direct-fallback в `_send_sync`.
+
+**Bug 3:** `RuntimeError: wrapped C/C++ object of type QPushButton has been deleted` — добавлены `try/except RuntimeError` guard в `on_result` и `_finish_ui()`.
+
+---
+
 ## [4.4.3] — 2026-06-23
 
 ### Критический фикс: SMTP не работает через прокси (proxy IP blacklisted)
