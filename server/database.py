@@ -115,6 +115,28 @@ CREATE INDEX IF NOT EXISTS idx_payments_invoice_id ON payments(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_id ON ticket_messages(ticket_id);
+
+CREATE TABLE IF NOT EXISTS promo_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT UNIQUE NOT NULL,
+  discount_type TEXT NOT NULL DEFAULT 'percent',
+  discount_value REAL NOT NULL DEFAULT 10.0,
+  max_uses INTEGER DEFAULT 0,
+  used_count INTEGER DEFAULT 0,
+  is_active INTEGER DEFAULT 1,
+  expires_at TEXT DEFAULT '',
+  created_at TEXT NOT NULL,
+  note TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS user_balance (
+  telegram_id INTEGER PRIMARY KEY,
+  balance_usdt REAL NOT NULL DEFAULT 0.0,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_promo_codes_code ON promo_codes(code);
+CREATE INDEX IF NOT EXISTS idx_user_balance_telegram ON user_balance(telegram_id);
 """
 
 
@@ -137,6 +159,9 @@ async def _migrate_db() -> None:
         "ALTER TABLE users ADD COLUMN hwid_reset_at TEXT DEFAULT ''",
         "ALTER TABLE users ADD COLUMN trial_used_at TEXT DEFAULT ''",
         "ALTER TABLE payments ADD COLUMN provider TEXT DEFAULT 'crypto'",
+        "CREATE TABLE IF NOT EXISTS promo_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE NOT NULL, discount_type TEXT NOT NULL DEFAULT 'percent', discount_value REAL NOT NULL DEFAULT 10.0, max_uses INTEGER DEFAULT 0, used_count INTEGER DEFAULT 0, is_active INTEGER DEFAULT 1, expires_at TEXT DEFAULT '', created_at TEXT NOT NULL, note TEXT DEFAULT '')",
+        "CREATE TABLE IF NOT EXISTS user_balance (telegram_id INTEGER PRIMARY KEY, balance_usdt REAL NOT NULL DEFAULT 0.0, updated_at TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_promo_codes_code ON promo_codes(code)",
     ]
   async with _db() as conn:
       for _sql in _migrations:
@@ -890,3 +915,158 @@ async def get_all_moderators() -> list[dict]:
       async with db.execute("SELECT telegram_id, added_by, added_at FROM moderators") as cur:
           rows = await cur.fetchall()
           return [{"telegram_id": row[0], "added_by": row[1], "added_at": row[2]} for row in rows]
+
+
+# ─── Promo Codes ────────────────────────────────────────────────────────────────────────
+
+async def get_promo_code(code: str) -> Optional[dict]:
+  """Возвращает запись промокода или None если не найден/неактивен."""
+  async with _db() as conn:
+      async with conn.execute(
+          "SELECT * FROM promo_codes WHERE code=? AND is_active=1", (code.upper(),)
+      ) as cur:
+          row = await cur.fetchone()
+          if row:
+              return dict(row)
+          return None
+
+
+async def validate_promo_code(code: str, price: float) -> tuple:
+  """Проверяет промокод и возвращает (valid, final_price, message, promo_code_str)."""
+  promo = await get_promo_code(code)
+  if not promo:
+      return False, price, "❌ Промокод не найден или неактивен.", ""
+  if promo['max_uses'] > 0 and promo['used_count'] >= promo['max_uses']:
+      return False, price, "❌ Лимит использований промокода исчерпан.", ""
+  if promo['expires_at']:
+      try:
+          exp = datetime.fromisoformat(promo['expires_at'].replace('Z', '+00:00'))
+          if exp.tzinfo is None:
+              exp = exp.replace(tzinfo=timezone.utc)
+          if datetime.now(timezone.utc) > exp:
+              return False, price, "❌ Срок действия промокода истёк.", ""
+      except Exception:
+          pass
+  if promo['discount_type'] == 'percent':
+      discount = round(price * promo['discount_value'] / 100, 2)
+      final_price = max(0.01, round(price - discount, 2))
+      msg = f"✅ Промокод применён: скидка {promo['discount_value']:.0f}% (−${discount:.2f})"
+  else:
+      discount = min(promo['discount_value'], price - 0.01)
+      final_price = max(0.01, round(price - discount, 2))
+      msg = f"✅ Промокод применён: скидка ${discount:.2f}"
+  return True, final_price, msg, promo['code']
+
+
+async def use_promo_code(code: str) -> None:
+  """Увеличивает счётчик использований промокода."""
+  async with _db() as conn:
+      await conn.execute(
+          "UPDATE promo_codes SET used_count = used_count + 1 WHERE code=?",
+          (code.upper(),)
+      )
+      await conn.commit()
+
+
+async def create_promo_code(
+    code: str,
+    discount_type: str = 'percent',
+    discount_value: float = 10.0,
+    max_uses: int = 0,
+    expires_at: str = '',
+    note: str = '',
+) -> dict:
+  """Создаёт новый промокод."""
+  code = code.upper().strip()
+  ts = _now()
+  async with _db() as conn:
+      await conn.execute(
+          """INSERT INTO promo_codes (code, discount_type, discount_value, max_uses, used_count,
+             is_active, expires_at, created_at, note)
+             VALUES (?, ?, ?, ?, 0, 1, ?, ?, ?)""",
+          (code, discount_type, discount_value, max_uses, expires_at, ts, note)
+      )
+      await conn.commit()
+      async with conn.execute("SELECT * FROM promo_codes WHERE code=?", (code,)) as cur:
+          row = await cur.fetchone()
+          return dict(row) if row else {}
+
+
+async def deactivate_promo_code(code: str) -> bool:
+  """Деактивирует промокод."""
+  async with _db() as conn:
+      cur = await conn.execute(
+          "UPDATE promo_codes SET is_active=0 WHERE code=?", (code.upper(),)
+      )
+      await conn.commit()
+      return cur.rowcount > 0
+
+
+async def get_all_promo_codes() -> list:
+  """Возвращает все промокоды."""
+  async with _db() as conn:
+      async with conn.execute(
+          "SELECT * FROM promo_codes ORDER BY created_at DESC"
+      ) as cur:
+          rows = await cur.fetchall()
+          return [dict(r) for r in rows]
+
+
+# ─── User Balance ───────────────────────────────────────────────────────────────────
+
+async def get_user_balance(telegram_id: int) -> float:
+  """Возвращает баланс пользователя в USDT."""
+  async with _db() as conn:
+      async with conn.execute(
+          "SELECT balance_usdt FROM user_balance WHERE telegram_id=?", (telegram_id,)
+      ) as cur:
+          row = await cur.fetchone()
+          return float(row[0]) if row else 0.0
+
+
+async def add_user_balance(telegram_id: int, amount: float, reason: str = '') -> float:
+  """Начисляет баланс пользователю. Возвращает новый баланс."""
+  ts = _now()
+  async with _db() as conn:
+      await conn.execute(
+          """INSERT INTO user_balance (telegram_id, balance_usdt, updated_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(telegram_id) DO UPDATE SET
+               balance_usdt = balance_usdt + excluded.balance_usdt,
+               updated_at = excluded.updated_at""",
+          (telegram_id, amount, ts)
+      )
+      await conn.commit()
+      async with conn.execute(
+          "SELECT balance_usdt FROM user_balance WHERE telegram_id=?", (telegram_id,)
+      ) as cur:
+          row = await cur.fetchone()
+          new_balance = float(row[0]) if row else 0.0
+  if reason:
+      logger.info("Balance +%.2f USDT for tg=%d (%s). New: %.2f", amount, telegram_id, reason, new_balance)
+  return new_balance
+
+
+async def deduct_user_balance(telegram_id: int, amount: float) -> tuple:
+  """Списывает баланс. Возвращает (success, remaining_balance)."""
+  ts = _now()
+  async with _db() as conn:
+      async with conn.execute(
+          "SELECT balance_usdt FROM user_balance WHERE telegram_id=?", (telegram_id,)
+      ) as cur:
+          row = await cur.fetchone()
+          current = float(row[0]) if row else 0.0
+      if current < amount - 0.001:
+          return False, current
+      new_balance = max(0.0, round(current - amount, 8))
+      await conn.execute(
+          """INSERT INTO user_balance (telegram_id, balance_usdt, updated_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(telegram_id) DO UPDATE SET
+               balance_usdt = ?,
+               updated_at = ?""",
+          (telegram_id, new_balance, ts, new_balance, ts)
+      )
+      await conn.commit()
+      logger.info("Balance -%.2f USDT for tg=%d. New: %.2f", amount, telegram_id, new_balance)
+      return True, new_balance
