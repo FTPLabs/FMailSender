@@ -639,7 +639,25 @@ async def delete_all_licenses() -> int:
   return count
 
 
-async def get_all_licenses(limit: int = 50, offset: int = 0) -> list:
+
+  async def auto_expire_licenses() -> int:
+    """Автоматически деактивирует лицензии с истёкшим сроком.
+    Вызывается фоновым планировщиком каждые 5 минут.
+    Returns: количество деактивированных лицензий.
+    """
+    async with _db() as db:
+        cur = await db.execute(
+            "UPDATE licenses SET is_active=0 WHERE is_active=1 AND expires_at < ?",
+            (_now(),),
+        )
+        await db.commit()
+        count = cur.rowcount
+        if count:
+            logger.info("auto_expire_licenses: деактивировано %d истёкших лицензий", count)
+        return count
+
+
+  async def get_all_licenses(limit: int = 50, offset: int = 0) -> list:
   async with _db() as db:
       db.row_factory = aiosqlite.Row
       async with db.execute(
@@ -683,7 +701,7 @@ async def get_stats() -> dict:
               return row[0] if row else 0
 
       total = await _count("SELECT COUNT(*) FROM licenses")
-      active = await _count("SELECT COUNT(*) FROM licenses WHERE is_active=1")
+      active = await _count("SELECT COUNT(*) FROM licenses WHERE is_active=1 AND expires_at > datetime('now')")
       paid = await _count("SELECT COUNT(*) FROM payments WHERE status='paid'")
       users = await _count("SELECT COUNT(*) FROM users")
       open_tickets = await _count("SELECT COUNT(*) FROM tickets WHERE status='open'")
