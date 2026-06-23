@@ -422,6 +422,7 @@ class CampaignConfig:
     track_clicks: bool = True
     unsubscribe_link: str = ""
     rotate_accounts: bool = True
+    uniqueize: bool = True   # v4.4.5: уникализировать каждое письмо (spintax, CSS micro, fingerprint)
 
 
 @dataclass
@@ -444,8 +445,36 @@ def _build_message(
     account: SmtpAccount,
     recipient: Recipient,
     template: EmailTemplate,
+    uniqueize: bool = True,
 ) -> MIMEMultipart:
-    """Build MIME message: multipart/mixed -> multipart/alternative -> html."""
+    """Build MIME message: multipart/mixed -> multipart/alternative -> html.
+    v4.4.5: uniqueize=True — spintax, CSS micro, fingerprint per email.
+    """
+    # v4.4.5: уникализация — каждое письмо уникально (spintax, CSS fingerprint, data-attrs)
+    _subject = template.subject
+    _body_html = template.body_html
+    if uniqueize and _body_html:
+        try:
+            from core.uniqueizer import (  # noqa: PLC0415
+                technique_spintax,
+                technique_css_micro,
+                technique_css_custom_props,
+                technique_data_attrs,
+                technique_font_stack,
+                technique_nbsp,
+                technique_random_comments,
+                technique_subject as _spin_subject,
+            )
+            _subject = _spin_subject(_subject)
+            _body_html = technique_spintax(_body_html)
+            _body_html = technique_css_micro(_body_html)
+            _body_html = technique_css_custom_props(_body_html)
+            _body_html = technique_data_attrs(_body_html)
+            _body_html = technique_font_stack(_body_html)
+            _body_html = technique_nbsp(_body_html)
+            _body_html = technique_random_comments(_body_html)
+        except Exception:
+            pass  # уникализация не должна блокировать отправку
     # BUG-FIX: используем домен отправителя, не SMTP-хост (RFC 2822)
     _sender_domain = account.email.split("@")[-1] if "@" in account.email else account.host
     msg_id = f"<{uuid.uuid4().hex}@{_sender_domain}>"
@@ -454,7 +483,7 @@ def _build_message(
         if account.display_name else account.email
     )
     outer = MIMEMultipart("mixed")
-    outer["Subject"] = template.subject
+    outer["Subject"] = _subject
     outer["From"] = from_addr
     outer["To"] = recipient.email
     outer["Message-ID"] = msg_id
@@ -469,7 +498,7 @@ def _build_message(
     from core.utils import strip_html as _strip
     plain = template.body_text or _strip(template.body_html)
     alt.attach(MIMEText(plain, "plain", "utf-8"))
-    alt.attach(MIMEText(template.body_html, "html", "utf-8"))
+    alt.attach(MIMEText(_body_html, "html", "utf-8"))
     outer.attach(alt)
 
     for att_path in template.attachments:
@@ -1217,7 +1246,7 @@ class SendingEngine:
             return await asyncio.get_running_loop().run_in_executor(
                 None, self._send_sync, account, recipient, template
             )  # FIX C1: fallback на sync при отсутствии aiosmtplib
-        msg = _build_message(account, recipient, template)
+        msg = _build_message(account, recipient, template, uniqueize=self.config.uniqueize)
         try:
             if account.use_ssl:
                 # SSL/TLS (порт 465) — передаём только use_tls=True
@@ -1302,7 +1331,7 @@ class SendingEngine:
           template: EmailTemplate,
       ) -> SendResult:
           import ssl as _ssl_mod
-          msg = _build_message(account, recipient, template)
+          msg = _build_message(account, recipient, template, uniqueize=self.config.uniqueize)
           try:
               ctx = _ssl_mod.create_default_context()
               proxy_url = account.proxy.strip() if account.proxy else ""
