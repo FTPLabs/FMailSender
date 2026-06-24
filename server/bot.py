@@ -2290,32 +2290,54 @@ async def msg_admin_broadcast(message: Message, state: FSMContext):
     text = message.text or ""
     await state.clear()
     user_ids = await db.get_distinct_user_ids()
-    sent = 0
-    failed = 0
-    # FIX СРЕДН-2: рассылка в фоновом asyncio.Task — бот не блокируется во время отправки
-    from aiogram.exceptions import TelegramRetryAfterError, TelegramForbiddenError
     admin_id = message.from_user.id
-    await message.answer(
-        f"📢 <b>Рассылка запущена в фоне</b>\n👥 Получателей: {len(user_ids)}\n\nПо завершении получишь отчёт.",
+    progress_msg = await message.answer(
+        f"📢 <b>Рассылка запущена</b>\n👥 Получателей: {len(user_ids)}\n\n⏳ Отправляем...",
         reply_markup=kb_admin(),
     )
-    asyncio.create_task(_broadcast_task(admin_id, user_ids, text))
+    asyncio.create_task(_broadcast_task(admin_id, user_ids, text, progress_msg.message_id))
 
 
-async def _broadcast_task(admin_id: int, user_ids: list, text: str) -> None:
-    """Фоновая рассылка — не блокирует event loop."""
-    from aiogram.exceptions import TelegramRetryAfterError, TelegramForbiddenError
-    sent = 0; failed = 0
-    for uid in user_ids:
+async def _broadcast_task(admin_id: int, user_ids: list, text: str, progress_msg_id: int) -> None:
+    """Broadcast with live progress updates."""
+    from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError
+    sent = 0
+    failed = 0
+    total = len(user_ids)
+    update_every = max(1, min(10, total // 20 or 1))
+
+    def _bar(done: int, total: int, width: int = 12) -> str:
+        filled = int(width * done / total) if total else 0
+        return "█" * filled + "░" * (width - filled)
+
+    async def _update_progress():
+        done = sent + failed
+        pct = int(100 * done / total) if total else 0
         try:
-            await bot.send_message(uid, text)
+            await bot.edit_message_text(
+                chat_id=admin_id,
+                message_id=progress_msg_id,
+                text=(
+                    f"📢 <b>Рассылка идёт...</b>\n"
+                    f"[{_bar(done, total)}] {pct}%\n"
+                    f"👤 Обработано: {done}/{total}\n"
+                    f"✅ Отправлено: {sent}  ❌ Ошибок: {failed}"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+    for i, uid in enumerate(user_ids):
+        try:
+            await bot.send_message(uid, text, parse_mode="HTML")
             sent += 1
             await asyncio.sleep(0.04)
-        except TelegramRetryAfterError as e:
-            logger.warning("Рассылка: rate limit %ds", e.retry_after)
+        except TelegramRetryAfter as e:
+            logger.warning("broadcast: rate limit %ds", e.retry_after)
             await asyncio.sleep(e.retry_after + 1)
             try:
-                await bot.send_message(uid, text)
+                await bot.send_message(uid, text, parse_mode="HTML")
                 sent += 1
             except Exception:
                 failed += 1
@@ -2323,11 +2345,32 @@ async def _broadcast_task(admin_id: int, user_ids: list, text: str) -> None:
             failed += 1
         except Exception:
             failed += 1
+        if (i + 1) % update_every == 0:
+            await _update_progress()
+
+    # final report - edit the progress message
     try:
-        await bot.send_message(admin_id,
-            f"📢 <b>Рассылка завершена</b>\n✅ Отправлено: {sent}\n❌ Ошибок: {failed}")
-    except Exception as _e:
-        logger.warning("broadcast_end_notify: не удалось отправить отчёт admin=%s: %s", admin_id, _e)
+        await bot.edit_message_text(
+            chat_id=admin_id,
+            message_id=progress_msg_id,
+            text=(
+                f"📢 <b>Рассылка завершена!</b>\n"
+                f"[{_bar(total, total)}] 100%\n\n"
+                f"✅ Доставлено: {sent}\n"
+                f"❌ Ошибок: {failed}\n"
+                f"👥 Всего: {total}"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"📢 <b>Рассылка завершена</b>\n✅ {sent} / ❌ {failed} / 👥 {total}",
+                parse_mode="HTML"
+            )
+        except Exception as _e2:
+            logger.warning("broadcast_end_notify failed: %s", _e2)
 
 
 # ─── Admin Command ────────────────────────────────────────────────────────────
