@@ -1,29 +1,37 @@
 name: Auto Deploy to VPS
 
-on:
-  push:
-    branches: [main]
+  on:
+    push:
+      branches: [main]
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy to VPS via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          password: ${{ secrets.VPS_PASSWORD }}
-          port: 22
-          command_timeout: 120s
-          script: |
-            set -e
-            cd /opt/fmailsender
-            git fetch origin main
-            git reset --hard origin/main
-            if [ ! -f venv/bin/pip ]; then python3 -m venv venv; fi
-            venv/bin/pip install -q --upgrade pip
-            venv/bin/pip install -q -r server/requirements.txt
-            systemctl daemon-reload
-            systemctl restart fmailsender && echo 'Service restarted OK' || echo 'Service restart skipped'
-            echo 'Deploy complete'
+  jobs:
+    deploy:
+      runs-on: ubuntu-latest
+      steps:
+        - name: Deploy to VPS via SSH
+          uses: appleboy/ssh-action@v1.0.3
+          with:
+            host: ${{ secrets.VPS_HOST }}
+            username: ${{ secrets.VPS_USER }}
+            password: ${{ secrets.VPS_PASSWORD }}
+            port: 22
+            command_timeout: 180s
+            script: |
+              set -e
+              cd /opt/fmailsender
+              git fetch origin main
+              git reset --hard origin/main
+              if [ ! -f venv/bin/pip ]; then python3 -m venv venv; fi
+              venv/bin/pip install -q --upgrade pip
+              venv/bin/pip install -q -r server/requirements.txt
+              # Обновляем systemd unit если изменился
+              if ! diff -q server/fmailsender.service /etc/systemd/system/fmailsender.service > /dev/null 2>&1; then
+                echo "Updating systemd service file..."
+                cp server/fmailsender.service /etc/systemd/system/fmailsender.service
+              fi
+              systemctl daemon-reload
+              systemctl restart fmailsender && echo "Service restarted OK" || echo "Service restart failed"
+              sleep 3
+              systemctl is-active fmailsender && echo "Service is ACTIVE" || echo "WARNING: Service is DOWN"
+              echo "Deploy complete"
+  
