@@ -1,11 +1,11 @@
 #!/bin/bash
-# FMail Sender — VPS Setup & Deploy Script v2.5.0
+# FMail Sender — VPS Setup & Deploy Script v3.0.0
 set -e
 
-echo "=== FMail Sender Bot Setup v2.5.0 ==="
+echo "=== FMail Sender Bot Setup v3.0.0 ==="
 
 apt-get update -qq
-apt-get install -y -qq python3 python3-pip python3-venv git curl
+apt-get install -y -qq python3 python3-pip python3-venv git curl cron
 
 cd /opt
 if [ -d "fmailsender" ]; then
@@ -42,16 +42,25 @@ API_HOST=0.0.0.0
 API_PORT=8000
 ENVEOF
     chmod 600 /opt/fmailsender/server/.env
-    echo ".env created"
+    echo ".env created — FILL IT IN before starting!"
 else
     echo ".env already exists, skipping"
 fi
 
-printf "[Unit]\nDescription=FMail Sender Telegram Bot + License API\nAfter=network.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser=root\nWorkingDirectory=/opt/fmailsender/server\nEnvironmentFile=/opt/fmailsender/server/.env\nExecStart=/opt/fmailsender/server/venv/bin/python bot.py\nRestart=always\nRestartSec=5\nStandardOutput=journal\nStandardError=journal\nSyslogIdentifier=fmailsender\n\n[Install]\nWantedBy=multi-user.target\n" > /etc/systemd/system/fmailsender.service
+# ── Systemd сервис ───────────────────────────────────────────
+cp /opt/fmailsender/server/fmailsender.service /etc/systemd/system/fmailsender.service
 
 systemctl daemon-reload
 systemctl enable fmailsender
 systemctl restart fmailsender
 
+# ── Watchdog (автоподнятие через cron) ──────────────────────
+chmod +x /opt/fmailsender/server/watchdog.sh
+bash /opt/fmailsender/server/watchdog.sh --install
+
+echo ""
 echo "=== Setup complete! ==="
-systemctl status fmailsender --no-pager
+systemctl status fmailsender --no-pager -l
+echo ""
+echo "Logs:    journalctl -u fmailsender -f"
+echo "Watchdog log: tail -f /var/log/fmailsender-watchdog.log"
