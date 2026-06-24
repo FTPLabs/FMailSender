@@ -146,7 +146,7 @@ class ProxyManager:
 
 class ProxyCheckWorker(QThread):
     """Реальная проверка прокси: SOCKS5/SOCKS4/HTTP рукопожатие + пинг + страна через ip-api.com."""
-    result = pyqtSignal(int, bool, str, str, int)  # index, valid, country, error, ping_ms
+    result = pyqtSignal(int, bool, str, str, int, bool)  # index, valid, country, error, ping_ms, smtp_ok
     finished = pyqtSignal(int, int)                 # valid_count, total
 
     TIMEOUT = 7  # сек на каждую попытку
@@ -165,10 +165,79 @@ class ProxyCheckWorker(QThread):
             if self._cancelled:
                 break
             valid, country, error, ping_ms = self._check_one(proxy_url)
+            smtp_ok = False
             if valid:
                 valid_count += 1
-            self.result.emit(i, valid, country, error, ping_ms)
+                # FIX v4.5.4: дополнительно проверяем SMTP-порт 587 через прокси
+                smtp_ok = self._check_smtp_via_proxy(proxy_url)
+            self.result.emit(i, valid, country, error, ping_ms, smtp_ok)
         self.finished.emit(valid_count, len(self._proxies))
+
+
+    @classmethod
+    def _check_smtp_via_proxy(cls, proxy_url: str) -> bool:
+        """FIX v4.5.4: проверяет, открыт ли SMTP-порт 587 через данный прокси.
+        Подключается к smtp.gmail.com:587 и ищет баннер «220».
+        Возвращает True только если SMTP доступен.
+        """
+        import ssl as _ssl
+        SMTP_HOST = "smtp.gmail.com"
+        SMTP_PORT = 587
+        TIMEOUT = 8
+
+        _auto = "://" not in proxy_url
+        _url = ("socks5://" + proxy_url) if _auto else proxy_url
+        parsed = urllib.parse.urlparse(_url)
+        px_host = parsed.hostname or ""
+        px_port = parsed.port or 1080
+        scheme = (parsed.scheme or "socks5").lower()
+        uname = parsed.username or ""
+        upass = parsed.password or ""
+
+        if not px_host:
+            return False
+
+        try:
+            if "socks" in scheme and not _auto:
+                # SOCKS5 → raw tunnel → smtp.gmail.com:587
+                s = cls._socks5_connect_raw(px_host, px_port, SMTP_HOST, SMTP_PORT,
+                                             username=uname, password=upass, timeout=TIMEOUT)
+            else:
+                # HTTP CONNECT → smtp.gmail.com:587
+                import base64 as _b64
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(TIMEOUT)
+                s.connect((px_host, px_port))
+                lines = [
+                    f"CONNECT {SMTP_HOST}:{SMTP_PORT} HTTP/1.1",
+                    f"Host: {SMTP_HOST}:{SMTP_PORT}",
+                    "Proxy-Connection: Keep-Alive",
+                ]
+                if uname:
+                    cred = _b64.b64encode(f"{uname}:{upass}".encode()).decode()
+                    lines.append(f"Proxy-Authorization: Basic {cred}")
+                s.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
+                resp = b""
+                while b"\r\n\r\n" not in resp and len(resp) < 4096:
+                    chunk = s.recv(256)
+                    if not chunk:
+                        break
+                    resp += chunk
+                if b"200" not in (resp.split(b"\r\n")[0] if resp else b""):
+                    s.close()
+                    return False
+            # Читаем SMTP-баннер (220 ...)
+            s.settimeout(TIMEOUT)
+            banner = b""
+            while b"\n" not in banner and len(banner) < 512:
+                chunk = s.recv(128)
+                if not chunk:
+                    break
+                banner += chunk
+            s.close()
+            return banner.startswith(b"220")
+        except Exception:
+            return False
 
     @classmethod
     def _check_one(cls, proxy_url: str) -> tuple[bool, str, str, int]:
@@ -1346,12 +1415,22 @@ class AccountsScreen(QWidget):
 
         @pyqtSlot(bool, str)
         def on_result(ok, msg, r=row):
-            # BUG FIX v4.4.4: RuntimeError guard (QPushButton deleted on table refresh)
+            # BUG FIX v4.5.4: различаем ошибку аутентификации vs ошибку прокси
             try:
                 if 0 <= r < len(self._accounts):
-                    self._accounts[r].last_test_ok = ok
+                    _ml = (msg or "").lower()
+                    _auth_fail = not ok and any(kw in _ml for kw in [
+                        "неверный логин", "неверный пароль", "password", "535", "534", "oauth2 отклонён"
+                    ])
+                    if ok:
+                        self._accounts[r].last_test_ok = True
+                        self._accounts[r].is_active = True
+                    elif _auth_fail:
+                        self._accounts[r].last_test_ok = False
+                        self._accounts[r].is_active = False
+                    else:
+                        self._accounts[r].last_test_ok = None  # прокси/сеть — не меняем is_active
                     self._accounts[r].last_test_msg = msg
-                    self._accounts[r].is_active = ok
                     save_accounts(self._accounts)
             except RuntimeError:
                 return
@@ -1564,20 +1643,22 @@ class AccountsScreen(QWidget):
         stat_lbl.setObjectName("label_muted")
         lay.addWidget(stat_lbl)
 
-        table = QTableWidget(len(proxies), 5)
-        table.setHorizontalHeaderLabels(["Прокси", "Статус", "Страна", "Пинг (мс)", "Ошибка"])
+        table = QTableWidget(len(proxies), 6)
+        table.setHorizontalHeaderLabels(["Прокси", "Статус", "SMTP :587", "Страна", "Пинг (мс)", "Ошибка"])
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         for i, p in enumerate(proxies):
             table.setItem(i, 0, QTableWidgetItem(p))
             item = QTableWidgetItem("Проверка...")
             item.setForeground(QColor(Colors.TEXT_MUTED))
             table.setItem(i, 1, item)
-            table.setItem(i, 2, QTableWidgetItem(""))
+            table.setItem(i, 2, QTableWidgetItem("…"))
             table.setItem(i, 3, QTableWidgetItem(""))
             table.setItem(i, 4, QTableWidgetItem(""))
+            table.setItem(i, 5, QTableWidgetItem(""))
         lay.addWidget(table)
 
         btn_row = QHBoxLayout()
@@ -1594,30 +1675,51 @@ class AccountsScreen(QWidget):
         lay.addLayout(btn_row)
 
         valid_proxies = []
+        smtp_blocked_proxies = []  # FIX v4.5.4: прокси что блокируют SMTP
         worker = ProxyCheckWorker(proxies, dlg)
 
-        def on_result(idx, valid, country, error, ping_ms):
+        def on_result(idx, valid, country, error, ping_ms, smtp_ok):
             progress.setValue(idx + 1)
-            s_item = table.item(idx, 1)
-            c_item = table.item(idx, 2)
-            p_item = table.item(idx, 3)
-            e_item = table.item(idx, 4)
+            s_item  = table.item(idx, 1)
+            sm_item = table.item(idx, 2)  # SMTP column
+            c_item  = table.item(idx, 3)
+            p_item  = table.item(idx, 4)
+            e_item  = table.item(idx, 5)
             if valid:
                 s_item.setText("✓ OK")
                 s_item.setForeground(QColor(Colors.SUCCESS))
+                if smtp_ok:
+                    sm_item.setText("✓ SMTP")
+                    sm_item.setForeground(QColor(Colors.SUCCESS))
+                else:
+                    sm_item.setText("✗ заблок.")
+                    sm_item.setForeground(QColor(Colors.ERROR))
                 c_item.setText(country or "—")
                 ping_color = Colors.SUCCESS if ping_ms < 300 else ("#F59E0B" if ping_ms < 800 else Colors.ERROR)
                 p_item.setText(f"{ping_ms} мс")
                 p_item.setForeground(QColor(ping_color))
-                valid_proxies.append(proxies[idx])
+                if smtp_ok:
+                    valid_proxies.append(proxies[idx])
+                else:
+                    # Прокси подключается, но блокирует SMTP — не пригоден для рассылки
+                    smtp_blocked_proxies.append(proxies[idx])
             else:
                 s_item.setText("✗ Ошибка")
                 s_item.setForeground(QColor(Colors.ERROR))
+                sm_item.setText("—")
                 e_item.setText(error)
 
         def on_finished(valid_cnt, total):
-            stat_lbl.setText(f"Готово: {valid_cnt}/{total} валидных")
-            use_btn.setEnabled(valid_cnt > 0)
+            _smtp_ok = len(valid_proxies)
+            _smtp_bad = len(smtp_blocked_proxies)
+            _fail = total - valid_cnt
+            parts = [f"✓ {_smtp_ok} готовы к SMTP-рассылке"]
+            if _smtp_bad:
+                parts.append(f"⚠ {_smtp_bad} блокируют SMTP-порт")
+            if _fail:
+                parts.append(f"✗ {_fail} недоступны")
+            stat_lbl.setText(" | ".join(parts))
+            use_btn.setEnabled(_smtp_ok > 0)
 
         def on_use():
             # Сохраняем в глобальный пул (сохраняется при удалении аккаунтов)
@@ -1861,6 +1963,17 @@ class AccountsScreen(QWidget):
         self.cancel_test_btn.setVisible(False)
         self.status_label.setText(f"Проверка отменена | Аккаунтов: {len(self._accounts)}")
 
+    def _test_accounts_by_indices(self, indices: list[int]) -> None:
+        """FIX v4.5.4: Проверяет ТОЛЬКО аккаунты по указанным индексам.
+        Используется после импорта — не перепроверяет уже валидные аккаунты.
+        """
+        if not indices:
+            return
+        self.status_label.setText(f"Проверяю {len(indices)} новых аккаунтов...")
+        for idx in indices:
+            if 0 <= idx < len(self._accounts):
+                QTimer.singleShot(idx * 50, lambda i=idx: self._test_single(i))
+
     def _toggle_invalid_visibility(self) -> None:
         """Переключает отображение невалидных аккаунтов (last_test_ok=False)."""
         self._hide_invalid_accounts = not self._hide_invalid_accounts
@@ -1969,9 +2082,8 @@ class AccountsScreen(QWidget):
             # Авто-распределение прокси из глобального пула на новые аккаунты
             _gproxies = load_global_proxies()
             _proxy_msg = ""
+            _start = len(self._accounts)  # FIX v4.5.4: индекс до добавления новых
             if _gproxies and new_accs:
-                # Определяем стартовый индекс — чтобы новые аккаунты продолжили ротацию
-                _start = len(self._accounts)
                 for i, acc in enumerate(new_accs):
                     acc.proxy = _gproxies[(_start + i) % len(_gproxies)]
                     acc.proxy_list = _gproxies
@@ -1987,13 +2099,14 @@ class AccountsScreen(QWidget):
 
             _info = f"Импортировано: {imported}\nПропущено: {errors}{_proxy_msg}"
             if imported > 0 and _gproxies:
-                _info += "\n\nЗапускаю автопроверку всех аккаунтов..."
+                _info += f"\n\nЗапускаю проверку {imported} новых аккаунтов..."
             QMessageBox.information(self, "Импорт завершён", _info)
             self._import_worker = None
 
-            # Авто-тест сразу после импорта если есть прокси
+            # FIX v4.5.4: тестируем ТОЛЬКО новые аккаунты (не все 50+N)
             if imported > 0 and _gproxies:
-                QTimer.singleShot(300, self._test_all)
+                _new_indices = list(range(_start, _start + len(new_accs)))
+                QTimer.singleShot(300, lambda idx=_new_indices: self._test_accounts_by_indices(idx))
 
         def on_error(msg):
             progress_dlg.close()
