@@ -1544,62 +1544,144 @@ class SendingEngine:
           except OSError as _ose:
               _ose_msg = str(_ose)
               if "SOCKS5" in _ose_msg or "CONNECT" in _ose_msg:
-                  try:
-                      _fb_ctx = ssl.create_default_context()
-                      _fb_ctx.check_hostname = False
-                      _fb_ctx.verify_mode = ssl.CERT_NONE
-                      for _p, _s, _t in [
-                          (account.port, account.use_ssl, account.use_tls),
-                          (587, False, True),
-                          (465, True, False),
-                      ]:
+                  # FIX v4.4.6: различаем два сценария:
+                  # А) SOCKS5 код 0x01/0x02 = ПРОКСИ блокирует этот SMTP-порт
+                  #    → пробуем альтернативные порты ЧЕРЕЗ ТОТ ЖЕ прокси
+                  # Б) Сетевая ошибка (таймаут, отказ) = прокси недоступен
+                  #    → fallback на прямое соединение как последний шанс
+                  _proxy_blocks_port = any(
+                      x in _ose_msg for x in ("общий сбой", "запрещено", "код 1", "код 2")
+                  )
+                  if _proxy_blocks_port:
+                      # SOCKS5 0x01/0x02: прокси-провайдер блокирует конкретный порт.
+                      # Пробуем 465/587/2525 через тот же прокси — часть портов может быть открыта.
+                      _tried_ports = {account.port}
+                      _alt_combos = [(465, True, False), (587, False, True), (2525, False, True), (2525, False, False)]
+                      for _ap, _as, _at in _alt_combos:
+                          if _ap in _tried_ports:
+                              continue
+                          _tried_ports.add(_ap)
                           try:
-                              if _s:
-                                  _fc = smtplib.SMTP_SSL(account.host, _p, timeout=30, context=_fb_ctx)
+                              _alt_raw = _proxy_connect(
+                                  _p, account.host, _ap,
+                                  timeout=15.0,
+                                  auto_detect=_proxy_auto_send,
+                              )
+                              _alt_ctx = ssl.create_default_context()
+                              _alt_ctx.check_hostname = False
+                              _alt_ctx.verify_mode = ssl.CERT_NONE
+                              def _make_alt_ssl(raw_s, ctx_s):
+                                  class _C(smtplib.SMTP_SSL):
+                                      def _get_socket(self, h, p2, t2): return ctx_s.wrap_socket(raw_s, server_hostname=h)
+                                  return _C
+                              def _make_alt_plain(raw_s):
+                                  class _C(smtplib.SMTP):
+                                      def _get_socket(self, h, p2, t2): return raw_s
+                                  return _C
+                              if _as:
+                                  _alt_conn = _make_alt_ssl(_alt_raw, _alt_ctx)(account.host, _ap, timeout=30, context=_alt_ctx)
                               else:
-                                  _fc = smtplib.SMTP(account.host, _p, timeout=30)
-                                  _fc.ehlo()
-                                  if _t:
-                                      _fc.starttls(context=_fb_ctx)
-                                      _fc.ehlo()
+                                  _alt_conn = _make_alt_plain(_alt_raw)(account.host, _ap, timeout=30)
+                                  if _at:
+                                      _alt_conn.starttls(context=_alt_ctx)
+                                      _alt_conn.ehlo()
                               _tok = _get_oauth_token(account) if _HAS_OAUTH2 else getattr(account, "oauth_token", "")
-                              _ms = frozenset({"outlook.com","hotmail.com","live.com","msn.com","windowslive.com"})
-                              _dom = account.email.split("@")[-1].lower() if "@" in account.email else ""
-                              if _tok and _dom in _ms:
-                                  _fc.docmd("AUTH", "XOAUTH2 " + base64.b64encode(("user=" + account.email + "\x01auth=Bearer " + _tok + "\x01\x01").encode()).decode())
+                              _ms2 = frozenset({"outlook.com","hotmail.com","live.com","msn.com","windowslive.com"})
+                              _dom2 = account.email.split("@")[-1].lower() if "@" in account.email else ""
+                              if _tok and _dom2 in _ms2:
+                                  _alt_conn.docmd("AUTH", "XOAUTH2 " + base64.b64encode(("user=" + account.email + "\x01auth=Bearer " + _tok + "\x01\x01").encode()).decode())
                               else:
-                                  _fc.login(account.email, account.password)
-                              _fc.send_message(msg)
-                              try: _fc.quit()
+                                  _alt_conn.login(account.email, account.password)
+                              _alt_conn.send_message(msg)
+                              try: _alt_conn.quit()
                               except Exception: pass
-                              if self._log_queue:
-                                  import time as _t2
-                                  self._log_queue.put_nowait({"type":"log","level":"warn","message":
-                                      "[" + _t2.strftime("%H:%M:%S") + "] WARNING: " + account.email +
-                                      " proxy-IP blocked by " + account.host + ", sent directly. Replace proxy with residential."})
+                              account.port = _ap; account.use_ssl = _as; account.use_tls = _at
                               return SendResult(
                                   recipient_email=recipient.email,
                                   success=True,
                                   account_used=account.email,
                                   message_id=msg.get("Message-ID", ""),
                               )
-                          except smtplib.SMTPAuthenticationError:
-                              raise
+                          except smtplib.SMTPAuthenticationError as _sae_alt:
+                              return SendResult(
+                                  recipient_email=recipient.email,
+                                  success=False,
+                                  error=f"Неверный логин/пароль: {_sae_alt.smtp_error!r:.120}",
+                                  account_used=account.email,
+                              )
                           except Exception:
                               continue
-                  except smtplib.SMTPAuthenticationError as _sae:
+                      # Все порты через прокси провалились — провайдер прокси блокирует SMTP
+                      _pts = "/".join(str(x) for x in sorted(_tried_ports))
                       return SendResult(
                           recipient_email=recipient.email,
                           success=False,
-                          error=f"Auth error (direct fallback): {_sae.smtp_error!r:.120}",
+                          error=(
+                              f"Прокси блокирует SMTP-порты {_pts} для {account.host}. "
+                              f"Причина: SOCKS5 General Failure (код 1). "
+                              f"Проверьте, что ваш прокси-провайдер разрешает SMTP (порты 465/587/2525). "
+                              f"Не все резидентные прокси поддерживают SMTP — уточните у провайдера."
+                          ),
                           account_used=account.email,
                       )
-                  except Exception:
-                      pass
+                  else:
+                      # Б) Сетевая ошибка, не блокировка порта — пробуем прямое соединение
+                      try:
+                          _fb_ctx = ssl.create_default_context()
+                          _fb_ctx.check_hostname = False
+                          _fb_ctx.verify_mode = ssl.CERT_NONE
+                          for _fp, _fs, _ft in [
+                              (account.port, account.use_ssl, account.use_tls),
+                              (587, False, True),
+                              (465, True, False),
+                          ]:
+                              try:
+                                  if _fs:
+                                      _fc = smtplib.SMTP_SSL(account.host, _fp, timeout=30, context=_fb_ctx)
+                                  else:
+                                      _fc = smtplib.SMTP(account.host, _fp, timeout=30)
+                                      _fc.ehlo()
+                                      if _ft:
+                                          _fc.starttls(context=_fb_ctx)
+                                          _fc.ehlo()
+                                  _tok = _get_oauth_token(account) if _HAS_OAUTH2 else getattr(account, "oauth_token", "")
+                                  _ms = frozenset({"outlook.com","hotmail.com","live.com","msn.com","windowslive.com"})
+                                  _dom = account.email.split("@")[-1].lower() if "@" in account.email else ""
+                                  if _tok and _dom in _ms:
+                                      _fc.docmd("AUTH", "XOAUTH2 " + base64.b64encode(("user=" + account.email + "\x01auth=Bearer " + _tok + "\x01\x01").encode()).decode())
+                                  else:
+                                      _fc.login(account.email, account.password)
+                                  _fc.send_message(msg)
+                                  try: _fc.quit()
+                                  except Exception: pass
+                                  if self._log_queue:
+                                      import time as _t2
+                                      self._log_queue.put_nowait({"type": "log", "level": "warn", "message":
+                                          "[" + _t2.strftime("%H:%M:%S") + "] ВНИМАНИЕ: " + account.email +
+                                          " — прокси недоступен, письмо отправлено напрямую. Проверьте прокси."})
+                                  return SendResult(
+                                      recipient_email=recipient.email,
+                                      success=True,
+                                      account_used=account.email,
+                                      message_id=msg.get("Message-ID", ""),
+                                  )
+                              except smtplib.SMTPAuthenticationError:
+                                  raise
+                              except Exception:
+                                  continue
+                      except smtplib.SMTPAuthenticationError as _sae:
+                          return SendResult(
+                              recipient_email=recipient.email,
+                              success=False,
+                              error=f"Auth error (direct fallback): {_sae.smtp_error!r:.120}",
+                              account_used=account.email,
+                          )
+                      except Exception:
+                          pass
               return SendResult(
                   recipient_email=recipient.email,
                   success=False,
-                  error=f"Proxy IP blocked by SMTP server: {_ose_msg[:120]}. Replace with residential proxy.",
+                  error=f"Ошибка прокси-соединения: {_ose_msg[:150]}",
                   account_used=account.email,
               )
           except Exception as e:
