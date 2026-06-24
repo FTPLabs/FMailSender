@@ -46,7 +46,19 @@ class XRocketPayClient:
             else:
                 ctx = session.get(url, timeout=timeout)
             async with ctx as resp:
-                data = await resp.json(content_type=None)
+                raw_text = await resp.text()
+                if not raw_text.strip():
+                    raise RuntimeError(
+                        f"xRocket API вернул пустой ответ (HTTP {resp.status}). "
+                        f"Проверьте XROCKET_API_TOKEN в .env"
+                    )
+                try:
+                    import json as _json
+                    data = _json.loads(raw_text)
+                except Exception:
+                    raise RuntimeError(
+                        f"xRocket API вернул не-JSON (HTTP {resp.status}): {raw_text[:200]}"
+                    )
                 if not isinstance(data, dict) or not data.get("success"):
                     err = (data.get("message") or data.get("errors") or data) if isinstance(data, dict) else data
                     raise RuntimeError(f"xRocket API error: {err}")

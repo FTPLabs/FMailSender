@@ -42,7 +42,19 @@ class CryptoPayClient:
                 else session.get(url, params=cleaned, timeout=aiohttp.ClientTimeout(total=15))
             )
             async with req_ctx as resp:
-                data = await resp.json(content_type=None)
+                raw_text = await resp.text()
+                if not raw_text.strip():
+                    raise RuntimeError(
+                        f"Crypto Pay API вернул пустой ответ (HTTP {resp.status}). "
+                        f"Проверьте CRYPTO_BOT_API и CRYPTO_BOT_TOKEN в .env"
+                    )
+                try:
+                    import json as _json
+                    data = _json.loads(raw_text)
+                except Exception:
+                    raise RuntimeError(
+                        f"Crypto Pay API вернул не-JSON (HTTP {resp.status}): {raw_text[:200]}"
+                    )
                 if not data.get("ok"):
                     error = data.get("error", {})
                     raise RuntimeError(

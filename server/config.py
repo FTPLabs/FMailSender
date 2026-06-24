@@ -45,7 +45,10 @@ elif len(ADMIN_API_KEY) < 16:
 # Backward-compat alias
 ADMIN_WEB_SECRET: str = ADMIN_API_KEY
 CRYPTO_BOT_TOKEN = _require("CRYPTO_BOT_TOKEN")
-CRYPTO_BOT_API = "https://pay.crypt.bot/api"
+# @Wallet (send.tg) Crypto Pay uses pay.wallet.tg/api;
+# legacy CryptoBot uses pay.crypt.bot/api.
+# Override via CRYPTO_BOT_API env var.
+CRYPTO_BOT_API = os.environ.get("CRYPTO_BOT_API", "https://pay.crypt.bot/api").strip()
 
 DB_PATH = os.environ.get("DB_PATH", "licenses.db")
 API_HOST = os.environ.get("API_HOST", "0.0.0.0")
