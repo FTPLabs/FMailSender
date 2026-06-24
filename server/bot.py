@@ -3586,10 +3586,6 @@ async def main():
         await pay.close_all()
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
-
-
 
 
 # ─── Promo Code Step (BuyFlow.waiting_promo) ────────────────────────────────────
@@ -3885,3 +3881,7 @@ async def msg_admin_balance_amt(message: Message, state: FSMContext):
     except Exception:
         pass
     logger.info("Admin %d set balance for tg=%d: %s, new=%.2f", message.from_user.id, tg_id, action, new_balance)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
