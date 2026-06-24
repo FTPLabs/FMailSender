@@ -1,4 +1,40 @@
-## [4.4.5] — 2026-06-23
+## [4.4.6] — 2026-06-24
+
+  ### Security — Критические исправления безопасности
+
+  #### Офлайн-активация полностью отключена
+  - `core/license.py` — удалён `OFFLINE_GRACE_HOURS = 72` (72-часовое окно без интернета)
+  - Удалён JWT_SECRET client-side fallback для локальной верификации
+  - `check_license()` теперь **всегда** проверяет ключ на сервере (кэш 5 мин для снижения нагрузки)
+  - Нет интернета → немедленный отказ: `"❌ Нет подключения к серверу лицензий"`
+  - Фоновая проверка заменена on-demand онлайн-верификацией
+
+  #### Admin Panel — API Key убран из JavaScript
+  - `server/bot.py` — `const AK="{AK}"` полностью удалён из HTML/JS
+  - Введены HttpOnly session cookies (`admin_sid`; TTL 1 час; Secure; SameSite=Strict)
+  - Ссылка "Обновить" исправлена: `?api_key=KEY` → `/admin` (использует cookie)
+  - Все admin form endpoints обновлены: принимают cookie-сессию + api_key (обратная совместимость)
+
+  #### Upload endpoint — MIME-валидация
+  - `web_upload_file` теперь проверяет magic bytes `MZ` (Windows PE header)
+  - Файл с расширением .exe, но без PE-заголовка — отклоняется с HTTP 400
+
+  #### Nginx — Rate Limiting
+  - `/v1/verify`: 10 req/min per IP (защита от brute-force ключей)
+  - `/v1/activate`: 3 req/min per IP (жёсткий лимит активации)
+  - `/v1/download`: 20 req/min per IP
+  - `/admin`: 20 req/hour per IP (защита от перебора admin key)
+  - Sanitized log format: api_key из URL больше не попадает в access.log
+  - Скрипт: `sudo bash scripts/setup_nginx_ratelimit.sh`
+
+  #### Прочие исправления
+  - `datetime.utcnow()` → `datetime.now(timezone.utc)` (deprecated в Python 3.12+)
+  - `scripts/bot_checker.py` — исправлена IndentationError (2-space indent)
+  - `.github/workflows/post-deploy-check.yml` — исправлена YAML-ошибка отступов
+
+  ---
+
+  ## [4.4.5] — 2026-06-23
 
   ### Критическое исправление + Уникализация писем
 
