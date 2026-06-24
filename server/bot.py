@@ -9,6 +9,8 @@ import hmac
 import html
 import logging
 import os
+import secrets as _secrets
+import threading
 import sys
 
 # FIX H-3: sys.path настраивается ДО любых относительных импортов
@@ -518,6 +520,39 @@ def is_admin_or_mod(user_id: int) -> bool:
 def _verify_admin_key(key: str) -> bool:
     """Проверяет API-ключ для веб-панели администратора."""
     return bool(ADMIN_WEB_SECRET) and key == ADMIN_WEB_SECRET
+
+
+# ── Admin session management (HttpOnly cookie auth) ──────────────────────────
+# api_key больше не встраивается в JS. После первого входа используется сессия.
+
+_admin_sessions: dict = {}  # {session_id: expiry_timestamp}
+_admin_sessions_lock = threading.Lock()
+_ADMIN_SESSION_TTL = 3600  # 1 час
+
+
+def _create_admin_session() -> str:
+    """Создаёт новую admin-сессию. Возвращает session_id."""
+    sid = _secrets.token_urlsafe(32)
+    now = time.time()
+    with _admin_sessions_lock:
+        # Чистим истёкшие сессии
+        expired = [k for k, v in _admin_sessions.items() if v < now]
+        for k in expired:
+            del _admin_sessions[k]
+        _admin_sessions[sid] = now + _ADMIN_SESSION_TTL
+    return sid
+
+
+def _verify_admin_session(sid: str) -> bool:
+    """Проверяет admin-сессию по cookie session_id."""
+    if not sid:
+        return False
+    with _admin_sessions_lock:
+        expiry = _admin_sessions.get(sid, 0)
+        if expiry < time.time():
+            _admin_sessions.pop(sid, None)
+            return False
+        return True
 
 
 def _get_active_license(licenses: list) -> Optional[dict]:
@@ -2888,6 +2923,15 @@ async def health():
 
 
 
+
+
+  def _verify_admin_request(request: "Request", api_key: str = "") -> bool:
+      """Проверяет admin-аутентификацию из cookie-сессии или api_key в форме.
+      Поддерживает оба способа для обратной совместимости.
+      """
+      sid = request.cookies.get("admin_sid", "")
+      return _verify_admin_session(sid) or _verify_admin_key(api_key)
+
 # ─── Публичная статус-страница ───────────────────────────────────────────────
 
 import time as _time
@@ -3055,7 +3099,7 @@ progress{{width:100%;height:5px;border-radius:3px;margin-top:5px;accent-color:#6
 <h1>⚙️ FMail Admin Panel</h1>
 <div class="sub">
   Обновлено: {now_utc} &nbsp;·&nbsp;
-  <a href="?api_key={AK}">Обновить</a> &nbsp;·&nbsp;
+  <a href="/admin" onclick="location.href='/admin';return false;">Обновить</a> &nbsp;·&nbsp;
   <a href="/">Статус</a>
 </div>
 
@@ -3169,7 +3213,8 @@ progress{{width:100%;height:5px;border-radius:3px;margin-top:5px;accent-color:#6
 <footer>FMail Sender v{APP_VERSION} · powered by fmailsender.com</footer>
 
 <script>
-const AK="{AK}",BASE=window.location.origin;
+// AK removed: admin key never embedded in JS. Auth via HttpOnly cookie (admin_sid).
+  const BASE=window.location.origin;
 function tab(n){{
   document.querySelectorAll('.tab,.tp').forEach(e=>e.classList.remove('on'));
   const t=[...document.querySelectorAll('.tab')].find(t=>t.getAttribute('onclick').includes(n));
@@ -3190,7 +3235,7 @@ async function rv(key,btn){{
   if(!confirm('Отозвать ключ '+key+'?'))return;
   btn.disabled=true;
   try{{
-    const fd=new FormData();fd.append('api_key',AK);fd.append('key',key);
+    const fd=new FormData();fd.append('key',key);
     const r=await fetch(BASE+'/v1/admin/web/revoke-license',{{method:'POST',body:fd}});
     const d=await r.json();
     if(d.ok){{
@@ -3203,7 +3248,7 @@ async function rv(key,btn){{
 }}
 async function crLic(){{
   const fd=new FormData();
-  fd.append('api_key',AK);
+  
   fd.append('plan',document.getElementById('c-plan').value);
   fd.append('telegram_id',document.getElementById('c-tg').value||'');
   fd.append('hwid',document.getElementById('c-hwid').value||'');
@@ -3222,7 +3267,7 @@ async function crLic(){{
 async function saveSetting(key,inputId,alertId){{
   const val=document.getElementById(inputId).value;
   const fd=new FormData();
-  fd.append('api_key',AK);fd.append('setting_key',key);fd.append('setting_value',val);
+  fd.append('setting_key',key);fd.append('setting_value',val);
   try{{
     const r=await fetch(BASE+'/v1/admin/web/set-setting',{{method:'POST',body:fd}});
     const d=await r.json();showAlert(alertId,d.ok?'✅ Сохранено':'❌ Ошибка',d.ok);
@@ -3231,7 +3276,7 @@ async function saveSetting(key,inputId,alertId){{
 async function ulFile(){{
   const file=document.getElementById('ul-f').files[0];
   if(!file){{showAlert('ul-alert','❌ Выберите файл',false);return;}}
-  const fd=new FormData();fd.append('api_key',AK);fd.append('file',file);
+  const fd=new FormData();fd.append('file',file);
   const prog=document.getElementById('ul-prog');prog.style.display='block';prog.value=25;
   try{{
     const r=await fetch(BASE+'/v1/admin/web/upload',{{method:'POST',body:fd}});
@@ -3276,11 +3321,12 @@ async def web_revoke_license(api_key: str = Form(""), key: str = Form(...)):
 
 @api_app.post("/v1/admin/web/set-setting", include_in_schema=False)
 async def web_set_setting(
+    request: Request,
     api_key: str = Form(""),
     setting_key: str = Form(...),
     setting_value: str = Form(""),
 ):
-    if not _verify_admin_key(api_key):
+    if not _verify_admin_request(request, api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
     allowed_settings = {"download_url", "zip_url", "vt_url"}
     if setting_key not in allowed_settings:
@@ -3405,7 +3451,17 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 </div>
 <div class="footer">Обновлено: {now_utc} UTC &nbsp;·&nbsp; <a href="/health" style="color:#667eea">JSON API</a></div>
 </body></html>"""
-    return HTMLResponse(content=html)
+    _resp = HTMLResponse(content=html)
+    _resp.set_cookie(
+        key="admin_sid",
+        value=sid,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=_ADMIN_SESSION_TTL,
+        path="/",
+    )
+    return _resp
 
 
 # ─── Entry Point ─────────────────────────────────────────────────────────────
