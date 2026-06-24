@@ -3337,14 +3337,24 @@ async def web_set_setting(
 
 
 @api_app.post("/v1/admin/web/upload", include_in_schema=False)
-async def web_upload_file(api_key: str = Form(""), file: UploadFile = FastAPIFile(...)):
-    if not _verify_admin_key(api_key):
+async def web_upload_file(request: Request, api_key: str = Form(""), file: UploadFile = FastAPIFile(...)):
+    if not _verify_admin_request(request, api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
     import os as _os
     from pathlib import Path as _Path
     ext = _os.path.splitext(file.filename or "")[1].lower()
     if ext not in {".exe"}:
         raise HTTPException(status_code=400, detail="Allowed type: .exe only")
+    # SECURITY: проверка magic bytes PE-заголовка (Windows Portable Executable)
+    # Magic bytes: 0x4D 0x5A ("MZ") — начало всех PE/EXE файлов
+    first_bytes = await file.read(2)
+    if first_bytes != b"MZ":
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file: not a valid Windows executable (missing MZ header)"
+        )
+    # Сбрасываем позицию для записи всего файла
+    await file.seek(0)
     safe = "".join(c for c in (file.filename or "upload") if c.isalnum() or c in "._-")
     dl_dir = _Path("downloads"); dl_dir.mkdir(exist_ok=True)
     dest = dl_dir / safe
@@ -3352,13 +3362,13 @@ async def web_upload_file(api_key: str = Form(""), file: UploadFile = FastAPIFil
     def _write_sync():
         with dest.open("wb") as fout:
             while True:
-                chunk = file.file.read(1024 * 1024)  # 1MB чанки — быстрая запись
+                chunk = file.file.read(1024 * 1024)  # 1MB чанки
                 if not chunk:
                     break
                 fout.write(chunk)
     await _asyncio.to_thread(_write_sync)
     from fastapi.responses import JSONResponse
-    # FIX: авто-обновляем download_url → fmail.shop после web-загрузки
+    # авто-обновляем download_url после web-загрузки
     _auto_url = f"https://fmail.shop/v1/download/{safe}"
     try:
         await db.set_setting("download_url", _auto_url)
