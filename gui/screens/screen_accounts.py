@@ -1246,7 +1246,7 @@ class AccountsScreen(QWidget):
           untested_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is None)
           sendable = sum(
               1 for a in self._accounts
-              if a.is_active and getattr(a, 'last_test_ok', None) is not False
+              if a.is_active and getattr(a, 'last_test_ok', None) is True
           )
           self.status_label.setText(
               f"Всего: {len(self._accounts)} | "
@@ -1394,7 +1394,7 @@ class AccountsScreen(QWidget):
         if not self._accounts:
             return
 
-        MAX_CONCURRENT = 4  # одновременных проверок (больше → rate-limit GMX/Rambler)
+        MAX_CONCURRENT = 8  # одновременных проверок (оптимальный баланс скорости и rate-limit)
 
         self._test_cancel_event.clear()
         self.cancel_test_btn.setVisible(True)
@@ -1449,9 +1449,10 @@ class AccountsScreen(QWidget):
 
                     completed[0] += 1
                     done = completed[0]
-                    ok_so_far = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is True)
+                    ok_so_far   = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is True)
+                    fail_so_far = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is False)
                     self.status_label.setText(
-                        f"Проверено: {done}/{total} | Валидных: {ok_so_far} | Невалидных: {done - ok_so_far}"
+                        f"Проверено: {done}/{total} | Валидных: {ok_so_far} | Невалидных: {fail_so_far}"
                     )
 
                     if done >= total or self._test_cancel_event.is_set():
@@ -1474,7 +1475,7 @@ class AccountsScreen(QWidget):
                         untested_final = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is None)
                         sendable_final = sum(
                             1 for a in self._accounts
-                            if a.is_active and getattr(a, "last_test_ok", None) is not False
+                            if a.is_active and getattr(a, "last_test_ok", None) is True
                         )
                         self.status_label.setText(
                             f"Всего: {len(self._accounts)} | "
@@ -1699,13 +1700,93 @@ class AccountsScreen(QWidget):
 
 
     def _test_selected(self) -> None:
-        """Проверить выбранные аккаунты (из таблицы)."""
+        """Проверить выбранные аккаунты батчами (MAX_CONCURRENT=8).
+
+        ИСПРАВЛЕНО: раньше запускало все потоки одновременно без лимита,
+        что вызывало перегрузку ОС и зависание ~30% аккаунтов в очереди.
+        Теперь использует ту же батчевую очередь что и _test_all().
+        """
         rows = sorted({idx.row() for idx in self.table.selectedIndexes()})
         if not rows:
             QMessageBox.information(self, "Нет выбранных", "Выберите строки в таблице для проверки.")
             return
+
+        MAX_CONCURRENT = 8
+
+        self._test_cancel_event.clear()
+        self.cancel_test_btn.setVisible(True)
+        self.test_all_btn.setEnabled(False)
+
+        # Пометить выбранные как «в очереди» — колонка 1
         for r in rows:
-            self._test_single(r)
+            item = self.table.item(r, 1)
+            if item:
+                item.setText("В очереди...")
+                item.setForeground(QColor(Colors.TEXT_MUTED))
+
+        total = len(rows)
+        completed = [0]
+        running = [0]
+        queue = list(rows)
+
+        def _start_next_sel():
+            """Запускает следующий воркер если есть свободный слот."""
+            while queue and running[0] < MAX_CONCURRENT:
+                if self._test_cancel_event.is_set():
+                    break
+                row = queue.pop(0)
+                if row >= len(self._accounts):
+                    continue
+                acc = self._accounts[row]
+
+                status_item = self.table.item(row, 1)
+                if status_item:
+                    status_item.setText("Проверка...")
+                    status_item.setForeground(QColor(Colors.TEXT_MUTED))
+
+                w = TestWorker(acc, parent=self)
+                running[0] += 1
+
+                @pyqtSlot(bool, str)
+                def on_result_sel(ok, msg, r=row):
+                    running[0] -= 1
+                    si = self.table.item(r, 1)
+                    if si:
+                        si.setText("Валидный" if ok else "Ошибка")
+                        si.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
+                        si.setToolTip(msg)
+
+                    if 0 <= r < len(self._accounts):
+                        self._accounts[r].last_test_ok = ok
+                        self._accounts[r].last_test_msg = msg
+                        self._accounts[r].is_active = ok
+
+                    completed[0] += 1
+                    done = completed[0]
+                    ok_cnt   = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is True)
+                    fail_cnt = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is False)
+                    self.status_label.setText(
+                        f"Выбранных проверено: {done}/{total} | Валидных: {ok_cnt} | Невалидных: {fail_cnt}"
+                    )
+
+                    if done >= total or self._test_cancel_event.is_set():
+                        save_accounts(self._accounts)
+                        self._refresh_table()
+                        try:
+                            self.accounts_changed.emit(self._accounts)
+                        except RuntimeError:
+                            pass
+                        self.test_all_btn.setEnabled(True)
+                        self.cancel_test_btn.setVisible(False)
+                        self._test_workers = [x for x in self._test_workers if x.isRunning()]
+                    else:
+                        _start_next_sel()
+
+                w.result_ready.connect(on_result_sel)
+                self._test_workers.append(w)
+                w.start()
+
+        _start_next_sel()
 
     def _cancel_test(self) -> None:
         """Отменить текущую проверку всех аккаунтов."""
