@@ -1240,6 +1240,10 @@ class SendingEngine:
         recipient: Recipient,
         template: EmailTemplate,
     ) -> SendResult:
+        # DEAD CODE — этот метод никогда не вызывается.
+        # _send_one всегда использует _send_sync через executor (прокси обязателен,
+        # aiosmtplib не поддерживает SOCKS5). Оставлено для возможного будущего
+        # использования в no-proxy режиме (currently disabled).
         try:
             import aiosmtplib as _aiosmtplib  # noqa: F401
         except ImportError:
@@ -1408,6 +1412,7 @@ class SendingEngine:
               # Root cause: proxy IP is blacklisted by the SMTP server.
               # SOCKS5 CONNECT returns 0x00 (success) but SMTP server immediately
               # closes the connection. Fall back to direct send (no proxy).
+              # FIX v4.4.5: log warning when falling back + apply OAuth2 in fallback.
               if _sce.smtp_code == -1:
                   try:
                       _fb_ctx = ctx.__class__()
@@ -1427,10 +1432,24 @@ class SendingEngine:
                                   if _fb_tls:
                                       _fb_c.starttls(context=_fb_ctx)
                                       _fb_c.ehlo()
-                              _fb_c.login(account.email, account.password)
+                              # FIX БАГ-2: применяем OAuth2/XOAUTH2 для Outlook в fallback
+                              if _current_token and _domain in _ms_domains:
+                                  _fb_xoauth2 = base64.b64encode(
+                                      ("user=" + account.email + "\x01auth=Bearer " +
+                                       _current_token + "\x01\x01").encode()
+                                  ).decode()
+                                  _fb_c.docmd("AUTH", "XOAUTH2 " + _fb_xoauth2)
+                              else:
+                                  _fb_c.login(account.email, account.password)
                               _fb_c.send_message(msg)
                               try: _fb_c.quit()
                               except Exception: pass
+                              # FIX БАГ-1: логируем предупреждение об утечке IP
+                              if self._log_queue:
+                                  self._log_queue.put_nowait({"type": "log", "level": "warn", "message":
+                                      f"[{time.strftime('%H:%M:%S')}] ВНИМАНИЕ: {account.email} — "
+                                      f"IP прокси заблокирован {account.host}, письмо отправлено напрямую. "
+                                      f"Замените прокси на резидентный."})
                               return SendResult(
                                   recipient_email=recipient.email,
                                   success=True,
@@ -1460,6 +1479,7 @@ class SendingEngine:
               # BUG FIX v4.4.4: SMTPServerDisconnected во время STARTTLS/AUTH (часто GMX порт 587).
               # Прокси-IP вызывает подозрение у сервера после установки соединения → он сбрасывает TCP.
               # Fallback: пробуем прямое подключение без прокси (может работать если IP клиента чист).
+              # FIX v4.4.5: log warning when falling back + apply OAuth2 in fallback.
               try:
                   _fb_ctx2 = ssl.create_default_context()
                   _fb_ctx2.check_hostname = False
@@ -1478,10 +1498,24 @@ class SendingEngine:
                               if _t2:
                                   _fc2.starttls(context=_fb_ctx2)
                                   _fc2.ehlo()
-                          _fc2.login(account.email, account.password)
+                          # FIX БАГ-2: применяем OAuth2/XOAUTH2 для Outlook в fallback
+                          if _current_token and _domain in _ms_domains:
+                              _fc2_xoauth2 = base64.b64encode(
+                                  ("user=" + account.email + "\x01auth=Bearer " +
+                                   _current_token + "\x01\x01").encode()
+                              ).decode()
+                              _fc2.docmd("AUTH", "XOAUTH2 " + _fc2_xoauth2)
+                          else:
+                              _fc2.login(account.email, account.password)
                           _fc2.send_message(msg)
                           try: _fc2.quit()
                           except Exception: pass
+                          # FIX БАГ-1: логируем предупреждение об утечке IP
+                          if self._log_queue:
+                              self._log_queue.put_nowait({"type": "log", "level": "warn", "message":
+                                  f"[{time.strftime('%H:%M:%S')}] ВНИМАНИЕ: {account.email} — "
+                                  f"прокси-IP сброшен сервером {account.host}, письмо отправлено напрямую. "
+                                  f"Замените прокси на резидентный."})
                           return SendResult(
                               recipient_email=recipient.email,
                               success=True,
