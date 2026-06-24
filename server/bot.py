@@ -533,7 +533,7 @@ _ADMIN_SESSION_TTL = 3600  # 1 час
 def _create_admin_session() -> str:
     """Создаёт новую admin-сессию. Возвращает session_id."""
     sid = _secrets.token_urlsafe(32)
-    now = time.time()
+    now = _time.time()
     with _admin_sessions_lock:
         # Чистим истёкшие сессии
         expired = [k for k, v in _admin_sessions.items() if v < now]
@@ -549,7 +549,7 @@ def _verify_admin_session(sid: str) -> bool:
         return False
     with _admin_sessions_lock:
         expiry = _admin_sessions.get(sid, 0)
-        if expiry < time.time():
+        if expiry < _time.time():
             _admin_sessions.pop(sid, None)
             return False
         return True
