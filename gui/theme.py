@@ -230,6 +230,7 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
 /* === TABLES ========================================================= */
 QTableWidget, QTableView {{
     background-color: transparent; color: {c.TEXT_PRIMARY};
+    alternate-background-color: {c.BG_SURFACE1};
     gridline-color: transparent; border: 1px solid {c.BORDER};
     border-radius: {r.CARD}; outline: none;
 }}
@@ -246,6 +247,7 @@ QTableWidget::item:hover {{ background-color: rgba(255,255,255,0.03); }}
 /* === LIST =========================================================== */
 QListWidget {{
     background-color: transparent; color: {c.TEXT_PRIMARY};
+    alternate-background-color: {c.BG_SURFACE1};
     border: 1px solid {c.BORDER}; border-radius: {r.CARD}; outline: none;
 }}
 QListWidget::item {{ padding: 11px 14px; border-bottom: 1px solid rgba(139,92,246,0.05); }}
