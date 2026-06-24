@@ -271,6 +271,41 @@ def technique_font_stack(html: str) -> str:
 
 
 # ============================================================
+# UUID fingerprint — уникальный токен на каждое письмо
+# ============================================================
+def technique_uuid_fingerprint(html: str) -> str:
+    """Embed a unique per-email UUID as a hidden meta tag and inline style variable.
+
+    Adds two invisible markers:
+      1. <meta name="x-mid" content="<uuid>"> in <head> (or top of body)
+      2. A CSS custom property --x-uid on the root element
+    Both are invisible to readers but make every email cryptographically distinct.
+    No spam signals: meta tags and CSS vars are standard and ignored by filters.
+    """
+    uid = str(uuid.uuid4())
+    short = uid.replace("-", "")[:16]
+    meta_tag = f'<meta name="x-mid" content="{uid}">'
+    css_var = f'<style>:root{{--x-uid:"{short}";}}</style>'
+
+    # Inject into <head> if present, otherwise prepend to body
+    if re.search(r"<head\b[^>]*>", html, re.IGNORECASE):
+        html = re.sub(
+            r"(<head\b[^>]*>)",
+            r"\1" + meta_tag + css_var,
+            html, count=1, flags=re.IGNORECASE
+        )
+    elif re.search(r"<body\b[^>]*>", html, re.IGNORECASE):
+        html = re.sub(
+            r"(<body\b[^>]*>)",
+            r"\1" + meta_tag + css_var,
+            html, count=1, flags=re.IGNORECASE
+        )
+    else:
+        html = meta_tag + css_var + html
+    return html
+
+
+# ============================================================
 # Tracking pixel (опционально, выключен по умолчанию)
 # ============================================================
 def technique_tracking_pixel(html: str) -> str:
@@ -402,12 +437,13 @@ _TECHNIQUE_FNS = {
     "css_micro": technique_css_micro,
     "css_custom_props": technique_css_custom_props,
     "font_stack": technique_font_stack,
+    "uuid_fingerprint": technique_uuid_fingerprint,
     "tracking_pixel": technique_tracking_pixel,
 }
 
 ALL_TECHNIQUES = [
     "spintax", "nbsp", "data_attrs", "random_comments",
-    "css_micro", "css_custom_props", "font_stack", "tracking_pixel",
+    "css_micro", "css_custom_props", "font_stack", "uuid_fingerprint", "tracking_pixel",
 ]
 
 TECHNIQUE_LABELS = {
@@ -418,13 +454,14 @@ TECHNIQUE_LABELS = {
     "css_micro": "CSS микро-вариации цвета (±1)",
     "css_custom_props": "CSS custom properties (отпечаток)",
     "font_stack": "Перестановка порядка font-family",
+    "uuid_fingerprint": "UUID fingerprint (meta + CSS var, уникален на каждое письмо)",
     "tracking_pixel": "Tracking pixel (1×1, опционально)",
 }
 
 # По умолчанию — только безопасные для «Входящих»; tracking_pixel выключен.
 DEFAULT_TECHNIQUES = [
     "spintax", "nbsp", "data_attrs", "random_comments",
-    "css_micro", "css_custom_props", "font_stack",
+    "css_micro", "css_custom_props", "font_stack", "uuid_fingerprint",
 ]
 
 
