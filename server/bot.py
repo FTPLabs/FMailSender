@@ -3248,18 +3248,30 @@ progress{{width:100%;height:5px;border-radius:3px;margin-top:5px;accent-color:#6
 <!-- Загрузить файл -->
 <div class="tp" id="tp-upload">
 <section>
-  <h2>📤 Загрузить .exe / .zip на сервер</h2>
+  <h2>📤 Загрузить .exe на сервер</h2>
   <p style="color:#718096;font-size:.8rem;margin-bottom:12px">
-    Файл сохраняется в <code>downloads/</code> и доступен через
-    <code>/v1/download/filename.exe?key=KEY</code>
+    Файл сохраняется в <code>downloads/</code>. Старый файл удаляется автоматически.
   </p>
-  <div class="form-row">
-    <div class="field"><label>Файл (.exe)</label>
-      <input id="ul-f" type="file" accept=".exe"></div>
-    <button class="btn bp" onclick="ulFile()">📤 Загрузить</button>
+  <div class="form-row" style="flex-wrap:wrap;gap:10px">
+    <div class="field" style="flex:1;min-width:220px">
+      <label>Файл (.exe)</label>
+      <input id="ul-f" type="file" accept=".exe" onchange="ulFileChosen(this)">
+      <div id="ul-fileinfo" style="font-size:.75rem;color:#90cdf4;margin-top:4px;display:none"></div>
+    </div>
+    <button id="ul-btn" class="btn bp" onclick="ulFile()" style="align-self:flex-end">📤 Загрузить</button>
   </div>
-  <div id="ul-alert" class="alert"></div>
-  <progress id="ul-prog" value="0" max="100" style="display:none"></progress>
+  <!-- Progress block -->
+  <div id="ul-progress-wrap" style="display:none;margin-top:14px">
+    <div style="display:flex;justify-content:space-between;font-size:.8rem;color:#718096;margin-bottom:5px">
+      <span id="ul-prog-label">Загрузка...</span>
+      <span id="ul-prog-pct">0%</span>
+    </div>
+    <div style="background:#2d2d44;border-radius:8px;height:10px;overflow:hidden">
+      <div id="ul-prog-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#667eea,#764ba2);border-radius:8px;transition:width .2s"></div>
+    </div>
+    <div id="ul-prog-bytes" style="font-size:.72rem;color:#4a5568;margin-top:4px;text-align:right"></div>
+  </div>
+  <div id="ul-alert" class="alert" style="margin-top:10px"></div>
 </section>
 </div>
 
@@ -3337,22 +3349,72 @@ async function saveSetting(key,inputId,alertId){{
     const d=await r.json();showAlert(alertId,d.ok?'✅ Сохранено':'❌ Ошибка',d.ok);
   }}catch(e){{showAlert(alertId,'❌ '+e,false);}}
 }}
-async function ulFile(){{
+function ulFileChosen(inp){{
+  const f=inp.files[0];const fi=document.getElementById('ul-fileinfo');
+  if(f){{fi.textContent=f.name+' ('+fmtBytes(f.size)+')';fi.style.display='block';}}
+  else fi.style.display='none';
+}}
+function fmtBytes(b){{
+  if(b>=1073741824)return(b/1073741824).toFixed(1)+' GB';
+  if(b>=1048576)return(b/1048576).toFixed(1)+' MB';
+  if(b>=1024)return(b/1024).toFixed(0)+' KB';
+  return b+' B';
+}}
+function ulFile(){{
   const file=document.getElementById('ul-f').files[0];
-  if(!file){{showAlert('ul-alert','❌ Выберите файл',false);return;}}
+  if(!file){{showAlert('ul-alert','❌ Выберите .exe файл',false);return;}}
+  const btn=document.getElementById('ul-btn');
+  const wrap=document.getElementById('ul-progress-wrap');
+  const bar=document.getElementById('ul-prog-bar');
+  const pct=document.getElementById('ul-prog-pct');
+  const lbl=document.getElementById('ul-prog-label');
+  const bts=document.getElementById('ul-prog-bytes');
+  btn.disabled=true;btn.textContent='⏳ Загрузка...';
+  wrap.style.display='block';bar.style.width='0%';pct.textContent='0%';
+  lbl.textContent='Загрузка '+file.name+'...';bts.textContent='';
+  document.getElementById('ul-alert').style.display='none';
   const fd=new FormData();fd.append('file',file);
-  const prog=document.getElementById('ul-prog');prog.style.display='block';prog.value=25;
-  try{{
-    const r=await fetch(BASE+'/v1/admin/web/upload',{{method:'POST',body:fd}});
-    prog.value=100;const d=await r.json();
-    if(d.ok)showAlert('ul-alert','✅ Загружен: '+d.filename+' ('+Math.round(d.size/1024)+' KB)',true);
-    else showAlert('ul-alert','❌ '+(d.detail||JSON.stringify(d)),false);
-  }}catch(e){{showAlert('ul-alert','❌ '+e,false);}}
-  setTimeout(()=>{{prog.style.display='none';prog.value=0;}},2000);
+  const xhr=new XMLHttpRequest();
+  xhr.upload.addEventListener('progress',function(e){{
+    if(e.lengthComputable){{
+      const p=Math.round(e.loaded/e.total*100);
+      bar.style.width=p+'%';pct.textContent=p+'%';
+      bts.textContent=fmtBytes(e.loaded)+' / '+fmtBytes(e.total);
+    }}
+  }});
+  xhr.addEventListener('load',function(){{
+    try{{
+      const d=JSON.parse(xhr.responseText);
+      if(d.ok){{
+        bar.style.width='100%';pct.textContent='100%';
+        showAlert('ul-alert','✅ Загружен: '+d.filename+' ('+fmtBytes(d.size)+')',true);
+      }}else showAlert('ul-alert','❌ '+(d.detail||xhr.responseText),false);
+    }}catch(e){{showAlert('ul-alert','❌ Ошибка: '+xhr.status+' '+xhr.statusText,false);}}
+    btn.disabled=false;btn.textContent='📤 Загрузить';
+    setTimeout(()=>{{wrap.style.display='none';bar.style.width='0%';}},3000);
+  }});
+  xhr.addEventListener('error',function(){{
+    showAlert('ul-alert','❌ Ошибка сети при загрузке',false);
+    btn.disabled=false;btn.textContent='📤 Загрузить';
+    wrap.style.display='none';
+  }});
+  xhr.open('POST',BASE+'/v1/admin/web/upload');
+  xhr.send(fd);
 }}
 </script>
 </body></html>"""
-    return HTMLResponse(content=admin_html)
+    sid = _create_admin_session()
+    _resp = HTMLResponse(content=admin_html)
+    _resp.set_cookie(
+        key="admin_sid",
+        value=sid,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=_ADMIN_SESSION_TTL,
+        path="/",
+    )
+    return _resp
 
 
 @api_app.post("/v1/admin/web/create-license", include_in_schema=False)
