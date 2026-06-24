@@ -224,6 +224,7 @@ class AdminFlow(StatesGroup):
     confirm_clear     = State()
     set_download_url  = State()
     add_promo_code    = State()
+    deactivate_promo  = State()
     add_balance_tgid  = State()
     add_balance_amt   = State()
 
@@ -3527,33 +3528,29 @@ if __name__ == "__main__":
 
 
 
-# ─── Promo Code Step (BuyFlow.waiting_promo) ──────────────────────────────────
+# ─── Promo Code Step (BuyFlow.waiting_promo) ────────────────────────────────────
 
 @dp.message(BuyFlow.waiting_promo)
 async def msg_promo_code(message: Message, state: FSMContext):
-    """Пользователь ввёл промокод."""
     code = (message.text or "").strip().upper()
     data = await state.get_data()
     plan_id = data.get("plan_id", "week")
     hwid = data.get("hwid", "")
-
     if plan_id not in PLANS:
         await state.clear()
         return
-
     base_price = await db.get_plan_price(plan_id)
     valid, final_price, msg, used_code = await db.validate_promo_code(code, base_price)
-
     if not valid:
         await message.answer(
-            f"{msg}\n\nОтправь другой промокод или нажми «Пропустить».",
+            f"{msg}\nОтправь другой код или нажми Пропустить:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="⏩ Пропустить", callback_data=f"skip_promo:{plan_id}")],
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_buy")],
             ]),
         )
         return
-
+    await db.use_promo_code(used_code)
     await state.update_data(promo_code=used_code, discounted_price=final_price)
     providers = pay.enabled_for_new_payments()
     provider_key = providers[0].key if providers else "crypto"
@@ -3563,10 +3560,9 @@ async def msg_promo_code(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("skip_promo:"))
 async def cb_skip_promo(query: CallbackQuery, state: FSMContext):
-    """Пропуск ввода промокода — переход к оплате без скидки."""
+    await query.answer()
     plan_id = query.data.split(":", 1)[1]
     if plan_id not in PLANS or PLANS[plan_id].get("admin_only"):
-        await query.answer("Неизвестный план", show_alert=True)
         return
     data = await state.get_data()
     hwid = data.get("hwid", "")
@@ -3575,12 +3571,11 @@ async def cb_skip_promo(query: CallbackQuery, state: FSMContext):
     if len(providers) > 1:
         plan = PLANS[plan_id]
         price = await db.get_plan_price(plan_id)
-        text = (
-            f"📦 <b>{plan['name']}</b> — ${price:.2f} USDT\n\n"
-            f"💻 HWID: <code>{hwid or 'привяжется при первом запуске'}</code>\n\n"
-            f"Выбери способ оплаты:"
+        await send_or_edit(
+            query,
+            f"📦 <b>{plan['name']}</b> — ${price:.2f} USDT\n\nВыбери способ оплаты:",
+            reply_markup=kb_provider(plan_id, providers),
         )
-        await send_or_edit(query, text, reply_markup=kb_provider(plan_id, providers))
     else:
         provider_key = providers[0].key if providers else "crypto"
         await _proceed_to_payment(query, state, hwid, plan_id, provider_key)
@@ -3588,7 +3583,6 @@ async def cb_skip_promo(query: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("balance_pay_plan:"))
 async def cb_balance_pay_plan(query: CallbackQuery, state: FSMContext):
-    """Оплата с баланса на этапе выбора промокода."""
     parts = query.data.split(":", 2)
     plan_id = parts[1] if len(parts) > 1 else ""
     hwid = parts[2] if len(parts) > 2 else ""
@@ -3600,46 +3594,32 @@ async def cb_balance_pay_plan(query: CallbackQuery, state: FSMContext):
     success, remaining = await db.deduct_user_balance(user_id, price)
     if not success:
         balance = await db.get_user_balance(user_id)
-        await query.answer(
-            f"❌ Недостаточно баланса. Ваш баланс: ${balance:.2f} USDT, нужно: ${price:.2f} USDT.",
-            show_alert=True,
-        )
+        await query.answer(f"Недостаточно баланса: ${balance:.2f} / нужно ${price:.2f}", show_alert=True)
         return
     await state.clear()
     try:
-        lic = await db.create_license(
-            plan=plan_id,
-            telegram_id=user_id,
-            hwid=hwid,
-            note=f"balance payment tg={user_id}",
-        )
+        lic = await db.create_license(plan=plan_id, telegram_id=user_id, hwid=hwid, note=f"balance tg={user_id}")
     except Exception as e:
-        logger.error("Balance payment license error for %d: %s", user_id, e)
-        await db.add_user_balance(user_id, price, reason="refund: license creation failed")
-        await query.answer("⚠️ Ошибка создания лицензии. Баланс возвращён.", show_alert=True)
+        logger.error("Balance payment error tg=%d: %s", user_id, e)
+        await db.add_user_balance(user_id, price, reason="refund: license error")
+        await query.answer("Ошибка создания лицензии. Баланс возвращён.", show_alert=True)
         return
-
     plan = PLANS[plan_id]
     exp = lic.get("expires_at", "")[:10]
     await send_or_edit(
         query,
-        f"✅ <b>Оплата с баланса прошла!</b>\n\n"
-        f"📦 Тариф: <b>{plan['name']}</b> | до {exp}\n"
-        f"💰 Списано: <b>${price:.2f} USDT</b>\n"
-        f"💰 Остаток: <b>${remaining:.2f} USDT</b>\n\n"
-        f"🔑 <b>Лицензионный ключ:</b>\n<code>{lic['key']}</code>\n\n"
-        f"Введи его в программе на экране активации.",
+        f"✅ <b>Оплачено с баланса</b>\n\n"
+        f"📦 {plan['name']} · до {exp}\n"
+        f"💰 Списано ${price:.2f} · остаток ${remaining:.2f}\n\n"
+        f"🔑 <code>{lic['key']}</code>\n\nВведи в программе.",
         reply_markup=kb_main(is_admin(query.from_user.id), is_mod_user=is_moderator(query.from_user.id)),
     )
-    logger.info("Balance payment tg=%d plan=%s price=%.2f remaining=%.2f", user_id, plan_id, price, remaining)
+    logger.info("Balance pay tg=%d plan=%s price=%.2f", user_id, plan_id, price)
     for _admin_id in ADMIN_IDS:
         try:
             await bot.send_message(
                 _admin_id,
-                f"💰 Оплата с баланса\n"
-                f"👤 TG: <code>{user_id}</code>\n"
-                f"📦 {plan['name']} | ${price:.2f}\n"
-                f"🔑 <code>{lic.get('key')}</code>",
+                f"💰 Баланс-оплата\n👤 <code>{user_id}</code> · {plan['name']} · ${price:.2f}\n🔑 <code>{lic.get('key')}</code>",
             )
         except Exception:
             pass
@@ -3647,54 +3627,46 @@ async def cb_balance_pay_plan(query: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("pay_balance:"))
 async def cb_pay_balance(query: CallbackQuery, state: FSMContext):
-    """Оплата с баланса на этапе инвойса (если передумал и нажал кнопку баланса)."""
     invoice_id = query.data.split(":", 1)[1]
     payment = await db.get_payment(invoice_id)
     if not payment:
-        await query.answer("❌ Платёж не найден.", show_alert=True)
+        await query.answer("Платёж не найден.", show_alert=True)
         return
     owner_id = payment.get("telegram_id") or 0
     if owner_id and owner_id != query.from_user.id and not is_admin(query.from_user.id):
-        await query.answer("❌ Это не ваш платёж.", show_alert=True)
+        await query.answer("Это не ваш платёж.", show_alert=True)
         return
     if payment.get("status") == "paid":
-        await query.answer("✅ Этот заказ уже оплачен.", show_alert=True)
+        await query.answer("Уже оплачено.", show_alert=True)
         return
-
-    amount = payment.get("amount", 0.0)
     user_id = query.from_user.id
-    success, remaining = await db.deduct_user_balance(user_id, amount)
+    plan_id = payment.get("plan", "")
+    price = payment.get("amount", 0)
+    success, remaining = await db.deduct_user_balance(user_id, price)
     if not success:
         balance = await db.get_user_balance(user_id)
-        await query.answer(
-            f"❌ Недостаточно баланса. Ваш баланс: ${balance:.2f}, нужно: ${amount:.2f} USDT.",
-            show_alert=True,
-        )
+        await query.answer(f"Недостаточно баланса: ${balance:.2f} / нужно ${price:.2f}", show_alert=True)
         return
-
+    await state.clear()
     license_data = await db.create_license_for_payment(
-        invoice_id=invoice_id,
-        plan=payment.get("plan", ""),
-        hwid=payment.get("hwid", ""),
-        telegram_id=user_id,
+        invoice_id=invoice_id, plan=plan_id,
+        hwid=payment.get("hwid", ""), telegram_id=user_id,
     )
     if not license_data.get("key"):
-        await db.add_user_balance(user_id, amount, reason="refund: license creation failed")
-        await query.answer("⚠️ Ошибка создания лицензии. Баланс возвращён.", show_alert=True)
+        await db.add_user_balance(user_id, price, reason="refund: license error")
+        await query.answer("Ошибка создания лицензии. Баланс возвращён.", show_alert=True)
         return
-
-    await state.clear()
-    plan_name = PLANS.get(payment.get("plan", ""), {}).get("name", payment.get("plan", ""))
+    plan = PLANS.get(plan_id, {})
+    exp = license_data.get("expires_at", "")[:10]
     await send_or_edit(
         query,
-        f"✅ <b>Оплата с баланса прошла!</b>\n\n"
-        f"📦 Тариф: <b>{plan_name}</b>\n"
-        f"💰 Списано: <b>${amount:.2f} USDT</b>\n"
-        f"💰 Остаток: <b>${remaining:.2f} USDT</b>\n\n"
-        f"🔑 <b>Ваш лицензионный ключ:</b>\n<code>{license_data['key']}</code>\n\n"
-        f"Введите его в программе на экране активации.",
+        f"✅ <b>Оплачено с баланса</b>\n\n"
+        f"📦 {plan.get('name', plan_id)} · до {exp}\n"
+        f"💰 Списано ${price:.2f} · остаток ${remaining:.2f}\n\n"
+        f"🔑 <code>{license_data['key']}</code>\n\nВведи в программе.",
         reply_markup=kb_main(is_admin(query.from_user.id), is_mod_user=is_moderator(query.from_user.id)),
     )
+    logger.info("Balance invoice pay tg=%d plan=%s price=%.2f", user_id, plan_id, price)
 
 
 # ─── Admin: Promo Codes ──────────────────────────────────────────────────────
@@ -3704,18 +3676,18 @@ async def cb_admin_promos(query: CallbackQuery):
     if not is_admin(query.from_user.id):
         return
     promos = await db.get_all_promo_codes()
-    lines = ["🎟 <b>Промокоды</b>\n"]
+    lines = ["🎟 <b>Промокоды</b>"]
     if promos:
         for p in promos[:15]:
-            status = "✅" if p["is_active"] else "❌"
-            dtype = f"{p['discount_value']:.0f}%" if p["discount_type"] == "percent" else f"${p['discount_value']:.2f}"
-            uses = f"{p['used_count']}/{p['max_uses']}" if p['max_uses'] > 0 else f"{p['used_count']}/∞"
-            lines.append(f"{status} <code>{p['code']}</code> — {dtype} · {uses} использ.")
+            s = "✅" if p["is_active"] else "❌"
+            d = f"{p['discount_value']:.0f}%" if p["discount_type"] == "percent" else f"${p['discount_value']:.2f}"
+            u = f"{p['used_count']}/{p['max_uses']}" if p["max_uses"] > 0 else f"{p['used_count']}/∞"
+            lines.append(f"{s} <code>{p['code']}</code> {d} · {u}")
     else:
-        lines.append("Промокодов нет.")
+        lines.append("Нет промокодов.")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Создать промокод", callback_data="admin_promo_create")],
-        [InlineKeyboardButton(text="🗑 Деактивировать код", callback_data="admin_promo_deactivate")],
+        [InlineKeyboardButton(text="➕ Создать", callback_data="admin_promo_create"),
+         InlineKeyboardButton(text="🗑 Деактивировать", callback_data="admin_promo_deactivate")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")],
     ])
     await send_or_edit(query, "\n".join(lines), reply_markup=kb)
@@ -3728,14 +3700,12 @@ async def cb_admin_promo_create(query: CallbackQuery, state: FSMContext):
     await state.set_state(AdminFlow.add_promo_code)
     await send_or_edit(
         query,
-        "🎟 <b>Создание промокода</b>\n\n"
-        "Отправь данные в формате:\n"
-        "<code>КОД ТИП ЗНАЧЕНИЕ [МАКС_ИСПОЛЬЗОВАНИЙ]</code>\n\n"
+        "🎟 <b>Новый промокод</b>\n\n"
+        "Формат: <code>КОД ТИП ЗНАЧЕНИЕ [ЛИМИТ]</code>\n"
+        "Тип: <b>percent</b> или <b>fixed</b>\n\n"
         "Примеры:\n"
-        "• <code>SUMMER20 percent 20</code> — скидка 20%\n"
-        "• <code>SAVE5 fixed 5 10</code> — скидка $5, лимит 10 раз\n"
-        "• <code>VIP50 percent 50 1</code> — скидка 50%, 1 раз\n\n"
-        "Тип: <b>percent</b> (%) или <b>fixed</b> ($)",
+        "• <code>SALE20 percent 20</code> — скидка 20%\n"
+        "• <code>SAVE5 fixed 5 10</code> — $5, лимит 10",
         reply_markup=kb_back_admin(),
     )
 
@@ -3746,48 +3716,50 @@ async def msg_admin_promo_code(message: Message, state: FSMContext):
         return
     parts = (message.text or "").strip().split()
     if len(parts) < 3:
-        await message.answer("❌ Формат: КОД ТИП ЗНАЧЕНИЕ [МАКС_ИСП]\nПример: SUMMER20 percent 20")
+        await message.answer("❌ Формат: КОД ТИП ЗНАЧЕНИЕ [ЛИМИТ]\nПример: SALE20 percent 20")
         return
-    code, dtype, value_str = parts[0], parts[1].lower(), parts[2]
-    max_uses = int(parts[3]) if len(parts) > 3 else 0
+    code, dtype, value_str = parts[0].upper(), parts[1].lower(), parts[2]
+    max_uses = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
     if dtype not in ("percent", "fixed"):
-        await message.answer("❌ Тип должен быть 'percent' или 'fixed'")
+        await message.answer("❌ Тип: percent или fixed")
         return
     try:
         value = float(value_str)
     except ValueError:
-        await message.answer("❌ Значение скидки должно быть числом")
+        await message.answer("❌ Значение должно быть числом")
         return
-    if dtype == "percent" and (value <= 0 or value >= 100):
-        await message.answer("❌ Процент должен быть от 1 до 99")
+    if dtype == "percent" and not (0 < value < 100):
+        await message.answer("❌ Процент: 1–99")
         return
     await state.clear()
     try:
         promo = await db.create_promo_code(code, dtype, value, max_uses)
-        dtype_display = f"{value:.0f}%" if dtype == "percent" else f"${value:.2f}"
-        uses_display = f"лимит {max_uses}" if max_uses > 0 else "безлимит"
-        await message.answer(
-            f"✅ <b>Промокод создан</b>\n\n"
-            f"Код: <code>{promo['code']}</code>\n"
-            f"Скидка: {dtype_display}\n"
-            f"Использований: {uses_display}",
-            reply_markup=kb_back_admin(),
-        )
+        d = f"{value:.0f}%" if dtype == "percent" else f"${value:.2f}"
+        u = f"лимит {max_uses}" if max_uses > 0 else "∞"
+        await message.answer(f"✅ <code>{promo['code']}</code> · {d} · {u}", reply_markup=kb_back_admin())
     except Exception as e:
-        await message.answer(f"❌ Ошибка: {e} (возможно, код уже существует)", reply_markup=kb_back_admin())
+        await message.answer(f"❌ Ошибка (код уже существует?): {e}", reply_markup=kb_back_admin())
 
 
 @dp.callback_query(F.data == "admin_promo_deactivate")
 async def cb_admin_promo_deactivate(query: CallbackQuery, state: FSMContext):
     if not is_admin(query.from_user.id):
         return
-    await state.set_state(AdminFlow.add_promo_code)
-    await state.update_data(promo_action="deactivate")
-    await send_or_edit(
-        query,
-        "🗑 <b>Деактивация промокода</b>\n\nОтправь код для деактивации:",
-        reply_markup=kb_back_admin(),
-    )
+    await state.set_state(AdminFlow.deactivate_promo)
+    await send_or_edit(query, "🗑 Отправь код для деактивации:", reply_markup=kb_back_admin())
+
+
+@dp.message(AdminFlow.deactivate_promo)
+async def msg_admin_promo_deactivate(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    code = (message.text or "").strip().upper()
+    await state.clear()
+    ok = await db.deactivate_promo_code(code)
+    if ok:
+        await message.answer(f"✅ <code>{code}</code> деактивирован", reply_markup=kb_back_admin())
+    else:
+        await message.answer(f"❌ Код <code>{code}</code> не найден", reply_markup=kb_back_admin())
 
 
 # ─── Admin: User Balance ─────────────────────────────────────────────────────
@@ -3797,31 +3769,23 @@ async def cb_admin_balance(query: CallbackQuery, state: FSMContext):
     if not is_admin(query.from_user.id):
         return
     await state.set_state(AdminFlow.add_balance_tgid)
-    await send_or_edit(
-        query,
-        "💰 <b>Начисление баланса</b>\n\nОтправь Telegram ID пользователя:",
-        reply_markup=kb_back_admin(),
-    )
+    await send_or_edit(query, "💰 <b>Начислить баланс</b>\n\nTelegram ID пользователя:", reply_markup=kb_back_admin())
 
 
 @dp.message(AdminFlow.add_balance_tgid)
 async def msg_admin_balance_tgid(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    raw = (message.text or "").strip()
     try:
-        tg_id = int(raw)
+        tg_id = int((message.text or "").strip())
     except ValueError:
-        await message.answer("❌ Telegram ID должен быть числом.")
+        await message.answer("❌ ID должен быть числом")
         return
-    current_balance = await db.get_user_balance(tg_id)
+    balance = await db.get_user_balance(tg_id)
     await state.update_data(balance_tgid=tg_id)
     await state.set_state(AdminFlow.add_balance_amt)
     await message.answer(
-        f"💰 Пользователь <code>{tg_id}</code>\n"
-        f"Текущий баланс: <b>${current_balance:.2f} USDT</b>\n\n"
-        f"Отправь сумму для начисления (например: <code>10.50</code>).\n"
-        f"Для списания — отрицательное число: <code>-5.00</code>",
+        f"👤 <code>{tg_id}</code> · баланс <b>${balance:.2f}</b>\n\nСумма (отрицательная = списание):",
         reply_markup=kb_back_admin(),
     )
 
@@ -3830,45 +3794,30 @@ async def msg_admin_balance_tgid(message: Message, state: FSMContext):
 async def msg_admin_balance_amt(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    raw = (message.text or "").strip()
     try:
-        amount = float(raw.replace(",", "."))
+        amount = float((message.text or "").strip().replace(",", "."))
     except ValueError:
         await message.answer("❌ Введи число, например: 10.50 или -5.00")
         return
     data = await state.get_data()
     tg_id = data.get("balance_tgid", 0)
     await state.clear()
-
     if amount >= 0:
-        new_balance = await db.add_user_balance(tg_id, amount, reason=f"admin manual top-up by {message.from_user.id}")
-        action = f"начислено +${amount:.2f}"
+        new_balance = await db.add_user_balance(tg_id, amount, reason=f"admin by {message.from_user.id}")
+        action = f"+${amount:.2f}"
     else:
         success, new_balance = await db.deduct_user_balance(tg_id, abs(amount))
         if not success:
-            current = await db.get_user_balance(tg_id)
-            await message.answer(
-                f"❌ Недостаточно баланса у пользователя.\n"
-                f"Текущий баланс: ${current:.2f} USDT",
-                reply_markup=kb_back_admin(),
-            )
+            cur = await db.get_user_balance(tg_id)
+            await message.answer(f"❌ Недостаточно баланса: ${cur:.2f}", reply_markup=kb_back_admin())
             return
-        action = f"списано -${abs(amount):.2f}"
-
+        action = f"-${abs(amount):.2f}"
     await message.answer(
-        f"✅ <b>Баланс обновлён</b>\n\n"
-        f"👤 Пользователь: <code>{tg_id}</code>\n"
-        f"💰 {action}\n"
-        f"💰 Новый баланс: <b>${new_balance:.2f} USDT</b>",
+        f"✅ <code>{tg_id}</code> · {action} · баланс <b>${new_balance:.2f}</b>",
         reply_markup=kb_back_admin(),
     )
     try:
-        await bot.send_message(
-            tg_id,
-            f"💰 <b>Ваш баланс изменён администратором</b>\n\n"
-            f"{action.capitalize()}\n"
-            f"Текущий баланс: <b>${new_balance:.2f} USDT</b>",
-        )
+        await bot.send_message(tg_id, f"💰 Баланс изменён: {action}\nТекущий: <b>${new_balance:.2f} USDT</b>")
     except Exception:
         pass
     logger.info("Admin %d set balance for tg=%d: %s, new=%.2f", message.from_user.id, tg_id, action, new_balance)
