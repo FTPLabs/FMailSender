@@ -1692,7 +1692,9 @@ async def cb_pay_with(query: CallbackQuery, state: FSMContext):
         return
     data = await state.get_data()
     hwid = data.get("hwid", "")
-    await _proceed_to_payment(query, state, hwid, plan_id, provider_key)
+    promo_code = data.get("promo_code", "")
+    discounted_price = data.get("discounted_price", 0.0)
+    await _proceed_to_payment(query, state, hwid, plan_id, provider_key, promo_code, discounted_price)
 
 
 async def _proceed_to_payment(event, state: FSMContext, hwid: str, plan_id: str, provider_key: str = "crypto", promo_code: str = "", discounted_price: float = 0.0):
