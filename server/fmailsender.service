@@ -1,41 +1,28 @@
 [Unit]
-Description=FMailSender License Server + Telegram Bot
-# Ждём полной инициализации сети (включая после длительного простоя)
-After=network-online.target
-Wants=network-online.target
-# Если nginx запущен — стартуем после него
-After=nginx.service
+  Description=FMailSender License Server + Telegram Bot
+  After=network-online.target
+  Wants=network-online.target
+  After=nginx.service
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/fmailsender/server
-Environment="PATH=/opt/fmailsender/venv/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="NO_SSL=1"
-EnvironmentFile=-/opt/fmailsender/server/.env
+  [Service]
+  Type=simple
+  User=root
+  WorkingDirectory=/opt/fmailsender/server
+  Environment="PATH=/opt/fmailsender/venv/bin:/usr/local/bin:/usr/bin:/bin"
+  Environment="NO_SSL=1"
+  EnvironmentFile=-/opt/fmailsender/server/.env
 
-ExecStart=/opt/fmailsender/venv/bin/python bot.py
+  ExecStart=/opt/fmailsender/venv/bin/python bot.py
 
-# ── Автоперезапуск ──────────────────────────────────────────────────
-# Restart=always — перезапускать при любом завершении (crash, kill, exit)
-Restart=always
-# Ждать 10 секунд перед перезапуском
-RestartSec=10
+  Restart=always
+  RestartSec=10
+  StartLimitIntervalSec=0
+  TimeoutStartSec=60
+  TimeoutStopSec=30
+  StandardOutput=journal
+  StandardError=journal
+  SyslogIdentifier=fmailsender
 
-# КРИТИЧНО: убираем лимит попыток перезапуска.
-# По умолчанию systemd сдаётся после N падений за интервал —
-# это ломает автоподнятие после длительного простоя сервера.
-# StartLimitIntervalSec=0 отключает этот лимит полностью.
-StartLimitIntervalSec=0
-
-# Таймауты
-TimeoutStartSec=60
-TimeoutStopSec=30
-
-# Логи
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=fmailsender
-
-[Install]
-WantedBy=multi-user.target
+  [Install]
+  WantedBy=multi-user.target
+  
