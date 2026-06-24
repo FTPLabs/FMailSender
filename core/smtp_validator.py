@@ -22,6 +22,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
+
+# ── DNS result cache (thread-safe, per-domain/per-host) ───────────────────────
+# Кешируем результаты DNS-проверок: SPF/DKIM/DMARC/MX/DNSBL одинаковы для всех
+# аккаунтов одного домена — нет смысла делать повторные запросы.
+import functools as _functools
+_dns_cache_lock = threading.Lock()
+_dns_cache: dict = {}
+
+def _cached_dns(key: str, fn):
+    """Возвращает кешированный результат или вычисляет и кеширует его."""
+    with _dns_cache_lock:
+        if key in _dns_cache:
+            return _dns_cache[key]
+    result = fn()
+    with _dns_cache_lock:
+        _dns_cache[key] = result
+    return result
+
 try:
     import dns.resolver
     import dns.exception
@@ -357,26 +375,34 @@ class ValidateResult:
 def _check_spf(domain: str) -> bool:
     if not _DNS_OK:
         return False
-    try:
-        answers = dns.resolver.resolve(domain, "TXT", lifetime=5)
-        return any("v=spf1" in str(r) for r in answers)
-    except Exception:
-        return False
+    def _do():
+        try:
+            answers = dns.resolver.resolve(domain, "TXT", lifetime=5)
+            return any("v=spf1" in str(r) for r in answers)
+        except Exception:
+            return False
+    return _cached_dns(f"spf:{domain}", _do)
 
 
 def _check_dmarc(domain: str) -> bool:
     if not _DNS_OK:
         return False
-    try:
-        answers = dns.resolver.resolve(f"_dmarc.{domain}", "TXT", lifetime=5)
-        return any("v=DMARC1" in str(r) for r in answers)
-    except Exception:
-        return False
+    def _do():
+        try:
+            answers = dns.resolver.resolve(f"_dmarc.{domain}", "TXT", lifetime=5)
+            return any("v=DMARC1" in str(r) for r in answers)
+        except Exception:
+            return False
+    return _cached_dns(f"dmarc:{domain}", _do)
 
 
 def _check_dkim(domain: str, selector: str = "") -> bool:
     if not _DNS_OK:
         return False
+    cache_key = f"dkim:{domain}:{selector}"
+    with _dns_cache_lock:
+        if cache_key in _dns_cache:
+            return _dns_cache[cache_key]
     _selectors = [selector] if selector else [
         "google", "mail", "default", "s1", "s2", "k1", "smtp",
         "dkim", "selector1", "selector2", "email", "mxvault",
@@ -389,40 +415,52 @@ def _check_dkim(domain: str, selector: str = "") -> bool:
         except Exception:
             return False
 
+    result = False
     with ThreadPoolExecutor(max_workers=min(len(_selectors), 6)) as executor:
         futures = {executor.submit(_probe, sel): sel for sel in _selectors}
         for fut in as_completed(futures):
             if fut.result():
+                result = True
                 for f in futures:
                     f.cancel()
-                return True
-    return False
+                break
+    with _dns_cache_lock:
+        _dns_cache[cache_key] = result
+    return result
 
 
 def _check_mx(domain: str) -> bool:
     if not _DNS_OK:
         return False
-    try:
-        dns.resolver.resolve(domain, "MX", lifetime=5)
-        return True
-    except Exception:
-        return False
+    def _do():
+        try:
+            dns.resolver.resolve(domain, "MX", lifetime=5)
+            return True
+        except Exception:
+            return False
+    return _cached_dns(f"mx:{domain}", _do)
 
+
+# Semaphore: не более 2 параллельных DNSBL-запросов (Spamhaus rate-limit)
+_dnsbl_semaphore = threading.Semaphore(2)
 
 def _check_dnsbl(host: str) -> bool:
-    DNSBL_ZONES = ["zen.spamhaus.org", "bl.spamcop.net", "dnsbl.sorbs.net"]
-    try:
-        ip = socket.gethostbyname(host)
-        rev = ".".join(reversed(ip.split(".")))
-        for zone in DNSBL_ZONES:
+    def _do():
+        DNSBL_ZONES = ["zen.spamhaus.org", "bl.spamcop.net", "dnsbl.sorbs.net"]
+        with _dnsbl_semaphore:
             try:
-                socket.getaddrinfo(f"{rev}.{zone}", None, socket.AF_INET)
-                return True
-            except socket.gaierror:
-                pass
-    except Exception as _smtp_e:
-        import logging as _log; _log.getLogger("smtp_validator").warning("dnsbl_check: неожиданная ошибка: %s", _smtp_e)
-    return False
+                ip = socket.gethostbyname(host)
+                rev = ".".join(reversed(ip.split(".")))
+                for zone in DNSBL_ZONES:
+                    try:
+                        socket.getaddrinfo(f"{rev}.{zone}", None, socket.AF_INET)
+                        return True
+                    except socket.gaierror:
+                        pass
+            except Exception as _smtp_e:
+                import logging as _log; _log.getLogger("smtp_validator").warning("dnsbl_check: неожиданная ошибка: %s", _smtp_e)
+            return False
+    return _cached_dns(f"dnsbl:{host}", _do)
 
 
 # ── Core SMTP connect (proxy-aware) ───────────────────────────────────────────
