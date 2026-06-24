@@ -232,6 +232,16 @@ class SendingScreen(QWidget):
       self.datetime_picker.setEnabled(False)
       sgl.addWidget(self.datetime_picker)
       ll.addWidget(sg)
+      og = QGroupBox("Уникализация")
+      ogl = QVBoxLayout(og)
+      self.uniqueize_check = QCheckBox("Уникализировать каждое письмо")
+      self.uniqueize_check.setChecked(True)
+      self.uniqueize_check.setToolTip(
+          "Spintax, CSS-вариации, data-атрибуты и HTML-комментарии — "
+          "каждое письмо получает уникальный fingerprint"
+      )
+      ogl.addWidget(self.uniqueize_check)
+      ll.addWidget(og)
       ll.addStretch()
       controls = QHBoxLayout()
       self.start_btn = QPushButton("Запустить рассылку")
@@ -334,6 +344,7 @@ class SendingScreen(QWidget):
           self.max_delay_spin.setValue(int(s.value("max_delay", 2000)))
           self.pause_after_spin.setValue(int(s.value("pause_after", 50)))
           self.pause_duration_spin.setValue(int(s.value("pause_duration", 60)))
+          self.uniqueize_check.setChecked(bool(int(s.value("uniqueize", 1))))
       except Exception:
           pass
 
@@ -344,6 +355,7 @@ class SendingScreen(QWidget):
       s.setValue("max_delay", self.max_delay_spin.value())
       s.setValue("pause_after", self.pause_after_spin.value())
       s.setValue("pause_duration", self.pause_duration_spin.value())
+      s.setValue("uniqueize", int(self.uniqueize_check.isChecked()))
 
   def _validate_ready(self):
       if not self._accounts or not any(a.is_active for a in self._accounts):
@@ -366,6 +378,7 @@ class SendingScreen(QWidget):
           pause_after_n=self.pause_after_spin.value(),
           pause_duration_sec=self.pause_duration_spin.value(),
           max_threads=self.threads_slider.value(),
+          uniqueize=self.uniqueize_check.isChecked(),
       )
       # Только проверенные и готовые аккаунты (is_active + last_test_ok is True).
       # Непроверенные (None) и провалившие проверку (False) не участвуют в рассылке.
