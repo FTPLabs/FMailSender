@@ -1,3 +1,19 @@
+## [4.4.8] — 2026-06-24
+
+  ### Исправление багов (gui/theme.py)
+
+  #### БАГ: Белые полосы в таблицах на Windows
+
+  - `gui/theme.py` — добавлен `alternate-background-color: {c.BG_SURFACE1}` в CSS-правила
+    `QTableWidget`, `QTableView` и `QListWidget`
+  - На Windows Qt использовал системный цвет `QPalette::AlternateBase` (белый) для чётных
+    строк таблиц, что давало белые полосы у клиентов с тёмной темой приложения и светлой
+    темой Windows
+  - Исправлено: чётные строки теперь используют тёмный цвет `BG_SURFACE1 (#08080F)` — 
+    одинаково на всех темах Windows
+
+  ---
+
 ## [4.4.7] — 2026-06-24
 
   ### Исправление багов (core/sender.py, gui/screens/screen_sending.py)
