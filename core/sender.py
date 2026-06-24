@@ -1014,6 +1014,7 @@ class SendingEngine:
         self.on_finished: Optional[Callable] = None
         self._stats: dict = {"success": 0, "errors": 0, "total": 0}
         self._stats_lock = threading.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None  # FIX v4.5.2: thread-safe cancel
 
     @property
     def stats(self) -> dict:
@@ -1029,13 +1030,21 @@ class SendingEngine:
     def stop(self) -> None:
         self.stop_event.set()
         self._paused = False
-        # Отменяем текущую asyncio-задачу для мгновенной остановки
+        # FIX v4.5.2: task.cancel() ОБЯЗАН выполняться в asyncio loop потоке.
+        # Прямой вызов из Qt потока — race condition, CancelledError не доставляется.
+        _loop = getattr(self, "_loop", None)
         task = getattr(self, "_campaign_task", None)
         if task is not None and not task.done():
-            try:
-                task.cancel()
-            except Exception as _exc:
-                logging.getLogger("sender").debug("Пропущено исключение: %s", _exc)
+            if _loop and not _loop.is_closed():
+                try:
+                    _loop.call_soon_threadsafe(task.cancel)
+                except Exception as _exc:
+                    logging.getLogger("sender").debug("E001 stop cancel: %s", _exc)
+            else:
+                try:
+                    task.cancel()
+                except Exception as _exc:
+                    logging.getLogger("sender").debug("E001 stop fallback: %s", _exc)
 
     def run(self) -> None:
         loop = asyncio.new_event_loop()
@@ -1057,6 +1066,7 @@ class SendingEngine:
             self._stats = {"success": 0, "errors": 0, "total": len(recipients)}
         self.stop_event.clear()
         self._paused = False
+        self._loop = asyncio.get_event_loop()  # FIX v4.5.2
         self._campaign_task = asyncio.current_task()
         if self._log_queue:
             self._log_queue.put_nowait({"type": "log", "level": "info", "message":
@@ -1178,6 +1188,7 @@ class SendingEngine:
             pass  # Остановлено через stop()
         finally:
             self._campaign_task = None
+            self._loop = None
 
         if self._log_queue:
             _ok = sum(1 for r in results if r.success)

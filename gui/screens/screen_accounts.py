@@ -473,21 +473,20 @@ ACCOUNTS_FILE = _get_data_dir() / "accounts.dat"
 PROXY_FILE    = _get_data_dir() / "proxies.dat"
 
 
+# FIX v4.5.2: Прокси — ТОЛЬКО СЕССИОННЫЕ (не сохраняются на диск).
+# При перезапуске прокси сбрасываются — нужно повторно импортировать.
+# Это исключает накопление устаревших/заблокированных прокси между сессиями.
+_SESSION_PROXIES: list[str] = []
+
 def save_global_proxies(proxies: list[str]) -> None:
-    """Сохраняет глобальный пул прокси — независимо от аккаунтов."""
-    PROXY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PROXY_FILE.write_text(json.dumps(proxies, ensure_ascii=False, indent=2), encoding="utf-8")
+    """Сохраняет прокси в памяти сессии (НЕ пишет на диск — сбрасывается при перезапуске)."""
+    global _SESSION_PROXIES
+    _SESSION_PROXIES = list(proxies)
 
 
 def load_global_proxies() -> list[str]:
-    """Загружает глобальный пул прокси. Возвращает [] если файл отсутствует."""
-    if not PROXY_FILE.exists():
-        return []
-    try:
-        data = json.loads(PROXY_FILE.read_text(encoding="utf-8"))
-        return [p for p in data if isinstance(p, str) and p.strip()]
-    except Exception:
-        return []
+    """Возвращает сессионный пул прокси (не читает с диска — данные сбрасываются при перезапуске)."""
+    return list(_SESSION_PROXIES)
 
 
 def distribute_proxies(accounts: "list[SmtpAccount]", proxies: list[str]) -> None:
@@ -549,12 +548,7 @@ def save_accounts(accounts: list[SmtpAccount]) -> None:
             "access_token": getattr(a, "access_token", "") or getattr(a, "oauth_token", ""),
             "token_expires_at": getattr(a, "token_expires_at", 0.0),
         }
-        if hasattr(a, "proxy_list") and a.proxy_list:
-            entry["proxy_list"] = a.proxy_list
-            entry["proxy"] = a.proxy_list[0]
-            entry["proxy_rotation_random"] = getattr(a, "proxy_rotation_random", False)
-        elif hasattr(a, "proxy") and a.proxy:
-            entry["proxy"] = a.proxy
+        # FIX v4.5.2: НЕ сохраняем proxy/proxy_list на диск — они сессионные.
         data.append(entry)
     ACCOUNTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -597,13 +591,9 @@ def load_accounts() -> list[SmtpAccount]:
                 acc.access_token = _saved_at
                 acc.oauth_token = _saved_at
             acc.token_expires_at = float(d.get("token_expires_at", 0))
-            if "proxy_list" in d:
-                acc.proxy_list = d["proxy_list"]
-                acc.proxy_rotation_random = d.get("proxy_rotation_random", False)
-                if d["proxy_list"]:
-                    acc.proxy = d["proxy_list"][0]
-            elif "proxy" in d:
-                acc.proxy = d["proxy"]
+            # FIX v4.5.2: НЕ восстанавливаем proxy/proxy_list с диска.
+            # Прокси — сессионные данные: импортируются вручную каждую сессию.
+            # Это предотвращает использование устаревших/заблокированных прокси.
             result.append(acc)
         return result
     except Exception:
@@ -1179,18 +1169,9 @@ class AccountsScreen(QWidget):
 
     def _load(self):
         self._accounts = load_accounts()
-        # Авто-назначение прокси из глобального пула аккаунтам без прокси
-        _gproxies = load_global_proxies()
-        if _gproxies:
-            _changed = False
-            for i, acc in enumerate(self._accounts):
-                if not getattr(acc, "proxy", ""):
-                    acc.proxy = _gproxies[i % len(_gproxies)]
-                    acc.proxy_list = _gproxies
-                    acc.proxy_rotation_random = False
-                    _changed = True
-            if _changed:
-                save_accounts(self._accounts)
+        # FIX v4.5.2: НЕ авто-восстанавливаем прокси из диска при загрузке.
+        # Прокси — сессионные, при перезапуске нужно импортировать заново.
+        # Аккаунты загружаются БЕЗ прокси-назначений (proxy/proxy_list сброшены load_accounts).
         self._refresh_table()
         self.accounts_changed.emit(self._accounts)
         # Автопроверка при загрузке отключена — слишком много потоков при большом кол-ве аккаунтов

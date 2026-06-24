@@ -1,3 +1,41 @@
+## [4.5.2] — 2026-06-24
+
+### Исправлены критические баги
+
+#### БАГ-1: Кнопка «Стоп / Отменить рассылку» не останавливала рассылку
+- **Причина**: `task.cancel()` вызывался из Qt main thread, тогда как asyncio
+  task живёт в отдельном потоке — прямой вызов НЕ thread-safe.
+  CancelledError не доставлялся → рассылка продолжалась до конца батча.
+- **Исправление** `core/sender.py`:
+  - добавлен `self._loop` (AsyncIO event loop) в `__init__` и `run_campaign`.
+  - В `stop()` используется `loop.call_soon_threadsafe(task.cancel)` —
+    единственный корректный способ отменить asyncio задачу из другого потока.
+- **Исправление** `gui/screens/screen_sending.py`:
+  - loop сохраняется в `self._engine._loop` ДО запуска `run_campaign`,
+    чтобы `stop()` мог получить ссылку немедленно.
+
+#### БАГ-2: Прокси и адреса сохранялись между сессиями
+- **Причина**: `save_global_proxies()` писала `proxies.dat`; `load_global_proxies()`
+  читала его при каждом старте. `save_accounts()` сохранял `proxy`/`proxy_list`
+  → устаревшие/заблокированные прокси применялись в следующей сессии.
+- **Исправление** `gui/screens/screen_accounts.py`:
+  - `save_global_proxies()` → только in-memory (`_SESSION_PROXIES`), диск не пишет.
+  - `load_global_proxies()` → возвращает `_SESSION_PROXIES` (не читает с диска).
+  - `save_accounts()` → не сохраняет поля `proxy`/`proxy_list`.
+  - `load_accounts()` → не восстанавливает поля `proxy`/`proxy_list` с диска.
+  - `_load()` → убрана авто-раздача прокси из диска при старте.
+- **Результат**: при перезапуске прокси пусты — нужно импортировать заново.
+  Аккаунты (email, пароль, хост, порт, last_test_ok) по-прежнему сохраняются.
+
+#### БАГ-3: Многословные ошибки засоряли экран лога
+- **Исправление** `gui/screens/screen_sending.py`:
+  - Все лог-строки обрезаются до 120 символов с троеточием.
+
+### Добавлены новые скиллы
+- `.agents/skills/cancel-guard/` — thread-safe отмена asyncio из Qt потока
+- `.agents/skills/session-only-data/` — правила сессионного хранения данных
+- `.agents/skills/log-brevity/` — правила краткости лог-сообщений
+
 ## [4.5.1] — 2026-06-24
 
 ### Added

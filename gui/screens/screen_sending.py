@@ -48,7 +48,9 @@ def _play_completion_chime() -> None:
 
 # ── Перевод SMTP ошибок на русский ────────────────────────────────────────
 def _translate_smtp_error(msg: str) -> str:
-    """Переводит технические SMTP-ошибки в понятные пользователю русские сообщения."""
+    """Переводит технические SMTP-ошибки в понятные пользователю русские сообщения.
+    FIX v4.5.2: ограничиваем длину до 100 символов + краткий код ошибки в скобках.
+    """
     m = msg
     # Коды ошибок SMTP
     _map = [
@@ -410,8 +412,13 @@ class SendingScreen(QWidget):
       def run():
           loop = asyncio.new_event_loop()
           asyncio.set_event_loop(loop)
-          loop.run_until_complete(self._engine.run_campaign(self._recipients, self._template))
-          loop.close()
+          # FIX v4.5.2: сохраняем loop ДО запуска, чтобы stop() мог вызвать
+          # loop.call_soon_threadsafe(task.cancel) из Qt потока (thread-safe).
+          self._engine._loop = loop
+          try:
+              loop.run_until_complete(self._engine.run_campaign(self._recipients, self._template))
+          finally:
+              loop.close()
       threading.Thread(target=run, daemon=True).start()
 
   def _on_progress(self, sent, total, result):
@@ -433,6 +440,9 @@ class SendingScreen(QWidget):
           if t == "log":
               _msg = item["message"]
               _msg = _translate_smtp_error(_msg)  # Переводим ошибки на русский
+              # FIX v4.5.2: ограничиваем длину лог-строк (не засоряем экран)
+              if len(_msg) > 120:
+                  _msg = _msg[:117] + "..."
               _wi = QListWidgetItem(_msg)
               _level = item.get("level")
               if _level == "ok":
