@@ -1506,7 +1506,7 @@ class SendingEngine:
                                                         auto_detect=_proxy_auto_send)
                               _alt_ctx = _ssl_mod.create_default_context()
                               _alt_ctx.check_hostname = False
-                              _alt_ctx.verify_mode = ssl.CERT_NONE
+                              _alt_ctx.verify_mode = _ssl_mod.CERT_NONE
                               def _make_alt_ssl(rs, cs):
                                   class _C(smtplib.SMTP_SSL):
                                       def _get_socket(self, h, p2, t2): return cs.wrap_socket(rs, server_hostname=h)

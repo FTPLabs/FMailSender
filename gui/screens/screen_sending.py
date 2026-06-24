@@ -548,7 +548,7 @@ class SendingScreen(QWidget):
           for i in range(self.log_list.count()):
               lines_out.append(self.log_list.item(i).text())
           with open(path, "w", encoding="utf-8") as f:
-              f.write(f"FMailSender — Лог рассылки\n")
+              f.write("FMailSender — Лог рассылки\n")
               f.write(f"Экспортировано: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n")
               f.write("=" * 80 + "\n\n")
               f.write("\n".join(lines_out))

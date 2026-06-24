@@ -1546,8 +1546,6 @@ class AccountsScreen(QWidget):
                             "oauth2 отклонён", "oauth2 rejected", "535", "534", "530",
                         ]
                     )
-                    _is_proxy_err = not ok and not _is_auth_fail  # соединение / прокси
-
                     # Обновить статус — колонка 1 (единственная колонка статуса)
                     si = self.table.item(r, 1)
                     if si:
