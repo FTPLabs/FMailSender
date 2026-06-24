@@ -1,3 +1,13 @@
+## [4.5.1] — 2026-06-24
+
+### Added
+- `technique_uuid_fingerprint` — per-email UUID fingerprint: injects `<meta name="x-mid">` + `:root{--x-uid}` CSS variable. Every email is cryptographically unique, no spam signals
+- GUI checkbox "Уникализировать каждое письмо" on the sending screen — on by default, persisted in QSettings
+
+### Fixed
+- Silent `except Exception: pass` in `_build_message` uniqueization block replaced with `logging.warning(..., exc_info=True)` — errors now visible in logs
+- `CampaignConfig(uniqueize=...)` now properly wired from GUI toggle (was always using default True)
+
 ## [4.4.9] — 2026-06-24
 
   ### Исправление багов
