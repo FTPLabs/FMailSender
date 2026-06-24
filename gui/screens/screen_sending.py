@@ -376,6 +376,28 @@ class SendingScreen(QWidget):
           QMessageBox.warning(self, "Нет валидных аккаунтов",
               "Нет аккаунтов готовых к отправке.\nПроверьте аккаунты во вкладке «Аккаунты».")
           return
+      # FIX БАГ-4: предупреждение о непроверенных аккаунтах перед запуском рассылки
+      _untested = [a for a in _sendable_accounts if getattr(a, "last_test_ok", None) is None]
+      if _untested:
+          _reply = QMessageBox.question(
+              self, "Непроверенные аккаунты",
+              f"{len(_untested)} аккаунт(ов) не проверялись перед рассылкой.\n"
+              f"Непроверенные аккаунты могут завершить отправку с ошибкой.\n\n"
+              f"Рекомендуется сначала запустить проверку во вкладке «Аккаунты».\n\n"
+              f"Всё равно включить непроверенные аккаунты в рассылку?",
+              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+              QMessageBox.StandardButton.No,
+          )
+          if _reply == QMessageBox.StandardButton.No:
+              _sendable_accounts = [
+                  a for a in _sendable_accounts
+                  if getattr(a, "last_test_ok", None) is not None
+              ]
+              if not _sendable_accounts:
+                  QMessageBox.warning(self, "Нет проверенных аккаунтов",
+                      "Нет проверенных аккаунтов для рассылки.\n"
+                      "Проверьте аккаунты во вкладке «Аккаунты» и повторите.")
+                  return
       self._engine = SendingEngine(accounts=_sendable_accounts, config=config, log_queue=self._log_queue)
       self._total = len(self._recipients)
       self._sent = 0
