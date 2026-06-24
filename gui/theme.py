@@ -228,8 +228,10 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
 }}
 
 /* === TABLES ========================================================= */
+/* FIX: explicit BG prevents Windows dark-mode system palette from
+   overriding alternating row colours (transparent leaks system palette). */
 QTableWidget, QTableView {{
-    background-color: transparent; color: {c.TEXT_PRIMARY};
+    background-color: {c.BG_BASE}; color: {c.TEXT_PRIMARY};
     alternate-background-color: {c.BG_SURFACE1};
     gridline-color: transparent; border: 1px solid {c.BORDER};
     border-radius: {r.CARD}; outline: none;
@@ -240,17 +242,18 @@ QHeaderView::section {{
     padding: 11px 14px; font-size: 11px;
     font-weight: {t.WEIGHT_SEMIBOLD}; letter-spacing: 0.05em;
 }}
-QTableWidget::item {{ padding: 12px 14px; border-bottom: 1px solid rgba(139,92,246,0.05); }}
+QTableWidget::item {{ background-color: transparent; padding: 12px 14px; border-bottom: 1px solid rgba(139,92,246,0.05); }}
 QTableWidget::item:selected {{ background-color: {c.ACCENT_DIM}; color: white; }}
 QTableWidget::item:hover {{ background-color: rgba(255,255,255,0.03); }}
 
 /* === LIST =========================================================== */
+/* FIX: same as tables — explicit BG to prevent Windows dark-mode interference. */
 QListWidget {{
-    background-color: transparent; color: {c.TEXT_PRIMARY};
+    background-color: {c.BG_BASE}; color: {c.TEXT_PRIMARY};
     alternate-background-color: {c.BG_SURFACE1};
     border: 1px solid {c.BORDER}; border-radius: {r.CARD}; outline: none;
 }}
-QListWidget::item {{ padding: 11px 14px; border-bottom: 1px solid rgba(139,92,246,0.05); }}
+QListWidget::item {{ background-color: transparent; padding: 11px 14px; border-bottom: 1px solid rgba(139,92,246,0.05); }}
 QListWidget::item:selected {{ background-color: {c.ACCENT_DIM}; color: white; }}
 QListWidget::item:hover {{ background-color: rgba(255,255,255,0.03); }}
 
