@@ -5,6 +5,15 @@ description: Push file changes to GitHub via REST API without 409 SHA conflicts.
 
 # GitHub Push (Conflict-Free)
 
+## When to Use vs Other Skills
+
+| Need | Use |
+|---|---|
+| Write/update files in FTPLabs/FMailSender | **This skill** |
+| Search GitHub for open-source libraries | `github-solution-finder` |
+| Read GitHub issues, PRs, or data via Replit OAuth | `query-integration-data` |
+| Connect a GitHub account via Replit OAuth | `integrations` |
+
 ## The Core Rule
 
 **Never store a SHA and reuse it later.** Always fetch the current SHA inside the same script that does the push. A SHA obtained even one commit ago will cause HTTP 409.
@@ -12,7 +21,8 @@ description: Push file changes to GitHub via REST API without 409 SHA conflicts.
 ## Project Context
 
 - Repo: `FTPLabs/FMailSender`
-- Token secret name: `GITHUB_TOKEN` (check environment secrets; value starts with `ghp_`)
+- Token: stored as Replit secret `GITHUB_TOKEN` — use `process.env.GITHUB_TOKEN`
+- If `GITHUB_TOKEN` is missing, use the `environment-secrets` skill to request it from the user
 - Language: Node.js (`node /tmp/script.js`) — no Python available in this environment
 - API base: `api.github.com`
 
@@ -23,7 +33,8 @@ Always one script per file. Never separate GET and PUT calls across different to
 ```js
 // /tmp/push_myfile.js
 const https = require('https');
-const TOKEN = process.env.GITHUB_TOKEN || 'ghp_...';
+const TOKEN = process.env.GITHUB_TOKEN;
+if (!TOKEN) { console.error('GITHUB_TOKEN not set'); process.exit(1); }
 const REPO  = 'FTPLabs/FMailSender';
 
 function apiGet(path) {
@@ -84,6 +95,18 @@ main().catch(e => { console.error(e.message); process.exit(1); });
 
 Run with: `node /tmp/push_myfile.js`
 
+## Creating a New File (no existing SHA)
+
+```js
+// Omit sha field entirely for new files
+const r = await apiPut(`/repos/${REPO}/contents/path/to/newfile.md`, {
+  message: 'docs: add new file',
+  content: Buffer.from(content).toString('base64'),
+  // no sha — GitHub creates the file
+});
+// Returns 201 on success
+```
+
 ## Patching by Line Number (when string replace fails)
 
 When the content has Cyrillic or complex quotes, `String.replace` may silently fail. Use line-number splicing instead:
@@ -119,8 +142,6 @@ node /tmp/push_file_b.js &
 wait
 ```
 
-Files with shared commit history (e.g. CHANGELOG + version bump) can be sequential or parallel — GitHub accepts concurrent pushes to the same branch; each creates its own commit.
-
 ## Version Bump Pattern
 
 ```js
@@ -140,9 +161,21 @@ const patched  = newEntry + current;   // prepend, never append
 ## Creating a Release Tag (triggers GitHub Actions build)
 
 ```js
-function apiPost(path, body) { /* same as apiPut but method: 'POST' */ }
+function apiPost(path, body) {
+  return new Promise((resolve, reject) => {
+    const b = JSON.stringify(body);
+    const req = https.request({
+      hostname: 'api.github.com', path, method: 'POST',
+      headers: { Authorization: 'token ' + TOKEN, 'Content-Type': 'application/json', 'User-Agent': 'fix/1.0', 'Content-Length': Buffer.byteLength(b) }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(d) })); });
+    req.on('error', reject); req.write(b); req.end();
+  });
+}
 
-async function createTag(headSha, version, message) {
+async function createTag(version, message) {
+  const branch = await apiGet(`/repos/${REPO}/git/ref/heads/main`);
+  const headSha = branch.object.sha;
+
   // Step 1: create annotated tag object
   const tagObj = await apiPost(`/repos/${REPO}/git/tags`, {
     tag: version, message, object: headSha, type: 'commit'
@@ -157,17 +190,17 @@ async function createTag(headSha, version, message) {
   console.log('Tag ref:', ref.status, ref.body.ref ?? ref.body.message);
 }
 
-// Get HEAD SHA
-const branch = await apiGet(`/repos/${REPO}/git/ref/heads/main`);
-await createTag(branch.object.sha, 'v4.4.9', 'Release 4.4.9 — description');
+// Usage:
+await createTag('v4.4.9', 'Release 4.4.9 — description');
 ```
 
 ## Sequence for a Full Release
 
-1. Write patched content to `/tmp/patch_X.js` for each changed file
-2. Run file patches in parallel (`& wait`)
-3. Fetch HEAD SHA → create tag
-4. GitHub Actions auto-builds EXE (~10-15 min), appears in Releases
+1. Check `GITHUB_TOKEN` secret is set (use `environment-secrets` skill if not)
+2. Write patched content to `/tmp/patch_X.js` for each changed file
+3. Run file patches in parallel (`& wait`)
+4. Fetch HEAD SHA → create tag
+5. GitHub Actions auto-builds EXE (~10-15 min), appears in Releases
 
 ## Common Errors
 
@@ -177,3 +210,4 @@ await createTag(branch.object.sha, 'v4.4.9', 'Release 4.4.9 — description');
 | `Fix present: false` after splice | Cyrillic / quote escaping in inline JS | Write script to `/tmp/script.js` with heredoc, run `node /tmp/script.js` |
 | Tag ref 422 "already exists" | Tag was already created | Skip or delete old tag first |
 | `Buffer.from(...).toString('base64')` truncated | `f.content` has `\n` every 60 chars | Always `.replace(/\n/g, '')` before decoding |
+| `process.env.GITHUB_TOKEN` is undefined | Secret not set | Use `environment-secrets` skill to request `GITHUB_TOKEN` |
