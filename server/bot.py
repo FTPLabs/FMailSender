@@ -2134,6 +2134,14 @@ async def msg_upload_file(message: Message, state: FSMContext):
 
     try:
         os.makedirs("downloads", exist_ok=True)
+        # CLEANUP: удаляем старые .exe перед сохранением нового
+        import glob as _glob
+        for _old in _glob.glob(os.path.join("downloads", "*.exe")):
+            try:
+                os.remove(_old)
+                logger.info("Removed old exe: %s", _old)
+            except Exception as _re:
+                logger.warning("Could not remove %s: %s", _old, _re)
         save_path = os.path.join("downloads", fname)
         # BUG-FIX: используем bot.download() — токен не попадает в логи URL
         file_bytes = await bot.download(doc.file_id)
@@ -3370,6 +3378,14 @@ async def web_upload_file(request: Request, api_key: str = Form(""), file: Uploa
     await file.seek(0)
     safe = "".join(c for c in (file.filename or "upload") if c.isalnum() or c in "._-")
     dl_dir = _Path("downloads"); dl_dir.mkdir(exist_ok=True)
+    # CLEANUP: удаляем старые .exe перед сохранением нового
+    import glob as _glob2
+    for _old_f in _glob2.glob(str(dl_dir / "*.exe")):
+        try:
+            _os.remove(_old_f)
+            logger.info("Removed old exe (web): %s", _old_f)
+        except Exception as _re2:
+            logger.warning("Could not remove %s: %s", _old_f, _re2)
     dest = dl_dir / safe
     import asyncio as _asyncio
     def _write_sync():
