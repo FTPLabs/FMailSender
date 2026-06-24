@@ -367,37 +367,17 @@ class SendingScreen(QWidget):
           pause_duration_sec=self.pause_duration_spin.value(),
           max_threads=self.threads_slider.value(),
       )
-      # BUG FIX v4.4.4: только валидные аккаунты (is_active + last_test_ok is not False)
+      # Только проверенные и готовые аккаунты (is_active + last_test_ok is True).
+      # Непроверенные (None) и провалившие проверку (False) не участвуют в рассылке.
       _sendable_accounts = [
           a for a in self._accounts
-          if a.is_active and getattr(a, "last_test_ok", None) is not False
+          if a.is_active and getattr(a, "last_test_ok", None) is True
       ]
       if not _sendable_accounts:
-          QMessageBox.warning(self, "Нет валидных аккаунтов",
-              "Нет аккаунтов готовых к отправке.\nПроверьте аккаунты во вкладке «Аккаунты».")
+          QMessageBox.warning(self, "Нет готовых аккаунтов",
+              "Нет проверенных аккаунтов готовых к рассылке.\n"
+              "Перейдите во вкладку «Аккаунты», выберите аккаунты и нажмите «Проверить».")
           return
-      # FIX БАГ-4: предупреждение о непроверенных аккаунтах перед запуском рассылки
-      _untested = [a for a in _sendable_accounts if getattr(a, "last_test_ok", None) is None]
-      if _untested:
-          _reply = QMessageBox.question(
-              self, "Непроверенные аккаунты",
-              f"{len(_untested)} аккаунт(ов) не проверялись перед рассылкой.\n"
-              f"Непроверенные аккаунты могут завершить отправку с ошибкой.\n\n"
-              f"Рекомендуется сначала запустить проверку во вкладке «Аккаунты».\n\n"
-              f"Всё равно включить непроверенные аккаунты в рассылку?",
-              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-              QMessageBox.StandardButton.No,
-          )
-          if _reply == QMessageBox.StandardButton.No:
-              _sendable_accounts = [
-                  a for a in _sendable_accounts
-                  if getattr(a, "last_test_ok", None) is not None
-              ]
-              if not _sendable_accounts:
-                  QMessageBox.warning(self, "Нет проверенных аккаунтов",
-                      "Нет проверенных аккаунтов для рассылки.\n"
-                      "Проверьте аккаунты во вкладке «Аккаунты» и повторите.")
-                  return
       self._engine = SendingEngine(accounts=_sendable_accounts, config=config, log_queue=self._log_queue)
       self._total = len(self._recipients)
       self._sent = 0
