@@ -473,8 +473,11 @@ def _build_message(
             _body_html = technique_font_stack(_body_html)
             _body_html = technique_nbsp(_body_html)
             _body_html = technique_random_comments(_body_html)
-        except Exception:
-            pass  # уникализация не должна блокировать отправку
+        except Exception as _uq_err:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "Uniqueization failed (sending as-is): %s", _uq_err, exc_info=True
+            )
     # BUG-FIX: используем домен отправителя, не SMTP-хост (RFC 2822)
     _sender_domain = account.email.split("@")[-1] if "@" in account.email else account.host
     msg_id = f"<{uuid.uuid4().hex}@{_sender_domain}>"
