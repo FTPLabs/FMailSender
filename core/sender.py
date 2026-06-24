@@ -1541,6 +1541,67 @@ class SendingEngine:
                   error=f"Сервер разорвал соединение (SMTPServerDisconnected): {_ssd}",
                   account_used=account.email,
               )
+          except OSError as _ose:
+              _ose_msg = str(_ose)
+              if "SOCKS5" in _ose_msg or "CONNECT" in _ose_msg:
+                  try:
+                      _fb_ctx = ssl.create_default_context()
+                      _fb_ctx.check_hostname = False
+                      _fb_ctx.verify_mode = ssl.CERT_NONE
+                      for _p, _s, _t in [
+                          (account.port, account.use_ssl, account.use_tls),
+                          (587, False, True),
+                          (465, True, False),
+                      ]:
+                          try:
+                              if _s:
+                                  _fc = smtplib.SMTP_SSL(account.host, _p, timeout=30, context=_fb_ctx)
+                              else:
+                                  _fc = smtplib.SMTP(account.host, _p, timeout=30)
+                                  _fc.ehlo()
+                                  if _t:
+                                      _fc.starttls(context=_fb_ctx)
+                                      _fc.ehlo()
+                              _tok = _get_oauth_token(account) if _HAS_OAUTH2 else getattr(account, "oauth_token", "")
+                              _ms = frozenset({"outlook.com","hotmail.com","live.com","msn.com","windowslive.com"})
+                              _dom = account.email.split("@")[-1].lower() if "@" in account.email else ""
+                              if _tok and _dom in _ms:
+                                  _fc.docmd("AUTH", "XOAUTH2 " + base64.b64encode(("user=" + account.email + "\x01auth=Bearer " + _tok + "\x01\x01").encode()).decode())
+                              else:
+                                  _fc.login(account.email, account.password)
+                              _fc.send_message(msg)
+                              try: _fc.quit()
+                              except Exception: pass
+                              if self._log_queue:
+                                  import time as _t2
+                                  self._log_queue.put_nowait({"type":"log","level":"warn","message":
+                                      "[" + _t2.strftime("%H:%M:%S") + "] WARNING: " + account.email +
+                                      " proxy-IP blocked by " + account.host + ", sent directly. Replace proxy with residential."})
+                              return SendResult(
+                                  recipient_email=recipient.email,
+                                  success=True,
+                                  account_used=account.email,
+                                  message_id=msg.get("Message-ID", ""),
+                              )
+                          except smtplib.SMTPAuthenticationError:
+                              raise
+                          except Exception:
+                              continue
+                  except smtplib.SMTPAuthenticationError as _sae:
+                      return SendResult(
+                          recipient_email=recipient.email,
+                          success=False,
+                          error=f"Auth error (direct fallback): {_sae.smtp_error!r:.120}",
+                          account_used=account.email,
+                      )
+                  except Exception:
+                      pass
+              return SendResult(
+                  recipient_email=recipient.email,
+                  success=False,
+                  error=f"Proxy IP blocked by SMTP server: {_ose_msg[:120]}. Replace with residential proxy.",
+                  account_used=account.email,
+              )
           except Exception as e:
               return SendResult(
                   recipient_email=recipient.email,
