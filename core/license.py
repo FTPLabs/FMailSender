@@ -47,28 +47,26 @@ LICENSE_VERIFY_URL: str = os.environ.get(
     "LICENSE_VERIFY_URL",
     "https://fmail.shop/v1/verify",  # FIX: HTTPS через fmail.shop (nginx → uvicorn)
 )
-
-OFFLINE_GRACE_HOURS = 72
-ONLINE_CHECK_INTERVAL_H = 24
+# ONLINE-ONLY: офлайн-режим полностью отключён.
+# Приложение требует интернет для каждой проверки лицензии (кэш 5 мин).
+_ONLINE_CACHE_SECONDS: int = 300  # кэш онлайн-проверки — 5 минут
 LICENSE_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "license.dat"
 _HWID_FILE         = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "hwid.dat"
 _HWID_COMPONENTS_FILE = Path(os.environ.get("APPDATA", ".")) / "FMailSender" / "hwid_components.json"
 
 KEY_PREFIX = "FMSND"
 
-# SECURITY FIX: JWT_SECRET требуется для offline-верификации.
-# Без него JWT без подписи будут приняты — это уязвимость.
-_JWT_SECRET_FALLBACK = os.environ.get("JWT_SECRET", "").strip()
-if not _JWT_SECRET_FALLBACK:
-    logger.error(
-        "SECURITY: JWT_SECRET not set — offline JWT verification DISABLED. "
-        "Without it, offline tokens are REJECTED and online check is required. "
-        "Set JWT_SECRET to the same value as the license server for offline support."
-    )
+# JWT_SECRET больше не используется на клиенте (offline отключён).
+# Используется только серверной частью (server/bot.py).
 
 # ── Внутренний кэш HWID ───────────────────────────────────────────────────────
 _hwid_cache: Optional[str] = None
 _hwid_lock = threading.Lock()
+
+# ── Кэш онлайн-проверки лицензии (ONLINE-ONLY) ──────────────────────────────
+_online_check_cache_time: float = 0.0
+_online_check_cache_result: Optional[bool] = None
+_online_check_lock = threading.Lock()
 
 
 
@@ -482,35 +480,11 @@ def _verify_key_online(key: str, hwid: str) -> Optional[bool]:
 
 
 def _schedule_background_verification() -> None:
-    """Раз в ONLINE_CHECK_INTERVAL_H часов проверяет ключ на сервере."""
-
-    def _worker() -> None:
-        time.sleep(30)
-        data = _load_license_data()
-        if not data:
-            return
-        key = data.get("key", "")
-        hwid = data.get("hwid", "")
-        last_verified = data.get("last_verified_online", 0)
-        if time.time() - last_verified < ONLINE_CHECK_INTERVAL_H * 3600:
-            return
-        result = _verify_key_online(key, hwid)
-        if result is False:
-            logger.warning(f"License key {key!r} revoked — clearing local license")
-            try:
-                LICENSE_FILE.unlink(missing_ok=True)
-            except Exception:
-                pass
-        elif result is True:
-            data["last_verified_online"] = time.time()
-            try:
-                _save_license_data(data)
-            except Exception:
-                pass
-
-    threading.Thread(target=_worker, daemon=True).start()
-
-
+    """Устаревшая функция — фоновая проверка не нужна (online-only режим).
+    check_license() делает онлайн-проверку с 5-мин кэшем при каждом вызове.
+    Оставлена для совместимости — ничего не делает.
+    """
+    pass  # no-op: online-only mode handles verification in check_license()
 # ── Активация ─────────────────────────────────────────────────────────────────
 
 def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
@@ -576,9 +550,15 @@ def activate_license(key: str, progress_callback=None) -> Tuple[bool, str]:
 
 def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
     """
-    Returns (is_valid, LicenseInfo | None, message).
-    Проверяет локальный кэш и JWT. При наличии JWT_SECRET — верифицирует подпись.
+    ONLINE-ONLY: всегда верифицирует лицензию через сервер.
+    Офлайн-режим полностью отключён — без интернета работа невозможна.
+
+    Кэш онлайн-ответа: 5 минут (_ONLINE_CACHE_SECONDS) в памяти.
+    После 5 минут — снова идём на сервер.
+    При потере интернета — немедленный отказ (нет grace-period).
     """
+    global _online_check_cache_time, _online_check_cache_result
+
     data = _load_license_data()
     if not data:
         return False, None, "Лицензия не найдена. Введите ключ активации."
@@ -587,77 +567,60 @@ def check_license() -> Tuple[bool, Optional[LicenseInfo], str]:
     if not token:
         return False, None, "Файл лицензии повреждён. Повторите активацию."
 
-    # Верификация JWT
-    if _JWT_SECRET_FALLBACK:
-        try:
-            payload = jwt.decode(
-                token,
-                _JWT_SECRET_FALLBACK,
-                algorithms=["HS256"],
-                options={"verify_exp": True},
-            )
-        except jwt.ExpiredSignatureError:
-            return False, None, "Лицензия истекла. Продлите подписку."
-        except jwt.InvalidTokenError as e:
-            logger.warning(f"JWT verification failed: {e}")
-            return False, None, "Ошибка верификации лицензии. Повторите активацию."
-    else:
-        # JWT_SECRET не задан — обязательна онлайн-верификация (security fix)
-        hwid_check = generate_hwid()
-        key_check = data.get("key", "")
-        online_result = _verify_key_online(key_check, hwid_check)
+    key = data.get("key", "")
+    hwid = generate_hwid()
+
+    # Проверяем кэш (5 минут)
+    with _online_check_lock:
+        cache_age = time.time() - _online_check_cache_time
+        cached = _online_check_cache_result if cache_age < _ONLINE_CACHE_SECONDS else None
+
+    if cached is None:
+        # Кэш устарел — обязательная проверка на сервере
+        online_result = _verify_key_online(key, hwid)
+
+        with _online_check_lock:
+            _online_check_cache_time = time.time()
+            _online_check_cache_result = online_result
+
         if online_result is False:
+            # Ключ отозван — удаляем локальную лицензию
             try:
                 LICENSE_FILE.unlink(missing_ok=True)
             except Exception:
                 pass
             return False, None, "Лицензия отозвана. Обратитесь в поддержку."
-        elif online_result is None:
+
+        if online_result is None:
+            # Нет интернета — БЛОКИРУЕМ (offline-режим отключён)
             return False, None, (
-                "Сервер лицензий недоступен и JWT_SECRET не настроен.\n"
-                "Подключитесь к интернету или задайте JWT_SECRET для offline-режима."
+                "❌ Нет подключения к серверу лицензий.\n"
+                "Приложение работает только при наличии интернета.\n"
+                "Проверьте соединение и повторите попытку."
             )
-        payload = _decode_payload_unverified(token)
-        if not payload:
-            return False, None, "Не удалось декодировать токен лицензии."
+
+        # online_result is True — обновляем timestamp
         data["last_verified_online"] = time.time()
         try:
             _save_license_data(data)
         except Exception:
             pass
 
-    # Проверка grace period (только при JWT_SECRET — offline режим)
-    if _JWT_SECRET_FALLBACK:
-        activated_at = data.get("activated_at", 0)
-        last_online = data.get("last_verified_online", activated_at)
-        hours_offline = (time.time() - last_online) / 3600  # UTC-independent: uses time.time()
-        if hours_offline > OFFLINE_GRACE_HOURS:
-            key_gp = data.get("key", "")
-            hwid_gp = generate_hwid()
-            gp_result = _verify_key_online(key_gp, hwid_gp)
-            if gp_result is False:
-                try:
-                    LICENSE_FILE.unlink(missing_ok=True)
-                except Exception:
-                    pass
-                return False, None, "Лицензия отозвана."
-            elif gp_result is None:
-                return False, None, (
-                    f"Нет связи с сервером более {OFFLINE_GRACE_HOURS} ч.\n"
-                    f"Подключитесь к интернету для проверки лицензии."
-                )
-            else:
-                data["last_verified_online"] = time.time()
-                try:
-                    _save_license_data(data)
-                except Exception:
-                    pass
+    elif cached is False:
+        # Кэш содержит отзыв
+        try:
+            LICENSE_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False, None, "Лицензия отозвана. Обратитесь в поддержку."
+
+    # Декодируем payload (сервер уже верифицировал подпись — не делаем это локально)
+    payload = _decode_payload_unverified(token)
+    if not payload:
+        return False, None, "Не удалось декодировать токен. Повторите активацию."
 
     license_info = LicenseInfo(payload)
     if license_info.is_expired:
-        return False, None, f"Лицензия истекла {license_info.expires_at.strftime('%d.%m.%Y')}."
-
-    # Фоновая онлайн-проверка
-    _schedule_background_verification()
+        return False, None, f"Лицензия истекла {license_info.expires_at.strftime('%d.%m.%Y')}. Продлите подписку."
 
     return True, license_info, f"Лицензия активна: {license_info.plan} до {license_info.expires_at.strftime('%d.%m.%Y')}"
