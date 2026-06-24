@@ -1069,6 +1069,7 @@ class AccountsScreen(QWidget):
         self._import_worker = None
         self._proxy_check_worker = None
         self._test_cancel_event = threading.Event()
+        self._hide_invalid_accounts = True  # скрывать невалидные по умолчанию
         self._setup_ui()
         self._load()
 
@@ -1112,6 +1113,15 @@ class AccountsScreen(QWidget):
           self.cancel_test_btn.clicked.connect(self._cancel_test)
           self.cancel_test_btn.setVisible(False)
           toolbar.addWidget(self.cancel_test_btn)
+
+          self._show_invalid_btn = QPushButton("Показать невалидные")
+          self._show_invalid_btn.setObjectName("btn_secondary")
+          self._show_invalid_btn.setToolTip(
+              "Показать/скрыть аккаунты с неверным логином/паролем.\n"
+              "Они не участвуют в рассылке ни при каких условиях."
+          )
+          self._show_invalid_btn.clicked.connect(self._toggle_invalid_visibility)
+          toolbar.addWidget(self._show_invalid_btn)
 
           layout.addLayout(toolbar)
 
@@ -1178,7 +1188,12 @@ class AccountsScreen(QWidget):
 
     def _refresh_table(self):
           self.table.setRowCount(0)
+          _hide_invalid = getattr(self, '_hide_invalid_accounts', True)
           for acc in self._accounts:
+              # FIX v4.5.3: невалидные аккаунты (подтверждённые ошибкой аутентификации) скрываются.
+              # Это исключает их из вида — они не используются в рассылке ни при каких условиях.
+              if _hide_invalid and getattr(acc, 'last_test_ok', None) is False:
+                  continue  # скрываем — неверный логин/пароль
               row = self.table.rowCount()
               self.table.insertRow(row)
               self.table.setRowHeight(row, 32)
@@ -1248,17 +1263,20 @@ class AccountsScreen(QWidget):
 
           valid_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is True)
           invalid_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is False)
-          untested_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is None)
+          proxy_err_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is None and a.last_test_msg)
+          untested_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is None and not a.last_test_msg)
           sendable = sum(
               1 for a in self._accounts
               if a.is_active and getattr(a, 'last_test_ok', None) is True
           )
+          _hidden_info = f" | Скрыто невалидных: {invalid_count}" if (self._hide_invalid_accounts and invalid_count > 0) else ""
           self.status_label.setText(
               f"Всего: {len(self._accounts)} | "
               f"Валидных: {valid_count} | "
-              f"Невалидных: {invalid_count} | "
-              f"Не проверено: {untested_count} | "
-              f"Готово к рассылке: {sendable}"
+              f"Не проверено: {untested_count}"
+              + (f" | Ошибка прокси: {proxy_err_count}" if proxy_err_count > 0 else "")
+              + _hidden_info +
+              f" | К рассылке: {sendable}"
           )
 
     def _update_contextual_buttons(self):
@@ -1399,7 +1417,7 @@ class AccountsScreen(QWidget):
         if not self._accounts:
             return
 
-        MAX_CONCURRENT = 8  # одновременных проверок (оптимальный баланс скорости и rate-limit)
+        MAX_CONCURRENT = 30  # FIX v4.5.3: увеличено с 8 до 30 — в 3-4x быстрее валидация
 
         self._test_cancel_event.clear()
         self.cancel_test_btn.setVisible(True)
@@ -1440,17 +1458,45 @@ class AccountsScreen(QWidget):
                 def on_result(ok, msg, r=row):
                     running[0] -= 1
 
+                    # FIX v4.5.3: различаем ошибку аутентификации vs ошибку прокси/соединения.
+                    # Плохой прокси НЕ означает неверный пароль — аккаунт остаётся активным.
+                    _msg_lower = (msg or "").lower()
+                    _is_auth_fail = not ok and any(
+                        kw in _msg_lower for kw in [
+                            "неверный логин", "неверный пароль", "password", "invalid credentials",
+                            "oauth2 отклонён", "oauth2 rejected", "535", "534", "530",
+                        ]
+                    )
+                    _is_proxy_err = not ok and not _is_auth_fail  # соединение / прокси
+
                     # Обновить статус — колонка 1 (единственная колонка статуса)
                     si = self.table.item(r, 1)
                     if si:
-                        si.setText("Валидный" if ok else "Ошибка")
-                        si.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
+                        if ok:
+                            si.setText("Валидный")
+                            si.setForeground(QColor(Colors.SUCCESS))
+                        elif _is_auth_fail:
+                            si.setText("Невалидный")
+                            si.setForeground(QColor(Colors.ERROR))
+                        else:
+                            si.setText("Ошибка прокси")
+                            si.setForeground(QColor("#f59e0b"))  # amber
                         si.setToolTip(msg)
 
                     if 0 <= r < len(self._accounts):
-                        self._accounts[r].last_test_ok = ok
+                        if ok:
+                            self._accounts[r].last_test_ok = True
+                            self._accounts[r].is_active = True
+                        elif _is_auth_fail:
+                            # Достоверно неверные учётные данные → деактивировать
+                            self._accounts[r].last_test_ok = False
+                            self._accounts[r].is_active = False
+                        else:
+                            # Ошибка прокси/соединения — пароль может быть верным.
+                            # last_test_ok=None означает "не проверено" → аккаунт остаётся
+                            # в статусе «Не проверено», is_active не меняется.
+                            self._accounts[r].last_test_ok = None
                         self._accounts[r].last_test_msg = msg
-                        self._accounts[r].is_active = ok
 
                     completed[0] += 1
                     done = completed[0]
@@ -1761,10 +1807,20 @@ class AccountsScreen(QWidget):
                         si.setForeground(QColor(Colors.SUCCESS if ok else Colors.ERROR))
                         si.setToolTip(msg)
 
+                    _ml = (msg or "").lower()
+                    _auth_fail = not ok and any(kw in _ml for kw in [
+                        "неверный логин", "неверный пароль", "password", "535", "534", "oauth2 отклонён"
+                    ])
                     if 0 <= r < len(self._accounts):
-                        self._accounts[r].last_test_ok = ok
+                        if ok:
+                            self._accounts[r].last_test_ok = True
+                            self._accounts[r].is_active = True
+                        elif _auth_fail:
+                            self._accounts[r].last_test_ok = False
+                            self._accounts[r].is_active = False
+                        else:
+                            self._accounts[r].last_test_ok = None  # proxy/conn error
                         self._accounts[r].last_test_msg = msg
-                        self._accounts[r].is_active = ok
 
                     completed[0] += 1
                     done = completed[0]
@@ -1804,6 +1860,15 @@ class AccountsScreen(QWidget):
         self.test_all_btn.setText("Проверить все")
         self.cancel_test_btn.setVisible(False)
         self.status_label.setText(f"Проверка отменена | Аккаунтов: {len(self._accounts)}")
+
+    def _toggle_invalid_visibility(self) -> None:
+        """Переключает отображение невалидных аккаунтов (last_test_ok=False)."""
+        self._hide_invalid_accounts = not self._hide_invalid_accounts
+        if self._hide_invalid_accounts:
+            self._show_invalid_btn.setText("Показать невалидные")
+        else:
+            self._show_invalid_btn.setText("Скрыть невалидные")
+        self._refresh_table()
 
     def _save_config(self) -> None:
         """Сохранить аккаунты в файл по выбору пользователя."""

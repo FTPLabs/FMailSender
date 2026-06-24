@@ -408,6 +408,16 @@ class SmtpAccount:
                 self.sent_this_hour += 1
                 return True
             return False
+
+    def decrement_sent(self) -> None:
+        """Откатывает инкремент счётчика если отправка в итоге провалилась.
+        Вызывается из _send_with_acct_delay при ошибке — лимиты не сжигаются впустую.
+        """
+        with self._lock:
+            if self.sent_today > 0:
+                self.sent_today -= 1
+            if self.sent_this_hour > 0:
+                self.sent_this_hour -= 1
   
 
 
@@ -1120,6 +1130,8 @@ class SendingEngine:
                         self._log_queue.put_nowait({"type": "log", "level": "ok", "message":
                             f"[{time.strftime('%H:%M:%S')}] {recipient.email}: успех с {account.email} (попытка {_attempt + 1})"})
                     return _result
+                # FIX v4.5.3: откатываем инкремент при ошибке — лимит не сжигается впустую
+                account.decrement_sent()
                 _last_result = _result
                 if _attempt < _MAX_RETRIES - 1 and self._log_queue:
                     self._log_queue.put_nowait({"type": "log", "level": "warn", "message":
