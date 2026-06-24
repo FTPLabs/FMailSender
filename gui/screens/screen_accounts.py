@@ -1023,32 +1023,36 @@ class _CountryWorker(QThread):
                     except Exception:
                         continue
 
-              # SOCKS5/SOCKS4 proxy
+              # SOCKS5/SOCKS4 proxy — FIX: используем pure-stdlib SOCKS5 (как ProxyCheckWorker)
+              # вместо PySocks, который часто не установлен. PySocks при ImportError
+              # молча проваливался в fallback по IP шлюза → все прокси показывали
+              # страну шлюза (напр. Netherlands для gw.foxyproxy.online) вместо exit-IP.
             elif "socks" in scheme:
                 try:
-                    import socks
-                    stype = socks.SOCKS5 if "socks5" in scheme else socks.SOCKS4
-                    s = socks.socksocket()
-                    s.set_proxy(stype, host, port, True, uname or None, upass or None)
-                    s.settimeout(7)
-                    s.connect(("ip-api.com", 80))
-                    s.send(b"GET /json/?fields=status,country,countryCode HTTP/1.0\r\n"
-                           b"Host: ip-api.com\r\nUser-Agent: FMailSender/3.1\r\n\r\n")
+                    s = ProxyCheckWorker._socks5_connect_raw(
+                        host, port, "ip-api.com", 80,
+                        username=uname, password=upass, timeout=7,
+                    )
+                    s.sendall(
+                        b"GET /json/?fields=status,country,countryCode HTTP/1.0\r\n"
+                        b"Host: ip-api.com\r\nUser-Agent: FMailSender/4.0\r\n\r\n"
+                    )
                     raw = b""
                     while True:
                         c = s.recv(4096)
                         if not c:
                             break
                         raw += c
+                        if len(raw) > 32768:
+                            break
                     s.close()
                     if b"\r\n\r\n" in raw:
-                        body = raw.split(b"\r\n\r\n", 1)[1].decode("utf-8","replace")
+                        body = raw.split(b"\r\n\r\n", 1)[1].decode("utf-8", "replace").strip()
                         d = json.loads(body)
-                        cc = d.get("countryCode","")
-                        ctry = d.get("country", cc)
-                        return f"{_CountryWorker._cc_flag(cc)} {ctry}".strip()
-                except ImportError:
-                    pass
+                        if d.get("status") == "success":
+                            cc = d.get("countryCode", "")
+                            ctry = d.get("country", cc)
+                            return f"{_CountryWorker._cc_flag(cc)} {ctry}".strip()
                 except Exception:
                     pass
 
@@ -1227,18 +1231,38 @@ class AccountsScreen(QWidget):
               self.table.setItem(row, 1, status_item)
 
               # Колонка 2: Прокси (страна из кэша — не теряется при _refresh_table)
-              _proxy_raw = (acc.proxy or "").strip()
+              _proxy_raw  = (acc.proxy or "").strip()
+              _proxy_pool = [p for p in (getattr(acc, "proxy_list", None) or []) if p.strip()]
+              _pool_size  = len(_proxy_pool)
               _cached_country = _proxy_country_cache.get(_proxy_raw, "") if _proxy_raw else ""
-              if _cached_country and _cached_country != "—":
+              if _pool_size > 1:
+                  # Пул из нескольких прокси — показываем страны всех
+                  _countries = [c for c in (
+                      _proxy_country_cache.get(p.strip(), "") for p in _proxy_pool
+                  ) if c and c != "—"]
+                  _flag_str = " | ".join(_countries) if _countries else ""
+                  _proxy_display = f"Пул: {_pool_size} прокси" + (f"  {_flag_str}" if _flag_str else "")
+                  _tooltip = "\n".join(_proxy_pool)
+              elif _cached_country and _cached_country != "—":
                   _proxy_display = f"{_cached_country} | {_proxy_raw}"
+                  _tooltip = _proxy_raw
               else:
                   _proxy_display = _proxy_raw if _proxy_raw else "—"
+                  _tooltip = _proxy_raw or "Прокси не назначен"
               proxy_item = QTableWidgetItem(_proxy_display)
               proxy_item.setForeground(QColor("#6C8EBF" if _proxy_raw else Colors.TEXT_MUTED))
-              proxy_item.setToolTip(_proxy_raw or "Прокси не назначен")
+              proxy_item.setToolTip(_tooltip)
               self.table.setItem(row, 2, proxy_item)
-              # Запускаем определение страны ТОЛЬКО если ещё нет в кэше
-              if _proxy_raw and not _cached_country:
+              # Запускаем определение страны для ВСЕХ прокси в пуле, чтобы кэш заполнился
+              if _pool_size > 1:
+                  for _pi, _px in enumerate(_proxy_pool):
+                      _px = _px.strip()
+                      if _px and not _proxy_country_cache.get(_px):
+                          QTimer.singleShot(
+                              100 + row * 80 + _pi * 300,
+                              lambda r=row, p=_px: self._fetch_proxy_country(r, p),
+                          )
+              elif _proxy_raw and not _cached_country:
                   QTimer.singleShot(100 + row * 80, lambda r=row, p=_proxy_raw: self._fetch_proxy_country(r, p))
 
           valid_count = sum(1 for a in self._accounts if getattr(a, 'last_test_ok', None) is True)
