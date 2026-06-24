@@ -666,17 +666,23 @@ async def delete_all_licenses() -> int:
 
 
 async def reset_all_trials() -> int:
-  """Сбрасывает trial_used_at для ВСЕХ пользователей (админ-команда).
-  После этого каждый пользователь сможет снова взять триал.
-  Returns: количество сброшенных записей.
+  """Сбрасывает trial_used_at для ВСЕХ пользователей и отзывает их trial-лицензии.
+  После этого каждый пользователь сможет снова взять бесплатный триал.
+  Returns: количество сброшенных записей (пользователей).
   """
   async with _db() as db:
+      # 1. Сбрасываем флаг использования триала
       cur = await db.execute(
           "UPDATE users SET trial_used_at='' WHERE trial_used_at IS NOT NULL AND trial_used_at != ''"
       )
-      await db.commit()
       count = cur.rowcount
-      logger.info("reset_all_trials: сброшено триалов для %d пользователей", count)
+      # 2. Деактивируем все существующие trial-лицензии, чтобы _get_active_license
+      #    не блокировал повторное получение триала
+      await db.execute(
+          "UPDATE licenses SET is_active=0 WHERE plan='trial' AND is_active=1"
+      )
+      await db.commit()
+      logger.info("reset_all_trials: сброшено %d пользователей, trial-лицензии деактивированы", count)
       return count
 
 
