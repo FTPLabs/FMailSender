@@ -2923,14 +2923,12 @@ async def health():
 
 
 
-
-
-  def _verify_admin_request(request: "Request", api_key: str = "") -> bool:
-      """Проверяет admin-аутентификацию из cookie-сессии или api_key в форме.
-      Поддерживает оба способа для обратной совместимости.
-      """
-      sid = request.cookies.get("admin_sid", "")
-      return _verify_admin_session(sid) or _verify_admin_key(api_key)
+def _verify_admin_request(request: "Request", api_key: str = "") -> bool:
+    """Проверяет admin-аутентификацию из cookie-сессии или api_key в форме.
+    Поддерживает оба способа для обратной совместимости.
+    """
+    sid = request.cookies.get("admin_sid", "")
+    return _verify_admin_session(sid) or _verify_admin_key(api_key)
 
 # ─── Публичная статус-страница ───────────────────────────────────────────────
 
