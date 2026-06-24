@@ -1643,8 +1643,20 @@ async def _choose_provider_or_pay(event, state: FSMContext, hwid: str, plan_id: 
     price = await db.get_plan_price(plan_id)
     user_id = event.from_user.id if hasattr(event, "from_user") else event.message.from_user.id
     balance = await db.get_user_balance(user_id)
-    await state.update_data(plan_id=plan_id, hwid=hwid)
+    await state.update_data(plan_id=plan_id, hwid=hwid, promo_code="", discounted_price=0.0)
     await state.set_state(BuyFlow.waiting_promo)
+
+    # Проверяем сохранённый промокод пользователя
+    pending_code = await db.get_user_pending_promo(user_id)
+    auto_promo_line = ""
+    if pending_code:
+        valid, final_price, promo_msg, used_code = await db.validate_promo_code(pending_code, price, user_id)
+        if valid:
+            await state.update_data(promo_code=used_code, discounted_price=final_price)
+            auto_promo_line = f"\n🎫 Промокод <b>{used_code}</b> сохранён — {promo_msg[2:].strip()}"
+        else:
+            await db.clear_user_pending_promo(user_id)
+
     rows = []
     if balance >= price:
         rows.append([InlineKeyboardButton(
@@ -1656,7 +1668,7 @@ async def _choose_provider_or_pay(event, state: FSMContext, hwid: str, plan_id: 
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     bal_line = f"\n💰 Ваш баланс: <b>${balance:.2f} USDT</b>" if balance > 0 else ""
     text = (
-        f"📦 <b>{plan['name']}</b> — ${price:.2f} USDT{bal_line}\n\n"
+        f"📦 <b>{plan['name']}</b> — ${price:.2f} USDT{bal_line}{auto_promo_line}\n\n"
         f"🎫 Есть промокод? Отправь его сейчас или нажми «Пропустить»."
     )
     if isinstance(event, CallbackQuery):
@@ -1773,6 +1785,7 @@ async def cb_check_pay(query: CallbackQuery, state: FSMContext):
         )
         return
     await state.clear()
+    await _mark_promo_used_if_pending(payment.get("telegram_id", 0) or query.from_user.id)
     text = (
         f"✅ <b>Оплата подтверждена!</b>\n\n"
         f"📦 Тариф: <b>{PLANS.get(payment['plan'], {}).get('name', payment['plan'])}</b>\n\n"
@@ -3507,6 +3520,7 @@ async def _poll_pending_payments():
                             # уже обработан (например ручной проверкой) — без повторного уведомления
                             continue
                         user_id = payment.get("telegram_id", 0)
+                        await _mark_promo_used_if_pending(user_id)
                         plan_name = PLANS.get(payment.get("plan", ""), {}).get("name", payment.get("plan", ""))
                         try:
                             await bot.send_message(
@@ -3599,8 +3613,9 @@ async def msg_promo_code(message: Message, state: FSMContext):
     if plan_id not in PLANS:
         await state.clear()
         return
+    user_id = message.from_user.id
     base_price = await db.get_plan_price(plan_id)
-    valid, final_price, msg, used_code = await db.validate_promo_code(code, base_price)
+    valid, final_price, msg, used_code = await db.validate_promo_code(code, base_price, user_id)
     if not valid:
         await message.answer(
             f"{msg}\nОтправь другой код или нажми Пропустить:",
@@ -3610,7 +3625,8 @@ async def msg_promo_code(message: Message, state: FSMContext):
             ]),
         )
         return
-    await db.use_promo_code(used_code)
+    # Сохраняем промокод как «ожидающий» — списывается только при успешной оплате
+    await db.set_user_pending_promo(user_id, used_code)
     await state.update_data(promo_code=used_code, discounted_price=final_price)
     providers = pay.enabled_for_new_payments()
     provider_key = providers[0].key if providers else "crypto"
@@ -3626,6 +3642,8 @@ async def cb_skip_promo(query: CallbackQuery, state: FSMContext):
         return
     data = await state.get_data()
     hwid = data.get("hwid", "")
+    promo_code = data.get("promo_code", "")
+    discounted_price = data.get("discounted_price", 0.0)
     await state.set_state(None)
     providers = pay.enabled_for_new_payments()
     if len(providers) > 1:
@@ -3638,7 +3656,7 @@ async def cb_skip_promo(query: CallbackQuery, state: FSMContext):
         )
     else:
         provider_key = providers[0].key if providers else "crypto"
-        await _proceed_to_payment(query, state, hwid, plan_id, provider_key)
+        await _proceed_to_payment(query, state, hwid, plan_id, provider_key, promo_code, discounted_price)
 
 
 @dp.callback_query(F.data.startswith("balance_pay_plan:"))
@@ -3664,6 +3682,7 @@ async def cb_balance_pay_plan(query: CallbackQuery, state: FSMContext):
         await db.add_user_balance(user_id, price, reason="refund: license error")
         await query.answer("Ошибка создания лицензии. Баланс возвращён.", show_alert=True)
         return
+    await _mark_promo_used_if_pending(user_id)
     plan = PLANS[plan_id]
     exp = lic.get("expires_at", "")[:10]
     await send_or_edit(
@@ -3716,6 +3735,7 @@ async def cb_pay_balance(query: CallbackQuery, state: FSMContext):
         await db.add_user_balance(user_id, price, reason="refund: license error")
         await query.answer("Ошибка создания лицензии. Баланс возвращён.", show_alert=True)
         return
+    await _mark_promo_used_if_pending(user_id)
     plan = PLANS.get(plan_id, {})
     exp = license_data.get("expires_at", "")[:10]
     await send_or_edit(
@@ -3727,6 +3747,19 @@ async def cb_pay_balance(query: CallbackQuery, state: FSMContext):
         reply_markup=kb_main(is_admin(query.from_user.id), is_mod_user=is_moderator(query.from_user.id)),
     )
     logger.info("Balance invoice pay tg=%d plan=%s price=%.2f", user_id, plan_id, price)
+
+
+async def _mark_promo_used_if_pending(user_id: int) -> None:
+    """Списывает сохранённый промокод пользователя после успешной оплаты."""
+    if not user_id:
+        return
+    try:
+        code = await db.get_user_pending_promo(user_id)
+        if code:
+            await db.use_promo_code(code, user_id)
+            await db.clear_user_pending_promo(user_id)
+    except Exception as e:
+        logger.warning("_mark_promo_used_if_pending user=%d: %s", user_id, e)
 
 
 # ─── Admin: Promo Codes ──────────────────────────────────────────────────────

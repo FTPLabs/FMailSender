@@ -135,8 +135,22 @@ CREATE TABLE IF NOT EXISTS user_balance (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS promo_code_usage (
+  code TEXT NOT NULL,
+  telegram_id INTEGER NOT NULL,
+  used_at TEXT NOT NULL,
+  PRIMARY KEY (code, telegram_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_pending_promo (
+  telegram_id INTEGER PRIMARY KEY,
+  code TEXT NOT NULL,
+  set_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_promo_codes_code ON promo_codes(code);
 CREATE INDEX IF NOT EXISTS idx_user_balance_telegram ON user_balance(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_promo_usage_tg ON promo_code_usage(telegram_id);
 """
 
 
@@ -162,6 +176,9 @@ async def _migrate_db() -> None:
         "CREATE TABLE IF NOT EXISTS promo_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE NOT NULL, discount_type TEXT NOT NULL DEFAULT 'percent', discount_value REAL NOT NULL DEFAULT 10.0, max_uses INTEGER DEFAULT 0, used_count INTEGER DEFAULT 0, is_active INTEGER DEFAULT 1, expires_at TEXT DEFAULT '', created_at TEXT NOT NULL, note TEXT DEFAULT '')",
         "CREATE TABLE IF NOT EXISTS user_balance (telegram_id INTEGER PRIMARY KEY, balance_usdt REAL NOT NULL DEFAULT 0.0, updated_at TEXT NOT NULL)",
         "CREATE INDEX IF NOT EXISTS idx_promo_codes_code ON promo_codes(code)",
+        "CREATE TABLE IF NOT EXISTS promo_code_usage (code TEXT NOT NULL, telegram_id INTEGER NOT NULL, used_at TEXT NOT NULL, PRIMARY KEY (code, telegram_id))",
+        "CREATE TABLE IF NOT EXISTS user_pending_promo (telegram_id INTEGER PRIMARY KEY, code TEXT NOT NULL, set_at TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_promo_usage_tg ON promo_code_usage(telegram_id)",
     ]
   async with _db() as conn:
       for _sql in _migrations:
@@ -937,13 +954,26 @@ async def get_promo_code(code: str) -> Optional[dict]:
           return None
 
 
-async def validate_promo_code(code: str, price: float) -> tuple:
-  """Проверяет промокод и возвращает (valid, final_price, message, promo_code_str)."""
+async def _check_user_promo_used(code: str, telegram_id: int) -> bool:
+  """Проверяет, использовал ли пользователь этот промокод ранее."""
+  async with _db() as conn:
+      async with conn.execute(
+          "SELECT 1 FROM promo_code_usage WHERE code=? AND telegram_id=?",
+          (code.upper(), telegram_id),
+      ) as cur:
+          return await cur.fetchone() is not None
+
+
+async def validate_promo_code(code: str, price: float, telegram_id: int = 0) -> tuple:
+  """Проверяет промокод и возвращает (valid, final_price, message, promo_code_str).
+  telegram_id — если передан, проверяется лимит «1 раз на пользователя»."""
   promo = await get_promo_code(code)
   if not promo:
       return False, price, "❌ Промокод не найден или неактивен.", ""
   if promo['max_uses'] > 0 and promo['used_count'] >= promo['max_uses']:
       return False, price, "❌ Лимит использований промокода исчерпан.", ""
+  if telegram_id and await _check_user_promo_used(code, telegram_id):
+      return False, price, "❌ Вы уже использовали этот промокод.", ""
   if promo['expires_at']:
       try:
           exp = datetime.fromisoformat(promo['expires_at'].replace('Z', '+00:00'))
@@ -964,12 +994,50 @@ async def validate_promo_code(code: str, price: float) -> tuple:
   return True, final_price, msg, promo['code']
 
 
-async def use_promo_code(code: str) -> None:
-  """Увеличивает счётчик использований промокода."""
+async def use_promo_code(code: str, telegram_id: int = 0) -> None:
+  """Увеличивает счётчик использований и записывает per-user факт использования."""
+  ts = _now()
   async with _db() as conn:
       await conn.execute(
           "UPDATE promo_codes SET used_count = used_count + 1 WHERE code=?",
           (code.upper(),)
+      )
+      if telegram_id:
+          await conn.execute(
+              "INSERT OR IGNORE INTO promo_code_usage (code, telegram_id, used_at) VALUES (?,?,?)",
+              (code.upper(), telegram_id, ts),
+          )
+      await conn.commit()
+
+
+async def set_user_pending_promo(telegram_id: int, code: str) -> None:
+  """Сохраняет промокод пользователя как «ожидающий применения»."""
+  ts = _now()
+  async with _db() as conn:
+      await conn.execute(
+          """INSERT INTO user_pending_promo (telegram_id, code, set_at)
+             VALUES (?,?,?)
+             ON CONFLICT(telegram_id) DO UPDATE SET code=excluded.code, set_at=excluded.set_at""",
+          (telegram_id, code.upper(), ts),
+      )
+      await conn.commit()
+
+
+async def get_user_pending_promo(telegram_id: int) -> Optional[str]:
+  """Возвращает сохранённый промокод пользователя или None."""
+  async with _db() as conn:
+      async with conn.execute(
+          "SELECT code FROM user_pending_promo WHERE telegram_id=?", (telegram_id,)
+      ) as cur:
+          row = await cur.fetchone()
+          return row[0] if row else None
+
+
+async def clear_user_pending_promo(telegram_id: int) -> None:
+  """Удаляет сохранённый промокод пользователя."""
+  async with _db() as conn:
+      await conn.execute(
+          "DELETE FROM user_pending_promo WHERE telegram_id=?", (telegram_id,)
       )
       await conn.commit()
 
