@@ -3533,17 +3533,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 </div>
 <div class="footer">Обновлено: {now_utc} UTC &nbsp;·&nbsp; <a href="/health" style="color:#667eea">JSON API</a></div>
 </body></html>"""
-    _resp = HTMLResponse(content=html)
-    _resp.set_cookie(
-        key="admin_sid",
-        value=sid,
-        httponly=True,
-        secure=True,
-        samesite="strict",
-        max_age=_ADMIN_SESSION_TTL,
-        path="/",
-    )
-    return _resp
+    return HTMLResponse(content=html)
 
 
 # ─── Entry Point ─────────────────────────────────────────────────────────────
