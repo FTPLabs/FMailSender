@@ -792,7 +792,7 @@ async def cb_cabinet(query: CallbackQuery):
     try:
         licenses = await db.get_license_by_telegram(user.id)
         hwid = await db.get_user_hwid(user.id)
-    balance_usdt = await db.get_user_balance(user.id)
+        balance_usdt = await db.get_user_balance(user.id)
     except Exception as e:
         logger.error("DB error in cb_cabinet: %s", e)
         await send_or_edit(query, "⚠️ Ошибка БД. Попробуй позже.", reply_markup=kb_back_main())
