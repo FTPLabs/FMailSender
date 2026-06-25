@@ -1463,10 +1463,17 @@ class SendingEngine:
 
               except smtplib.SMTPAuthenticationError as _sae:
                   # Неверные учётные данные — нет смысла пробовать другие прокси
+                  # FIX v4.5.6: правильные аргументы _parse_auth_error (раньше передавался объект исключения → TypeError)
+                  _sae_raw = _sae.smtp_error
+                  _sae_detail = (
+                      _sae_raw.decode("utf-8", errors="replace")
+                      if isinstance(_sae_raw, (bytes, bytearray))
+                      else str(_sae_raw)
+                  )
                   return SendResult(
                       recipient_email=recipient.email,
                       success=False,
-                      error=f"{_parse_auth_error(_sae)}",
+                      error=_parse_auth_error(account.host, _sae.smtp_code, _sae_detail),
                       account_used=account.email,
                   )
 
@@ -1540,9 +1547,16 @@ class SendingEngine:
                                   account_used=account.email, message_id=msg.get("Message-ID", ""),
                               )
                           except smtplib.SMTPAuthenticationError as _sae_alt:
+                              # FIX v4.5.6: decode smtp_error bytes properly (was !r:.120 — invalid format spec)
+                              _alt_raw = _sae_alt.smtp_error
+                              _alt_detail = (
+                                  _alt_raw.decode("utf-8", errors="replace")
+                                  if isinstance(_alt_raw, (bytes, bytearray))
+                                  else str(_alt_raw)
+                              )
                               return SendResult(
                                   recipient_email=recipient.email, success=False,
-                                  error=f"Неверный логин/пароль: {_sae_alt.smtp_error!r:.120}",
+                                  error=_parse_auth_error(account.host, _sae_alt.smtp_code, _alt_detail),
                                   account_used=account.email,
                               )
                           except Exception:
