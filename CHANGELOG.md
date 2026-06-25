@@ -1,3 +1,20 @@
+## [4.5.6] — 2026-06-25
+
+### Исправлены баги
+
+#### _parse_auth_error — критичный TypeError при ошибке авторизации [КРИТИЧНЫЙ]
+- **Симптом**: при любом прокси появлялась одна и та же ошибка "провалился" /
+  "ошибка [TypeError]" вместо "неверный логин/пароль"
+- **Причина**: _parse_auth_error(host, smtp_code, detail) вызывался как
+  _parse_auth_error(_sae) — один аргумент вместо трёх. TypeError всплывал через
+  asyncio.gather как BaseException, маскировался под "все прокси провалились".
+- **Исправление**: правильное извлечение host/smtp_code/detail из SMTPAuthenticationError
+
+#### Invalid f-string format spec в fallback [КРИТИЧНЫЙ]
+- **Симптом**: {_sae_alt.smtp_error!r:.120} — некорректный format spec вызывал
+  ValueError при форматировании; ошибка auth в fallback-ветке уходила в исключение
+- **Исправление**: явный decode bytes + вызов _parse_auth_error с правильными аргументами
+
 ## [4.5.5] — 2026-06-25
 
 ### Контекст
