@@ -1601,13 +1601,64 @@ class SendingEngine:
                                   f"все SMTP-порты → пробуем следующий прокси"})
                           continue  # → следующий прокси из пула
                   else:
-                      # Сетевая ошибка (таймаут, отказ TCP) → следующий прокси
-                      _last_err = f"Сетевая ошибка через {_p.hostname}: {_ose_msg[:100]}"
-                      if self._log_queue and len(_candidates) > 1:
-                          self._log_queue.put_nowait({"type": "log", "level": "warn", "message":
-                              f"[{time.strftime('%H:%M:%S')}] {account.email}: ошибка прокси "
-                              f"{_p.hostname}: {_ose_msg[:60]} → пробуем следующий"})
-                      continue  # → следующий прокси из пула
+                        # FIX v5.1: SSL-таймаут на 465 → 587 STARTTLS через тот же прокси
+                        _is_ssl_timeout = (
+                            account.use_ssl and account.port == 465 and
+                            any(x in _ose_msg.lower() for x in ("handshake", "ssl", "timed out", "eof"))
+                        )
+                        if _is_ssl_timeout:
+                            if self._log_queue:
+                                self._log_queue.put_nowait({"type": "log", "level": "warn", "message":
+                                    f"[{time.strftime('%H:%M:%S')}] {account.email}: port 465 SSL недоступен"
+                                    f" через прокси — автоматически переключаюсь на 587 STARTTLS"})
+                            try:
+                                _s587_raw = _proxy_connect(_p, account.host, 587, timeout=30.0,
+                                                           auto_detect=_proxy_auto_send)
+                                _s587_ctx = _ssl_mod.create_default_context()
+                                _s587_ctx.check_hostname = False
+                                _s587_ctx.verify_mode = _ssl_mod.CERT_NONE
+                                _s587_r = _s587_raw
+                                def _make_s587(rs):
+                                    class _C587(smtplib.SMTP):
+                                        def _get_socket(self, h, p2, t2): return rs
+                                    return _C587
+                                _s587_conn = _make_s587(_s587_r)(account.host, 587, timeout=30)
+                                _s587_conn.ehlo()
+                                _s587_conn.starttls(context=_s587_ctx)
+                                _s587_conn.ehlo()
+                                _tok587 = _get_oauth_token(account) if _HAS_OAUTH2 else getattr(account, "oauth_token", "")
+                                _ms587 = frozenset({"outlook.com","hotmail.com","live.com","msn.com","windowslive.com",
+                                                     "outlook.de","hotmail.de","live.de","outlook.fr","hotmail.fr",
+                                                     "outlook.ru","hotmail.ru","live.ru"})
+                                _dom587 = account.email.split("@")[-1].lower() if "@" in account.email else ""
+                                if _tok587 and _dom587 in _ms587:
+                                    _s587_conn.docmd("AUTH", "XOAUTH2 " + base64.b64encode(
+                                        ("user=" + account.email + "\x01auth=Bearer " + _tok587 + "\x01\x01").encode()
+                                    ).decode())
+                                else:
+                                    _s587_conn.login(account.email, account.password)
+                                _s587_conn.send_message(msg)
+                                try: _s587_conn.quit()
+                                except Exception: pass
+                                account.port = 587; account.use_ssl = False; account.use_tls = True
+                                return SendResult(
+                                    recipient_email=recipient.email, success=True,
+                                    account_used=account.email, message_id=msg.get("Message-ID", ""),
+                                )
+                            except smtplib.SMTPAuthenticationError as _s587_ae:
+                                _re587 = _s587_ae.smtp_error
+                                _de587 = _re587.decode("utf-8", "replace") if isinstance(_re587, bytes) else str(_re587)
+                                _last_err = f"AUTH 587: {_de587[:120]}"
+                            except Exception as _s587_e:
+                                _last_err = f"587 STARTTLS: {str(_s587_e)[:100]}"
+                            continue
+                        # Сетевая ошибка (таймаут, отказ TCP) → следующий прокси
+                        _last_err = f"Сетевая ошибка через {_p.hostname}: {_ose_msg[:100]}"
+                        if self._log_queue and len(_candidates) > 1:
+                            self._log_queue.put_nowait({"type": "log", "level": "warn", "message":
+                                f"[{time.strftime('%H:%M:%S')}] {account.email}: ошибка прокси "
+                                f"{_p.hostname}: {_ose_msg[:60]} → пробуем следующий"})
+                        continue  # → следующий прокси из пула
 
               except Exception as _any:
                   _last_err = str(_any)[:120]
