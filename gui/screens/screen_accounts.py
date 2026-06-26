@@ -1420,7 +1420,9 @@ class AccountsScreen(QWidget):
 
         @pyqtSlot(bool, str)
         def on_result(ok, msg, r=row):
-            # BUG FIX v4.5.4: различаем ошибку аутентификации vs ошибку прокси
+            # FIX v5.2.3: НЕ вызываем _refresh_table() на каждый результат —
+            # это пересобирает всю таблицу (O(N)) и вызывает лаг при параллельных проверках.
+            # Вместо этого: обновляем только конкретную строку, планируем отложенный refresh.
             try:
                 if 0 <= r < len(self._accounts):
                     _ml = (msg or "").lower()
@@ -1437,10 +1439,35 @@ class AccountsScreen(QWidget):
                         self._accounts[r].last_test_ok = None  # прокси/сеть — не меняем is_active
                     self._accounts[r].last_test_msg = msg
                     save_accounts(self._accounts)
+
+                    # Обновляем только строку r — без полной пересборки таблицы
+                    _ltok = self._accounts[r].last_test_ok
+                    _ltmsg = self._accounts[r].last_test_msg or ""
+                    _sent = getattr(self._accounts[r], "sent_today", 0)
+                    _lim = self._accounts[r].daily_limit
+                    _si = self.table.item(r, 1)
+                    if _si:
+                        if _ltok is True:
+                            _si.setText(f"Валидный  {_sent}/{_lim}")
+                            _si.setForeground(QColor(Colors.SUCCESS))
+                            _si.setToolTip(f"Аккаунт работает\nОтправлено сегодня: {_sent} из {_lim}")
+                        elif _ltok is False:
+                            _fl = (_ltmsg or "Неверный логин или пароль").split('\n')[0]
+                            _si.setText(f"{_fl[:55]}")
+                            _si.setForeground(QColor(Colors.ERROR))
+                            _si.setToolTip(_ltmsg or "Аккаунт недействителен")
+                        else:
+                            _si.setText("Ошибка прокси")
+                            _si.setForeground(QColor("#f59e0b"))
+                            _si.setToolTip(_ltmsg or "Ошибка соединения")
+
+                    # Пересобираем таблицу отложенно — не чаще раза в 600мс
+                    if not getattr(self, "_refresh_pending", False):
+                        self._refresh_pending = True
+                        QTimer.singleShot(600, self._deferred_refresh_after_test)
+
             except RuntimeError:
                 return
-            # Обновляем таблицу (кэш страны сохранится — не теряется)
-            self._refresh_table()
             # BUG FIX v4.4.4: уведомляем SendingScreen об обновлённом аккаунте
             try:
                 self.accounts_changed.emit(self._accounts)
@@ -1456,6 +1483,17 @@ class AccountsScreen(QWidget):
         w.result_ready.connect(on_result)
         self._test_workers.append(w)
         w.start()
+
+    def _deferred_refresh_after_test(self) -> None:
+        """Вызывается отложенно (QTimer 600мс) после _test_single — делает полный refresh таблицы.
+        FIX v5.2.3: вместо вызова _refresh_table() в каждом on_result (O(N) × кол-во потоков)
+        объединяем множественные обновления в одно, снижая нагрузку на GUI при пакетной проверке.
+        """
+        self._refresh_pending = False
+        # Если сейчас идёт _test_all (он сам управляет refresh) — пропускаем
+        if not self.test_all_btn.isEnabled():
+            return
+        self._refresh_table()
 
     def _fetch_proxy_country(self, row: int, proxy_url: str) -> None:
         """Запускает CountryWorker для обновления флага страны в колонке Прокси (2).

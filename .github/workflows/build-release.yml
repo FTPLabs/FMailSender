@@ -67,6 +67,7 @@ jobs:
           retention-days: 90
 
       - name: Create GitHub Release
+        id: release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
@@ -84,3 +85,102 @@ jobs:
           prerelease: false
           make_latest: true
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate patch manifest
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: python
+        run: |
+          import os, sys, hashlib, json
+          sys.path.insert(0, '.')
+          from core._version import APP_VERSION
+          exe_path = 'dist/FMailSender.exe'
+          with open(exe_path, 'rb') as f:
+              data = f.read()
+          sha256 = hashlib.sha256(data).hexdigest()
+          size = len(data)
+          tag = f'v{APP_VERSION}'
+          base_url = f'https://github.com/FTPLabs/FMailSender/releases/download/{tag}'
+          manifest = {
+              'version': APP_VERSION,
+              'tag': tag,
+              'files': [
+                  {
+                      'path': 'FMailSender.exe',
+                      'sha256': sha256,
+                      'url': f'{base_url}/FMailSender.exe',
+                      'size': size
+                  }
+              ]
+          }
+          with open(f'dist/patch_manifest_v{APP_VERSION}.json', 'w') as f:
+              json.dump(manifest, f, indent=2)
+          print(f'Patch manifest created for {tag}')
+
+      - name: Upload patch manifest to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/patch_manifest_v${{ steps.version.outputs.version }}.json
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy version.json to fmail.shop
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PASS: ${{ secrets.VPS_PASS }}
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          TAG="v${VER}"
+          BASE="https://github.com/FTPLabs/FMailSender/releases/download/${TAG}"
+          EXE_SIZE=$(stat -c%s dist/FMailSender.exe)
+          JSON=$(cat <<EOF
+          {
+            "version": "${VER}",
+            "tag": "${TAG}",
+            "release_name": "FMail Sender ${VER}",
+            "body": "$(cat CHANGELOG.md | head -20 | tr -d '"' | tr '\n' ' ')",
+            "html_url": "https://github.com/FTPLabs/FMailSender/releases/tag/${TAG}",
+            "exe_url": "${BASE}/FMailSender.exe",
+            "exe_size": ${EXE_SIZE},
+            "patch_manifest_url": "${BASE}/patch_manifest_${TAG}.json",
+            "published_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          )
+          # Install sshpass and deploy
+          choco install sshpass -y --no-progress 2>nul || true
+          pip install paramiko
+          python - <<PYEOF
+          import paramiko, json, os
+          host = os.environ['VPS_HOST']
+          user = os.environ['VPS_USER']
+          password = os.environ['VPS_PASS']
+          client = paramiko.SSHClient()
+          client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+          client.connect(host, username=user, password=password, timeout=15)
+          ver = '${VER}'
+          tag = '${TAG}'
+          base = '${BASE}'
+          exe_size = int('${EXE_SIZE}')
+          import subprocess, time
+          ts = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+          data = {
+              'version': ver,
+              'tag': tag,
+              'release_name': f'FMail Sender {ver}',
+              'body': f'Исправления: верификация аккаунтов, мобильные прокси, тихое обновление.',
+              'html_url': f'https://github.com/FTPLabs/FMailSender/releases/tag/{tag}',
+              'exe_url': f'{base}/FMailSender.exe',
+              'exe_size': exe_size,
+              'patch_manifest_url': f'{base}/patch_manifest_{tag}.json',
+              'published_at': ts,
+          }
+          content = json.dumps(data, ensure_ascii=False, indent=2)
+          cmd = f"echo '{content}' > /var/www/html/version.json && chmod 644 /var/www/html/version.json"
+          stdin, stdout, stderr = client.exec_command(f"cat > /var/www/html/version.json << 'JSONEOF'\n{content}\nJSONEOF\nchmod 644 /var/www/html/version.json")
+          stdout.read(); stderr.read()
+          print(f'version.json deployed for {tag}')
+          client.close()
+          PYEOF

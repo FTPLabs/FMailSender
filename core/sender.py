@@ -1427,6 +1427,8 @@ class SendingEngine:
               "outlook.es","hotmail.es","outlook.it","hotmail.it","outlook.nl",
           })
           _last_err = "Нет доступных прокси"
+          # FIX v5.2.3: счётчик ретраев SMTPServerDisconnected per-proxy (мобильные прокси ротируют IP)
+          _sd_retry: dict[str, int] = {}
 
           # ── Основной цикл ротации ─────────────────────────────────────────
           for _proxy_candidate in _candidates:
@@ -1513,7 +1515,25 @@ class SendingEngine:
                   continue  # → следующий прокси из пула
 
               except smtplib.SMTPServerDisconnected as _ssd:
-                  # SMTP-сервер сбросил соединение (подозрительный IP прокси)
+                  # SMTP-сервер сбросил соединение.
+                  # FIX v5.2.3: мобильные прокси ротируют IP при каждом подключении.
+                  # Повторяем тот же прокси до 2 раз (3 попытки итого) с задержкой 1.5с —
+                  # новый ротационный IP с высокой вероятностью не будет заблокирован.
+                  # Трекер _sd_retry[proxy] хранится вне объекта исключения
+                  # (исключение всегда новый объект при каждом attempt).
+                  _sd_n = _sd_retry.get(_proxy_candidate, 0)
+                  if _sd_n < 2:
+                      _sd_retry[_proxy_candidate] = _sd_n + 1
+                      if self._log_queue:
+                          self._log_queue.put_nowait({"type": "log", "level": "warn", "message":
+                              f"[{time.strftime('%H:%M:%S')}] {account.email}: "
+                              f"сервер сбросил соединение через {_p.hostname} "
+                              f"(попытка {_sd_n + 1}/3, жду IP-ротацию...)"})
+                      time.sleep(1.5)
+                      # Вставляем тот же прокси в позицию 0 — после continue итератор
+                      # окажется на следующей позиции, которая теперь == тот же прокси.
+                      _candidates.insert(0, _proxy_candidate)
+                      continue
                   _last_err = f"Прокси {_p.hostname} сброшен сервером: {_ssd}"
                   if self._log_queue and len(_candidates) > 1:
                       self._log_queue.put_nowait({"type": "log", "level": "warn", "message":

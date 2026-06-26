@@ -25,6 +25,7 @@ from core._version import APP_VERSION
 logger = logging.getLogger("updater")
 
 GITHUB_API_URL = "https://api.github.com/repos/FTPLabs/FMailSender/releases/latest"
+VERSION_CHECK_URL = "https://fmail.shop/version.json"  # публичный эндпоинт (не зависит от приватности репо)
 CHECK_INTERVAL_SEC = 3600  # раз в час
 
 # Каталог патчей рядом с EXE (или рядом с main.py в dev-режиме)
@@ -66,10 +67,48 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def check_for_update(timeout: float = 10.0) -> Optional[UpdateInfo]:
+def _check_fmail_shop(timeout: float) -> Optional[UpdateInfo]:
     """
-    Проверяет GitHub Releases на наличие новой версии.
-    Возвращает UpdateInfo или None.
+    Первичный эндпоинт: https://fmail.shop/version.json
+    Не зависит от того, публичный репо или приватный.
+    Формат: {"version":"5.2.3","tag":"v5.2.3","release_name":"...","body":"...",
+              "html_url":"...","exe_url":"...","exe_size":0,"patch_manifest_url":"..."}
+    """
+    try:
+        resp = requests.get(
+            VERSION_CHECK_URL,
+            timeout=timeout,
+            headers={"User-Agent": f"FMailSender/{APP_VERSION}"},
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        ver = data.get("version", "")
+        if not ver:
+            return None
+        if _parse_version(ver) <= _parse_version(APP_VERSION):
+            return None
+        tag = data.get("tag", f"v{ver}")
+        return UpdateInfo(
+            version=ver,
+            tag_name=tag,
+            release_name=data.get("release_name", f"FMail Sender {ver}"),
+            body=data.get("body", ""),
+            html_url=data.get("html_url", ""),
+            download_url=data.get("exe_url", ""),
+            download_size=int(data.get("exe_size", 0)),
+            patch_manifest_url=data.get("patch_manifest_url", ""),
+            published_at=data.get("published_at", ""),
+        )
+    except Exception as e:
+        logger.debug("fmail.shop version check failed: %s", e)
+        return None
+
+
+def _check_github_api(timeout: float) -> Optional[UpdateInfo]:
+    """
+    Резервный эндпоинт: GitHub Releases API.
+    Работает только если репо публичный или установлен GITHUB_TOKEN.
     """
     try:
         _gh_token = os.environ.get("GITHUB_TOKEN", "")
@@ -92,21 +131,16 @@ def check_for_update(timeout: float = 10.0) -> Optional[UpdateInfo]:
             return None
 
         assets = data.get("assets", [])
-
-        # Полный EXE
         exe_asset = next(
             (a for a in assets if a["name"].endswith(".exe") and "patch" not in a["name"].lower()),
             None,
         )
         exe_url = exe_asset["browser_download_url"] if exe_asset else data.get("html_url", "")
         exe_size = exe_asset["size"] if exe_asset else 0
-
-        # Patch manifest JSON
         manifest_asset = next(
             (a for a in assets if "patch_manifest" in a["name"] and a["name"].endswith(".json")),
             None,
         )
-
         info = UpdateInfo(
             version=tag.lstrip("v"),
             tag_name=tag,
@@ -117,15 +151,24 @@ def check_for_update(timeout: float = 10.0) -> Optional[UpdateInfo]:
             download_size=exe_size,
             published_at=data.get("published_at", ""),
         )
-
         if manifest_asset:
             info.patch_manifest_url = manifest_asset["browser_download_url"]
-
         return info
-
     except Exception as e:
-        logger.debug("Update check failed: %s", e)
+        logger.debug("GitHub API update check failed: %s", e)
         return None
+
+
+def check_for_update(timeout: float = 10.0) -> Optional[UpdateInfo]:
+    """
+    Проверяет наличие новой версии.
+    Сначала — fmail.shop/version.json (работает всегда, репо может быть приватным).
+    Если не ответил — GitHub Releases API (резерв).
+    """
+    info = _check_fmail_shop(timeout)
+    if info is not None:
+        return info
+    return _check_github_api(timeout)
 
 
 def fetch_patch_manifest(info: UpdateInfo, timeout: float = 10.0) -> bool:
@@ -268,21 +311,36 @@ class Downloader(threading.Thread):
 
 def apply_update_windows(new_exe_path: Path) -> None:
     """
-    Запускает bat-скрипт который заменяет запущенный EXE на новый.
-    (Windows only)
+    Заменяет запущенный EXE на новый через PowerShell без окна.
+    (Windows only) — silent: никаких CMD-окон, только прогресс-бар в диалоге приложения.
     """
+    import subprocess
     current_exe = Path(sys.executable)
-    batch = current_exe.parent / "_update_apply.bat"
-    bat_content = (
-        "@echo off\r\n"
-        "timeout /t 2 /nobreak >nul\r\n"
-        f'copy /Y "{new_exe_path}" "{current_exe}"\r\n'
-        f'del "{new_exe_path}"\r\n'
-        f'start "" "{current_exe}"\r\n'
-        'del "%~f0"\r\n'
+
+    # PowerShell скрипт: ждём 2с → копируем → запускаем → удаляем скрипт
+    ps_script = current_exe.parent / "_update_apply.ps1"
+    ps_content = (
+        "Start-Sleep -Seconds 2\r\n"
+        f'Copy-Item -Path "{new_exe_path}" -Destination "{current_exe}" -Force\r\n'
+        f'Remove-Item -Path "{new_exe_path}" -Force -ErrorAction SilentlyContinue\r\n'
+        f'Start-Process -FilePath "{current_exe}"\r\n'
+        f'Remove-Item -Path "$PSCommandPath" -Force -ErrorAction SilentlyContinue\r\n'
     )
-    batch.write_text(bat_content, encoding="utf-8")
-    os.startfile(str(batch))
+    ps_script.write_text(ps_content, encoding="utf-8")
+
+    # Запускаем PowerShell полностью скрыто: нет CMD окна, нет мерцания
+    CREATE_NO_WINDOW = 0x08000000
+    subprocess.Popen(
+        [
+            "powershell.exe",
+            "-NonInteractive",
+            "-WindowStyle", "Hidden",
+            "-ExecutionPolicy", "Bypass",
+            "-File", str(ps_script),
+        ],
+        creationflags=CREATE_NO_WINDOW,
+        close_fds=True,
+    )
     sys.exit(0)
 
 
