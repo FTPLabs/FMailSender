@@ -1,3 +1,39 @@
+## [4.6.0] — 2026-06-26
+
+### Исправлены баги
+
+#### Microsoft SMTP AUTH отключён — понятное сообщение [КРИТИЧНЫЙ]
+- **Симптом**: ошибка 535 с текстом `SmtpClientAuthentication is disabled` — пользователь не понимал что делать
+- **Причина**: Microsoft отключил Basic Auth и SMTP AUTH по умолчанию для новых аккаунтов
+- **Исправление**: добавлено детальное русское сообщение с инструкцией по включению SMTP AUTH + ссылка aka.ms/smtp_auth_disabled
+
+#### OAuth2 refresh_token — автоматическое обновление access_token [КРИТИЧНЫЙ]
+- **Симптом**: аккаунты с refresh_token не авторизовались (использовался пустой access_token)
+- **Причина**: `_get_oauth_token` не вызывал `oauth2_refresh.refresh_ms_token`
+- **Исправление**: `_get_oauth_token` теперь автоматически обновляет access_token через refresh_token при его наличии
+
+#### OAuth2 client_id — исправлен порядок перебора [КРИТИЧНЫЙ]
+- **Симптом**: OAuth2 токены не обновлялись несмотря на рабочий refresh_token
+- **Причина**: `d3590ed6` (MSEdge) шёл первым — он не поддерживает consumer аккаунты
+- **Исправление**: `9e5f94bc` (Outlook iOS) теперь первый — подтверждённо работает
+
+#### OAuth2 dual endpoint — login.live.com + microsoftonline.com [УЛУЧШЕНО]
+- Добавлен fallback на `login.live.com/oauth20_token.srf` (v1 endpoint)
+- Увеличивает совместимость с разными типами Microsoft аккаунтов
+
+#### QPushButton RuntimeError при закрытии диалога [КРИТИЧНЫЙ]
+- **Симптом**: краш `RuntimeError: wrapped C++ object of type QPushButton has been deleted`
+- **Исправление**: `try/except RuntimeError` в `_poll_send` callback
+
+#### SOCKS5 CONNECT код 2 — автоматический fallback [КРИТИЧНЫЙ]
+- **Симптом**: все аккаунты провалились с `SOCKS5 CONNECT отклонён: запрещено`
+- **Причина**: прокси блокировал SMTP порты; вместо fallback выбрасывалось исключение
+- **Исправление**: автоматический переход на прямое соединение в `_proxy_connect` и inline SOCKS5
+
+### Прокси
+- Подтверждено: `socks5://107.174.114.18:14371` — **полностью рабочий** (все порты 25/465/587 открыты)
+- Причина провала аккаунтов — не прокси, а отключённый SMTP AUTH на стороне Microsoft
+
 ## [4.5.6] — 2026-06-25
 
 ### Исправлены баги
