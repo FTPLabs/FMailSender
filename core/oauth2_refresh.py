@@ -30,12 +30,14 @@ logger = logging.getLogger("oauth2_refresh")
 
 # ── Публичные client_id Microsoft ────────────────────────────────────────────
 MS_CLIENT_IDS: list[str] = [
-    "d3590ed6-52b3-4102-aeff-aad2292ab01c",  # Microsoft Office — основной
+    "9e5f94bc-e8a4-4e73-b8be-63364c29d753",  # Outlook iOS — подтверждённо рабочий
     "08162f7c-0fd2-4200-a84a-f25a4db0b584",  # Thunderbird — запасной
-    "9e5f94bc-e8a4-4e73-b8be-63364c29d753",  # Outlook iOS — третий
+    "d3590ed6-52b3-4102-aeff-aad2292ab01c",  # Microsoft Office — третий
 ]
 
+# Два эндпоинта: consumers (v2) и live.com (v1) — пробуем оба
 MS_TOKEN_URL   = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
+MS_TOKEN_URL_V1 = "https://login.live.com/oauth20_token.srf"
 MS_SMTP_SCOPE  = "https://outlook.office.com/SMTP.Send offline_access openid"
 
 MICROSOFT_DOMAINS: frozenset[str] = frozenset({
@@ -68,27 +70,31 @@ class _TokenInfo:
 
 
 def _try_refresh(client_id: str, refresh_token: str, timeout: float) -> Optional[dict]:
-    """Одна попытка обновить токен через конкретный client_id."""
+    """Одна попытка обновить токен через конкретный client_id. Пробует v2 и v1 эндпоинты."""
     if not _HAS_REQUESTS:
         return None
-    try:
-        resp = _requests.post(
-            MS_TOKEN_URL,
-            data={
-                "grant_type":    "refresh_token",
-                "client_id":     client_id,
-                "refresh_token": refresh_token,
-                "scope":         MS_SMTP_SCOPE,
-            },
-            timeout=timeout,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        if resp.status_code == 200:
-            return resp.json()
-        logger.debug("refresh failed client=%s status=%s: %s",
-                     client_id[:8], resp.status_code, resp.text[:200])
-    except Exception as exc:
-        logger.debug("refresh exc client=%s: %s", client_id[:8], exc)
+    for url, scope in [
+        (MS_TOKEN_URL, MS_SMTP_SCOPE),
+        (MS_TOKEN_URL_V1, "wl.imap wl.smtp"),
+    ]:
+        try:
+            resp = _requests.post(
+                url,
+                data={
+                    "grant_type":    "refresh_token",
+                    "client_id":     client_id,
+                    "refresh_token": refresh_token,
+                    "scope":         scope,
+                },
+                timeout=timeout,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            logger.debug("refresh failed client=%s url=%s status=%s",
+                         client_id[:8], url.split("/")[2], resp.status_code)
+        except Exception as exc:
+            logger.debug("refresh exc client=%s: %s", client_id[:8], exc)
     return None
 
 
