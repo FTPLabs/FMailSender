@@ -49,7 +49,20 @@ try:
 except ImportError:
     _HAS_OAUTH2 = False
     def _get_oauth_token(account) -> str:
-        return getattr(account, "oauth_token", "") or ""
+        """Получает OAuth2 access_token; авто-обновляет через refresh_token."""
+        _at = getattr(account, "access_token", "") or getattr(account, "oauth_token", "") or ""
+        _rt = getattr(account, "refresh_token", "") or ""
+        if not _at and _rt and _HAS_OAUTH2:
+            try:
+                from core.oauth2_refresh import refresh_ms_token
+                info = refresh_ms_token(account.email, _rt, timeout=15.0)
+                if info:
+                    account.access_token = info.access_token
+                    account.oauth_token  = info.access_token
+                    return info.access_token
+            except Exception:
+                pass
+        return _at
     def _is_ms_domain(email: str) -> bool:
         return email.split("@")[-1].lower() in {
             "outlook.com","hotmail.com","live.com","msn.com","windowslive.com",
@@ -562,10 +575,20 @@ def _parse_auth_error(host: str, smtp_code: int, detail: str) -> str:
 
     # Microsoft / Outlook / Hotmail
     if any(s in h for s in ["outlook", "hotmail", "live.com", "office365", "microsoft"]):
-        if "5.7.139" in d or "basic authentication is disabled" in d:
-            return ("Microsoft: базовая аутентификация отключена.\n"
-                    "Решение: account.microsoft.com → Безопасность → App Password.")
-        if "535" in d or "5.7.3" in d:
+        if "5.7.139" in d or "basic authentication is disabled" in d or "smtpclientauthentication is disabled" in d or "5.7.138" in d:
+        ("Microsoft: SMTP AUTH отключён для этого ящика.
+"
+                    "Ошибка: SmtpClientAuthentication is disabled.
+"
+                    "Решение:
+"
+                    "  1. Зайдите в Outlook.com → Настройки → Почта → Синхронизация
+"
+                    "  2. Включите 'SMTP AUTH' для ящика
+"
+                    "  3. Или используйте OAuth2 (добавьте refresh_token к аккаунту)
+"
+                    "Ссылка: https://aka.ms/smtp_auth_disabled")        if "535" in d or "5.7.3" in d:
             return ("Microsoft: неверный пароль или нужен App Password.\n"
                     "Решение: создайте App Password на account.microsoft.com.")
 
