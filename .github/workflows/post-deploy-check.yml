@@ -2,7 +2,7 @@ name: Post-Deploy Bot Checker
 
 on:
   workflow_run:
-    workflows: ["Auto Deploy"]
+    workflows: ["Auto Deploy to VPS"]
     types: [completed]
   workflow_dispatch:
     inputs:
