@@ -1081,7 +1081,8 @@ class ComposeScreen(QWidget):
                 def _poll_send():
                     if t.is_alive():
                         QTimer.singleShot(300, _poll_send)
-                    else:
+                        return
+                    try:
                         send_btn.setEnabled(True)
                         send_btn.setText("Отправить тест автоматически")
                         if send_result[0] is True:
@@ -1092,6 +1093,8 @@ class ComposeScreen(QWidget):
                             check_btn.setEnabled(True)
                         else:
                             status_lbl.setText(f"<span style=\"color:#EF4444\">Ошибка отправки:</span> {send_result[0]}")
+                    except RuntimeError:
+                        pass  # Виджет удалён (диалог закрыт во время отправки)
 
                 QTimer.singleShot(300, _poll_send)
 
