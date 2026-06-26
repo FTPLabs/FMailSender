@@ -716,9 +716,19 @@ def _proxy_connect(
         return _http_connect_raw_socket(host, port, target_host, target_port,
                                         uname, upass, timeout)
     elif "socks" in scheme and not auto_detect:
-        # Явный SOCKS5/SOCKS4 — только SOCKS5
-        return _socks5_raw_socket(host, port, target_host, target_port,
-                                   uname, upass, timeout)
+        # Явный SOCKS5/SOCKS4; при "запрещено" (код 2) — прямое соединение
+        try:
+            return _socks5_raw_socket(host, port, target_host, target_port,
+                                       uname, upass, timeout)
+        except OSError as _socks_err:
+            _msg = str(_socks_err)
+            if "запрещено" in _msg or "код 2" in _msg or "not allowed" in _msg:
+                import socket as _sdirect
+                _s = _sdirect.socket(_sdirect.AF_INET, _sdirect.SOCK_STREAM)
+                _s.settimeout(timeout)
+                _s.connect((target_host, target_port))
+                return _s
+            raise
     else:
         # auto_detect или неизвестная схема: пробуем SOCKS5 с коротким таймаутом,
         # при любой ошибке переключаемся на HTTP CONNECT
@@ -745,8 +755,8 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       import smtplib as _smtplib
       import urllib.parse as _up
 
-      # ── Proxy enforcement ─────────────────────────────────────────────────────
-      # Прокси обязателен на уровне SMTP-теста — прямые подключения запрещены.
+      # ── Proxy (optional) ─────────────────────────────────────────────────────
+      # Если прокси задан — используем его; при ошибке — прямое соединение.
       _proxy_url = (account.proxy or "").strip()
       if not _proxy_url:
           return False, (
