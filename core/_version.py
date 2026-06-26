@@ -1,3 +1,2 @@
 APP_VERSION = "5.1.0"
-  APP_NAME = "FMail Sender"
-  
+APP_NAME = "FMail Sender"
