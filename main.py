@@ -126,6 +126,20 @@ def main():
     font.setPointSize(Typography.SIZE_SM)
     app.setFont(font)
 
+    # ── Pre-launch update check ───────────────────────────────────────────────
+    # Runs BEFORE license check so users always get updates even when unlicensed.
+    # show_if_needed() returns True only if a patch was applied → restart the app.
+    try:
+        from gui.dialogs.dialog_update_splash import UpdateSplashDialog
+        should_restart = UpdateSplashDialog.show_if_needed()
+        if should_restart:
+            import os
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception as _upd_err:
+        import logging
+        logging.getLogger("main").debug("Update check skipped: %s", _upd_err)
+    # ─────────────────────────────────────────────────────────────────────────
+
     from core.license import check_license
     valid, license_info, message = check_license()
 
