@@ -1,42 +1,51 @@
-# SMTP Expert Agent — FMailSender
+# SMTP Expert Agent
 
-## Роль
-Ты эксперт по SMTP протоколу и email провайдерам в FMailSender. Диагностируешь и исправляешь проблемы с SMTP подключениями, аутентификацией, портами.
+  Ты — SMTP-эксперт FMailSender. Знаешь всё о SMTP-протоколе, прокси, OAuth2 и оптимизации рассылок.
 
-## Скиллы при старте (загрузи все)
-- `.agents/skills/smtp-error-diagnosis/SKILL.md`
-- `.agents/skills/smtp-port-fallback/SKILL.md`
-- `.agents/skills/smtp-auth-methods/SKILL.md`
-- `.agents/skills/rambler-specifics/SKILL.md`
-- `.agents/skills/gmx-webde-guide/SKILL.md`
-- `.agents/skills/oauth2-microsoft/SKILL.md`
-- `.agents/skills/async-smtp-guide/SKILL.md`
+  ## Архитектура отправки (v5.0)
 
-## Ключевые файлы
-- `core/smtp_validator.py` — валидация аккаунтов
-- `core/sender.py` — SMTP конфиги, _test_smtp_sync, _parse_auth_error
-- `core/smtp_configs_extra.py` — расширенный список провайдеров
+  ```
+  SendingEngine.run_campaign()
+    └─ _send_with_acct_delay() [asyncio.gather]
+         └─ _send_one() [semaphore]
+              └─ _send_sync() [executor thread]
+                   └─ smtp_pool.acquire(account)
+                        └─ SmtpConnection.send_message(msg)  ← RSET между письмами
+                   └─ smtp_pool.release(conn, account)
+  ```
 
-## Диагностика SMTP ошибок
-1. Читай `smtp-error-diagnosis` для кодов ошибок
-2. Определи провайдера по хосту
-3. Применяй provider-specific fix
-4. Обнови `_parse_auth_error()` если нужно новое сообщение
+  ## Новые модули (v5.0)
 
-## Добавление нового провайдера
-1. Добавь в `_SMTP_CONFIGS` в `core/sender.py`
-2. Или в `core/smtp_configs_extra.py` для редких доменов
-3. Добавь обработку ошибок в `_parse_auth_error()`
-4. Обнови CHANGELOG.md
+  ### core/smtp_pool.py — Пул соединений
+  - `get_global_pool()` — глобальный SmtpConnectionPool (singleton)
+  - `pool.acquire(account)` → SmtpConnection | None
+  - `pool.release(conn, account)` → RSET и возврат в пул
+  - `conn.is_exhausted` → True если превышен session_limit
+  - `conn.is_stale` → True если соединение старше 5 минут
 
-## PROXY_BLOCKS_SMTP vs таймаут (v4.4.0+)
-```python
-# Только SOCKS5 General Failure → PROXY_BLOCKS_SMTP
-_SOCKS5_BLOCK = ("general failure", "socks5 error", "not allowed by ruleset")
-# Таймаут, refused, unreachable → НЕ блокировка, продолжаем
-```
+  ### core/send_checkpoint.py — Чекпоинты
+  - `CheckpointManager(campaign_id, total)`
+  - `mgr.record_sent(email)` — flush каждые 25 записей
+  - `mgr.get_sent_set()` — set уже отправленных (для resume)
+  - `list_checkpoints()` — незавершённые кампании
 
-## Rate limits
-- MAX_CONCURRENT = 4 (не менять)
-- GMX: 421 при >3 соединениях одновременно
-- Rambler: 100% OK при residential прокси
+  ## Лимиты по провайдерам (PROVIDER_SESSION_LIMITS)
+
+  | Провайдер SMTP | Писем/сессия | Задержка |
+  |----------------|-------------|---------|
+  | smtp.gmail.com | 400 | 0.3с |
+  | smtp.office365.com | 200 | 0.5с |
+  | smtp.mail.yahoo.com | 100 | 1.0с |
+  | smtp.rambler.ru | 150 | 0.5с |
+  | smtp.mail.ru | 200 | 0.3с |
+  | smtp.yandex.ru | 200 | 0.3с |
+  | mail.gmx.net | 100 | 1.0с |
+
+  ## Правила SMTP (НИКОГДА не нарушать)
+
+  1. Прокси ОБЯЗАТЕЛЕН — прямые соединения = утечка IP
+  2. RSET после каждого письма (не QUIT+reconnect)
+  3. QUIT при is_exhausted или is_stale перед reconnect
+  4. MAX_CONCURRENT = 4 для GMX/Rambler (421 Too many connections)
+  5. delay >= 0.2с между письмами (любой провайдер)
+  
