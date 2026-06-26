@@ -1,51 +1,36 @@
 ---
-name: agent-roles
-description: Описание всех специализированных агентов FMailSender — кто за что отвечает, как активировать параллельную работу. Читай ПЕРВЫМ при многоагентной задаче.
----
+  name: agent-roles
+  description: Роли агентов FMailSender — кто за что отвечает. Активируй при настройке multi-agent workflow.
+  ---
 
-# Agent Roles — FMailSender Multi-Agent System
+  # Agent Roles — FMailSender
 
-## Доступные агенты
+  ## Основные агенты
 
-| Агент | Файл | Специализация |
-|-------|------|--------------|
-| Architect | `.agents/prompts/architect.md` | Архитектурные решения, рефакторинг |
-| GUI Agent | `.agents/prompts/gui-agent.md` | PyQt6 UI, дизайн, виджеты |
-| SMTP Expert | `.agents/prompts/smtp-expert.md` | SMTP протокол, провайдеры |
-| Proxy Expert | `.agents/prompts/proxy-expert.md` | Прокси, сетевые протоколы |
-| Code Reviewer | `.agents/prompts/code-reviewer.md` | Качество кода, code review |
-| Security Agent | `.agents/prompts/security-agent.md` | Безопасность, секреты |
-| Tester | `.agents/prompts/tester.md` | QA, тесты, регрессии |
-| DevOps | `.agents/prompts/devops-agent.md` | Сборка, CI/CD, релизы |
-| Debugger | `.agents/prompts/debugger.md` | Отладка сложных проблем |
-| Orchestrator | `.agents/prompts/orchestrator.md` | Координация агентов |
+  | Агент | Файл промпта | Задача |
+  |-------|-------------|-------|
+  | Orchestrator | orchestrator.md | Координирует остальных агентов |
+  | SMTP Expert | smtp-expert.md | Всё о SMTP, прокси, OAuth2, пуле соединений |
+  | Optimizer | optimizer-agent.md | Производительность, 10к+ рассылки |
+  | Debugger | debugger.md | Диагностика ошибок |
+  | Security Agent | security-agent.md | Секреты, лицензия, прокси-безопасность |
+  | GUI Agent | gui-agent.md | PyQt6 интерфейс |
+  | DevOps Agent | devops-agent.md | Сборка, деплой, сервер |
 
-## Когда какой агент использовать
+  ## Новые модули (v5.0)
 
-**Новая фича GUI** → GUI Agent + Code Reviewer
-**SMTP ошибки** → SMTP Expert + Debugger (параллельно)
-**Прокси проблемы** → Proxy Expert (основной) + Debugger
-**Релиз** → DevOps (основной) + Security Agent + Code Reviewer
-**Рефакторинг** → Architect → Code Reviewer → Tester
-**Баг в production** → Debugger → SMTP/Proxy Expert (по контексту)
+  - **core/smtp_pool.py** — пул SMTP-соединений (5-10x быстрее для 10к+)
+  - **core/send_checkpoint.py** — чекпоинты кампаний (resume при крэше)
 
-## Параллельная работа
+  ## Разделение ответственности
 
-Агенты могут работать параллельно если их области не пересекаются:
-- GUI Agent + SMTP Expert → можно параллельно (разные файлы)
-- Code Reviewer + Security Agent → можно (читают, не пишут)
-- Tester + DevOps → нельзя (Tester тестирует то что DevOps собирает)
+  - SMTP Expert: smtp_pool, smtp_validator, sender._send_sync
+  - Optimizer: CampaignConfig оптимизация, send_checkpoint, performance-guide skill
+  - GUI Agent: экраны, PyQt6, сигналы/слоты
+  - Security Agent: proxy_url валидация, license.py, SECRET guard
+  - DevOps: GitHub Actions, nginx, systemd service
 
-## Загрузка всех скиллов при старте
+  ## Правило для всех агентов
 
-При начале новой сессии загружай скиллы по роли:
-```
-Architect: project-architecture, async-smtp-guide, account-persistence
-GUI Agent: pyqt6-patterns, pyqt6-threading-guide, pyqt6-table-patterns, gui-ux-principles
-SMTP Expert: smtp-error-diagnosis, smtp-port-fallback, smtp-auth-methods, rambler-specifics
-Proxy Expert: socks5-internals, http-connect-proxy, proxy-country-cache, rate-limit-strategy
-Security Agent: security-checklist
-Tester: testing-guide
-DevOps: windows-exe-build, release-workflow, changelog-guide
-Debugger: debug-network, smtp-error-diagnosis, performance-guide
-```
+  Перед изменением core/sender.py → активировать скилл smtp-engine-guard.
+  
