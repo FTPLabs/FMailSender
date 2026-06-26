@@ -201,15 +201,15 @@ _SMTP_CONFIGS: dict[str, dict] = {
     # Google Workspace custom domains — FIX: iejesusmirey.com / buzzmaster.market = G Suite → smtp.gmail.com
     "iejesusmirey.com":  {"host": "smtp.gmail.com",        "port": 465, "use_ssl": True,  "use_tls": False},
     "buzzmaster.market": {"host": "smtp.gmail.com",        "port": 465, "use_ssl": True,  "use_tls": False},
-      # Fastmail
-      "fastmail.com":      {"host": "smtp.fastmail.com",     "port": 465, "use_ssl": True,  "use_tls": False},
-      "fastmail.fm":       {"host": "smtp.fastmail.com",     "port": 465, "use_ssl": True,  "use_tls": False},
-      # Tutanota / Tuta
-      "tutanota.com":      {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True},
-      "tutamail.com":      {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True},
-      "tuta.io":           {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True},
-      # Yahoo — дополнительные TLD
-      "yahoo.ca":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
+    # Fastmail
+    "fastmail.com":      {"host": "smtp.fastmail.com",     "port": 465, "use_ssl": True,  "use_tls": False},
+    "fastmail.fm":       {"host": "smtp.fastmail.com",     "port": 465, "use_ssl": True,  "use_tls": False},
+    # Tutanota / Tuta
+    "tutanota.com":      {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True},
+    "tutamail.com":      {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True},
+    "tuta.io":           {"host": "mail.tutanota.com",     "port": 587, "use_ssl": False, "use_tls": True},
+    # Yahoo — дополнительные TLD
+    "yahoo.ca":          {"host": "smtp.mail.yahoo.com",   "port": 465, "use_ssl": True,  "use_tls": False},
 }
 
 # Load extended SMTP providers (poczta.fm, sapo.pt, bigpond, telenet, comcast +80 more)
