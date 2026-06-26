@@ -1,5 +1,36 @@
 # CHANGELOG — FMailSender
 
+## v5.2.1 — Pre-launch автообновление (patch-updater)
+
+### Новые возможности
+
+#### gui/dialogs/dialog_update_splash.py — Pre-launch диалог обновления
+- Всплывает **до** запуска основного приложения — не мешает работе
+- Дизайн в стиле CyberPro: анимированные orbs (violet/cyan), dot-grid, aurora, glassmorphism-карточка
+- Показывает badge «Быстрый патч: ~X КБ (вместо Y МБ EXE)» когда patch-manifest доступен
+- Три действия: **Установить обновление**, **Пропустить эту версию**, **Напомнить позже (24 ч)**
+- Gradient progress-bar с отображением прогресса по каждому файлу
+- После патча — автоматический `os.execv()` рестарт без потери argv
+
+#### core/update_settings.py — Хранение предпочтений
+- `skip_version(v)` — запоминает «больше не показывать для v5.2.1»
+- `set_remind_later()` — откладывает на 24 часа
+- JSON-файл `_update_prefs.json` рядом с EXE (не требует прав администратора)
+
+#### main.py — Интеграция
+- Проверка обновлений после `setStyleSheet`, **до** `check_license`
+- Таймаут 6 с — не задерживает запуск при офлайне или медленной сети
+- Обёрнута в `try/except` — любая ошибка updater не ломает запуск
+
+### Исправления синтаксиса (v5.1.0)
+- `core/_version.py` — IndentationError на строке 2
+- `core/send_checkpoint.py` — лишний 2-пробельный отступ на уровне модуля
+- `core/smtp_pool.py` — лишний 2-пробельный отступ на уровне модуля
+- `tests/test_smtp_pool.py` — лишний 2-пробельный отступ на уровне модуля
+- `core/sender.py` — непоследовательный отступ в dict fastmail/tutanota
+
+---
+
   ## v5.0.0 — SMTP Connection Pool + Campaign Checkpoints
 
   ### Новые возможности (оптимизация для 10-15к писем)
