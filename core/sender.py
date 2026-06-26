@@ -576,19 +576,15 @@ def _parse_auth_error(host: str, smtp_code: int, detail: str) -> str:
     # Microsoft / Outlook / Hotmail
     if any(s in h for s in ["outlook", "hotmail", "live.com", "office365", "microsoft"]):
         if "5.7.139" in d or "basic authentication is disabled" in d or "smtpclientauthentication is disabled" in d or "5.7.138" in d:
-        ("Microsoft: SMTP AUTH отключён для этого ящика.
-"
-                    "Ошибка: SmtpClientAuthentication is disabled.
-"
-                    "Решение:
-"
-                    "  1. Зайдите в Outlook.com → Настройки → Почта → Синхронизация
-"
-                    "  2. Включите 'SMTP AUTH' для ящика
-"
-                    "  3. Или используйте OAuth2 (добавьте refresh_token к аккаунту)
-"
-                    "Ссылка: https://aka.ms/smtp_auth_disabled")        if "535" in d or "5.7.3" in d:
+            return (
+                "Microsoft: SMTP AUTH отключён для этого ящика.\n"
+                "Ошибка: SmtpClientAuthentication is disabled.\n"
+                "Решение:\n"
+                "  1. Зайдите в Outlook.com → Настройки → Почта → Синхронизация\n"
+                "  2. Включите SMTP AUTH для ящика\n"
+                "  3. Или используйте OAuth2 (добавьте refresh_token)\n"
+                "Ссылка: https://aka.ms/smtp_auth_disabled"
+            )
             return ("Microsoft: неверный пароль или нужен App Password.\n"
                     "Решение: создайте App Password на account.microsoft.com.")
 
