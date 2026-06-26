@@ -39,6 +39,12 @@ from core.update_settings import (
 )
 from gui.theme import Colors, Typography
 
+  try:
+      from core.utils import resource_path as _resource_path
+      _RESOURCE_PATH_OK = True
+  except ImportError:
+      _RESOURCE_PATH_OK = False
+
 
 # ── Inline SVGs ─────────────────────────────────────────────────────────────
 
@@ -96,7 +102,32 @@ def _svg_pixmap(data: bytes, size: int) -> QPixmap:
     return px
 
 
-def _fmt_size(b: int) -> str:
+def _load_logo_pixmap(size: int) -> "QPixmap | None":
+      """Загружает оригинальный логотип fmail_logo.png из assets. Возвращает None при ошибке."""
+      try:
+          import os, sys
+          if _RESOURCE_PATH_OK:
+              logo_path = _resource_path("assets", "images", "fmail_logo.png")
+          else:
+              base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+              # gui/dialogs/ -> gui/ -> repo_root
+              base = os.path.dirname(os.path.dirname(base))
+              logo_path = os.path.join(base, "assets", "images", "fmail_logo.png")
+          from PyQt6.QtGui import QPixmap
+          from PyQt6.QtCore import Qt
+          pix = QPixmap(logo_path)
+          if not pix.isNull():
+              return pix.scaled(
+                  size, size,
+                  Qt.AspectRatioMode.KeepAspectRatio,
+                  Qt.TransformationMode.SmoothTransformation,
+              )
+      except Exception:
+          pass
+      return None
+
+
+  def _fmt_size(b: int) -> str:
     if b >= 1_048_576:
         return f"{b / 1_048_576:.1f} МБ"
     if b >= 1024:
@@ -281,12 +312,17 @@ class UpdateSplashDialog(QDialog):
         cl.setContentsMargins(40, 36, 40, 36)
         cl.setSpacing(0)
 
-        # Icon
+        # Icon — оригинальный логотип fmail_logo.png, SVG как запасной вариант
         icon_row = QHBoxLayout()
         icon_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(_svg_pixmap(_SHIELD_UPDATE_SVG, 56))
-        icon_lbl.setFixedSize(56, 56)
+        _real_logo = _load_logo_pixmap(64)
+        if _real_logo is not None:
+            icon_lbl.setPixmap(_real_logo)
+            icon_lbl.setFixedSize(64, 64)
+        else:
+            icon_lbl.setPixmap(_svg_pixmap(_SHIELD_UPDATE_SVG, 56))
+            icon_lbl.setFixedSize(56, 56)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_lbl.setStyleSheet("background: transparent; border: none;")
         icon_row.addWidget(icon_lbl)
