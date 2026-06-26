@@ -1,4 +1,0 @@
-# Build/dev tools — not needed at runtime
-  pyinstaller>=6.0.0
-  pyinstaller-hooks-contrib>=2024.0
-  
