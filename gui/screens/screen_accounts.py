@@ -730,6 +730,8 @@ class BulkImportWorker(QThread):
                 # Для pipe-формата третье поле — refresh_token для OAuth2
                 if _sep == "|" and len(parts) >= 3:
                     _refresh_token_import = parts[2].strip()
+                    # FIX_B003: 4-field pipe email|pass|token|client_id
+                    _oauth_client_id_import = parts[3].strip() if len(parts) >= 4 else ""
                 if not email or "@" not in email:
                     skipped += 1
                     continue
@@ -754,6 +756,9 @@ class BulkImportWorker(QThread):
                     acc.refresh_token = _refresh_token_import
                     # Для Outlook: при наличии refresh_token — авто-получим access_token при первой отправке
                     acc.oauth_token = ""  # будет заполнено oauth2_refresh модулем
+                    # FIX_B003: store explicit client_id from 4th pipe field if given
+                    if _oauth_client_id_import:
+                        acc.ms_client_id = _oauth_client_id_import
                 if alias and "@" in alias:
                     acc.reply_to = alias  # Google Workspace alias
                 self.new_accounts.append(acc)
