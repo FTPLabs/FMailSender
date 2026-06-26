@@ -1,3 +1,19 @@
+## [4.6.2] — 2026-06-26
+
+### Исправлены баги
+
+#### B001 — Dead code в _parse_auth_error Microsoft else-ветка [КОД]
+- **Симптом**: строки 588-589 core/sender.py были мёртвым кодом (unreachable return после return в том же if-блоке)
+- **Причина**: при добавлении Microsoft SMTP AUTH disabled сообщения (v4.6.0) fallback-return остался недостижимым
+- **Исправление**: добавлена `else:` ветка для fallback "неверный пароль" сообщения
+
+### Добавлено
+
+#### fmailsender-master SKILL — мастер-скилл проекта
+- Единый скилл с полным контекстом: карта файлов, все известные баги, GitHub API push паттерны,
+  SMTP configs, threading rules, релиз-процесс, checkpoint commit guidance, credit-efficient workflow
+- Заменяет необходимость читать AGENTS.md вручную при каждой сессии
+
 ## [4.6.1] — 2026-06-26
 
 ### Исправлены баги
