@@ -542,20 +542,40 @@ ACCOUNTS_FILE = _get_data_dir() / "accounts.dat"
 PROXY_FILE    = _get_data_dir() / "proxies.dat"
 
 
-# FIX v4.5.2: Прокси — ТОЛЬКО СЕССИОННЫЕ (не сохраняются на диск).
-# При перезапуске прокси сбрасываются — нужно повторно импортировать.
-# Это исключает накопление устаревших/заблокированных прокси между сессиями.
+# Глобальные прокси: сохраняются на диск + кеш в памяти для скорости
 _SESSION_PROXIES: list[str] = []
+_GLOBAL_PROXIES_FILE = Path(__file__).parent.parent.parent / "data" / "global_proxies.json"
+
 
 def save_global_proxies(proxies: list[str]) -> None:
-    """Сохраняет прокси в памяти сессии (НЕ пишет на диск — сбрасывается при перезапуске)."""
+    """Сохраняет прокси на диск (data/global_proxies.json) и в кеш сессии."""
     global _SESSION_PROXIES
     _SESSION_PROXIES = list(proxies)
+    try:
+        _GLOBAL_PROXIES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        import json as _j
+        _GLOBAL_PROXIES_FILE.write_text(
+            _j.dumps(proxies, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception:
+        pass
 
 
 def load_global_proxies() -> list[str]:
-    """Возвращает сессионный пул прокси (не читает с диска — данные сбрасываются при перезапуске)."""
-    return list(_SESSION_PROXIES)
+    """Возвращает пул прокси: из кеша сессии или читает с диска (data/global_proxies.json)."""
+    global _SESSION_PROXIES
+    if _SESSION_PROXIES:
+        return list(_SESSION_PROXIES)
+    try:
+        if _GLOBAL_PROXIES_FILE.exists():
+            import json as _j
+            data = _j.loads(_GLOBAL_PROXIES_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                _SESSION_PROXIES = [str(p) for p in data if p]
+                return list(_SESSION_PROXIES)
+    except Exception:
+        pass
+    return []
 
 
 def distribute_proxies(accounts: "list[SmtpAccount]", proxies: list[str]) -> None:
@@ -898,7 +918,7 @@ class AccountDialog(QDialog):
             self.test_status.setStyleSheet("color: #F59E0B;")
             return
 
-        # Получаем прокси из формы (обязателен — тест без прокси запрещён)
+        # Получаем прокси из формы (необязательно — тест без прокси разрешён)
         proxy_raw = self.proxy_edit.toPlainText().strip()
         proxy_lines = [
             ProxyManager.parse(l.strip())
@@ -906,13 +926,12 @@ class AccountDialog(QDialog):
             if l.strip() and not l.strip().startswith("#")
         ]
         proxy_list = [p for p in proxy_lines if p]
-        if not proxy_list:
-            self.test_status.setText("Добавьте прокси перед тестом — прямые подключения запрещены")
-            self.test_status.setStyleSheet("color: #EF4444;")
-            return
 
         self.test_btn.setEnabled(False)
-        self.test_status.setText("Подключение через прокси…")
+        if proxy_list:
+            self.test_status.setText("Подключение через прокси…")
+        else:
+            self.test_status.setText("Прямое подключение (без прокси)…")
         self.test_status.setStyleSheet("color: gray;")
         QApplication.processEvents()
         acc = SmtpAccount(
@@ -922,8 +941,9 @@ class AccountDialog(QDialog):
             use_ssl=self.ssl_check.isChecked(),
             use_tls=self.tls_check.isChecked(),
         )
-        acc.proxy_list = proxy_list
-        acc.proxy = proxy_list[0]
+        if proxy_list:
+            acc.proxy_list = proxy_list
+            acc.proxy = proxy_list[0]
         self._test_worker = TestWorker(acc, parent=self)
 
         @pyqtSlot(bool, str)
@@ -2005,15 +2025,107 @@ class AccountsScreen(QWidget):
         self.status_label.setText(f"Проверка отменена | Аккаунтов: {len(self._accounts)}")
 
     def _test_accounts_by_indices(self, indices: list[int]) -> None:
-        """FIX v4.5.4: Проверяет ТОЛЬКО аккаунты по указанным индексам.
+        """Проверяет ТОЛЬКО аккаунты по указанным индексам через батч-очередь (MAX_CONCURRENT=4).
         Используется после импорта — не перепроверяет уже валидные аккаунты.
         """
         if not indices:
             return
-        self.status_label.setText(f"Проверяю {len(indices)} новых аккаунтов...")
-        for idx in indices:
-            if 0 <= idx < len(self._accounts):
-                QTimer.singleShot(idx * 50, lambda i=idx: self._test_single(i))
+
+        # Фильтруем невалидные индексы
+        valid_indices = [i for i in indices if 0 <= i < len(self._accounts)]
+        if not valid_indices:
+            return
+
+        MAX_CONCURRENT = 4
+        total = len(valid_indices)
+        completed = [0]
+        running = [0]
+        queue = list(valid_indices)
+
+        self.status_label.setText(f"Проверяю {total} новых аккаунтов...")
+
+        # Пометить в очереди
+        for row in valid_indices:
+            item = self.table.item(row, 1)
+            if item:
+                item.setText("В очереди...")
+                item.setForeground(QColor(Colors.TEXT_MUTED))
+
+        def _start_next():
+            while queue and running[0] < MAX_CONCURRENT:
+                if self._test_cancel_event.is_set():
+                    break
+                row = queue.pop(0)
+                if row >= len(self._accounts):
+                    completed[0] += 1
+                    continue
+                acc = self._accounts[row]
+                si = self.table.item(row, 1)
+                if si:
+                    si.setText("Проверка...")
+                    si.setForeground(QColor(Colors.TEXT_MUTED))
+
+                w = TestWorker(acc, parent=self)
+                running[0] += 1
+
+                @pyqtSlot(bool, str)
+                def on_result(ok, msg, r=row):
+                    running[0] -= 1
+                    _ml = (msg or "").lower()
+                    _auth_fail = not ok and any(kw in _ml for kw in [
+                        "неверный логин", "неверный пароль", "password", "535", "534", "oauth2 отклонён"
+                    ])
+                    _si = self.table.item(r, 1)
+                    if _si:
+                        if ok:
+                            _si.setText("Валидный")
+                            _si.setForeground(QColor(Colors.SUCCESS))
+                        elif _auth_fail:
+                            _si.setText("Невалидный")
+                            _si.setForeground(QColor(Colors.ERROR))
+                        else:
+                            _si.setText("Ошибка прокси")
+                            _si.setForeground(QColor("#f59e0b"))
+                        _si.setToolTip(msg)
+                    if 0 <= r < len(self._accounts):
+                        if ok:
+                            self._accounts[r].last_test_ok = True
+                            self._accounts[r].is_active = True
+                        elif _auth_fail:
+                            self._accounts[r].last_test_ok = False
+                            self._accounts[r].is_active = False
+                        else:
+                            self._accounts[r].last_test_ok = None
+                        self._accounts[r].last_test_msg = msg
+                    completed[0] += 1
+                    ok_cnt = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is True)
+                    fail_cnt = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is False)
+                    self.status_label.setText(
+                        f"Проверено: {completed[0]}/{total} | Валидных: {ok_cnt} | Невалидных: {fail_cnt}"
+                    )
+                    if completed[0] >= total:
+                        save_accounts(self._accounts)
+                        self._refresh_table()
+                        try:
+                            self.accounts_changed.emit(self._accounts)
+                        except RuntimeError:
+                            pass
+                        ok_f = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is True)
+                        fail_f = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is False)
+                        unt_f = sum(1 for a in self._accounts if getattr(a, "last_test_ok", None) is None)
+                        snd_f = sum(1 for a in self._accounts if a.is_active and getattr(a, "last_test_ok", None) is True)
+                        self.status_label.setText(
+                            f"Всего: {len(self._accounts)} | Валидных: {ok_f} | "
+                            f"Невалидных: {fail_f} | Не проверено: {unt_f} | Готово к рассылке: {snd_f}"
+                        )
+                    else:
+                        _start_next()
+
+                w.result_ready.connect(on_result)
+                self._test_workers.append(w)
+                w.start()
+
+        _start_next()
 
     def _toggle_invalid_visibility(self) -> None:
         """Переключает отображение невалидных аккаунтов (last_test_ok=False)."""
