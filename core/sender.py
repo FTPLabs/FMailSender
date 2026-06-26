@@ -1164,7 +1164,7 @@ class SendingEngine:
                 _last_result = _result
                 if _attempt < _MAX_RETRIES - 1 and self._log_queue:
                     self._log_queue.put_nowait({"type": "log", "level": "warn", "message":
-                        f"[{time.strftime('%H:%M:%S')}] {recipient.email}: {_result.error[:60]} — пробую другой аккаунт..."})
+                        f"[{time.strftime('%H:%M:%S')}] {recipient.email}: {_result.error[:120]} — пробую другой аккаунт..."})
             if _last_result is not None:
                 return _last_result
             if self._log_queue:
@@ -1232,8 +1232,9 @@ class SendingEngine:
             self._loop = None
 
         if self._log_queue:
-            _ok = sum(1 for r in results if r.success)
-            _fail = len(results) - _ok
+            with self._stats_lock:
+                _ok = self._stats.get("success", 0)
+                _fail = self._stats.get("errors", 0)
             self._log_queue.put_nowait({"type": "log", "level": "info", "message":
                 f"[{time.strftime('%H:%M:%S')}] Готово: {_ok} успешно, {_fail} ошибок"})
         if self.on_finished:
