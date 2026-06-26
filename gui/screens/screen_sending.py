@@ -443,12 +443,9 @@ class SendingScreen(QWidget):
           if t == "log":
               _msg = item["message"]
               _msg = _translate_smtp_error(_msg)  # Переводим ошибки на русский
-              # FIX v4.5.3: обрезаем лог-строки по границе слова (не режем mid-word)
-              if len(_msg) > 120:
-                  _cut = _msg[:117]
-                  # найти последний пробел — не резать кириллицу посередине слова
-                  _last_sp = _cut.rfind(' ')
-                  _msg = (_cut[:_last_sp] if _last_sp > 80 else _cut) + "..."
+              # FIX v4.6.1: НЕ обрезаем лог-строки — Qt сам элидирует в виджете.
+              # Экспорт берёт .text() из QListWidgetItem → нужна ПОЛНАЯ строка.
+              # Старый [:120] обрезал "Сетевая ошибка через..." до "Сетевая ошибка ч"
               _wi = QListWidgetItem(_msg)
               _level = item.get("level")
               if _level == "ok":
