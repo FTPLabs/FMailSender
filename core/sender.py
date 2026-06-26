@@ -986,10 +986,11 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                   account.port    = _dp
                   account.use_ssl = _ds
                   account.use_tls = _dt
-                  return True, (
-                      f"OK (прямое {account.host}:{_dp}) — "
-                      f"IP прокси {_proxy_parsed.hostname} заблокирован SMTP-сервером. "
-                      f"Для работы через прокси используйте резидентные/мобильные прокси."
+                  return False, (
+                      f"ПРОКСИ НЕ РАБОТАЕТ ДЛЯ РАССЫЛКИ: "
+                      f"IP прокси {_proxy_parsed.hostname} заблокирован SMTP-сервером {account.host}. "
+                      f"Пароль верный (прямое подключение OK), но через этот прокси отправка невозможна. "
+                      f"Используйте SMTP-совместимый прокси (резидентный или мобильный)."
                   )
               except _smtplib.SMTPAuthenticationError as _dae:
                   _raw_e = _dae.smtp_error
