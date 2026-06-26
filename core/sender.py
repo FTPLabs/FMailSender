@@ -911,6 +911,7 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
           return True, msg
       if ok is False:
           return False, msg  # Пароль неверен — дальше пробовать бессмысленно
+      _msg1 = msg  # FIX v5.2.3+: сохраняем тип ошибки Step 1
 
       # ── Шаг 2: та же конфигурация без cert-verify (self-signed SSL) ──────────
       ok, msg = _attempt(account.host, account.port, account.use_ssl, account.use_tls, verify=False)
@@ -919,9 +920,19 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
       if ok is False:
           return False, msg
 
+      # FIX v5.2.3+: если прокси задан и обе попытки вернули SMTP-уровневую ошибку
+      # (IP прокси заблокирован SMTP-сервером), перебор 12 портов через тот же прокси
+      # бессмысленен — все провалятся, а это ~6-8 сек потерянного времени на аккаунт.
+      # "SMTP:" = SMTPConnectError/SMTPServerDisconnected (сервер сбросил соединение).
+      # "connect/" = OSError (порт закрыт на TCP) → тогда перебор портов осмысленен.
+      _smtp_ip_blocked = bool(_proxy_parsed) and any(
+          (m or "").startswith("SMTP:") for m in [_msg1, msg]
+      )
+
       # ── Шаг 3: fallback — перебираем ВСЕ стандартные порты (и с прокси, и без) ─
       # Ошибка соединения на одном порту ≠ «прокси не работает» или «хост недоступен» —
       # нужно проверить 465/587/25/2525 прежде чем сдаваться.
+      # При SMTP-блокировке IP через прокси — пропускаем (все порты дадут тот же результат).
       _combos = [
           (465,  True,  False),   # SMTPS  — SSL напрямую
           (587,  False, True),    # Submission — STARTTLS
@@ -931,7 +942,7 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
           (587,  True,  False),   # 587 + SSL (нестандартно)
       ]
       _tried = {account.port}
-      for _port, _ssl_flag, _tls_flag in _combos:
+      for _port, _ssl_flag, _tls_flag in ([] if _smtp_ip_blocked else _combos):
           if _port in _tried:
               continue
           _tried.add(_port)
@@ -990,9 +1001,21 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
               except _smtplib.SMTPAuthenticationError as _dae:
                   _raw_e = _dae.smtp_error
                   _de = _raw_e.decode("utf-8", "replace") if isinstance(_raw_e, bytes) else str(_raw_e)
+                  # FIX v5.2.3+: НЕ помечаем как «невалидный» когда прокси заблокирован.
+                  # Прямое подключение с нашего IP ненадёжно — Gmail отклоняет из-за
+                  # подозрительного IP ИЛИ требует App-пароль, даже если основной пароль верен.
+                  # Не включаем слова "неверный пароль"/"535" — иначе on_result пометит
+                  # аккаунт как невалидный вместо «ошибка прокси».
+                  if _dae.smtp_code == 534 or "application-specific" in _de.lower():
+                      return False, (
+                          f"Прокси-IP заблокирован SMTP-сервером. "
+                          f"Для Gmail нужен App-пароль — создайте: Google Аккаунт → "
+                          f"Безопасность → Двухэтапная аутентификация → Пароли приложений."
+                      )
                   return False, (
-                      f"Неверный логин или пароль: {_de[:120]} "
-                      f"(прокси-IP также заблокирован SMTP-сервером)"
+                      f"Прокси-IP заблокирован SMTP-сервером. "
+                      f"Авторизация при прямом подключении также не удалась. "
+                      f"Возможные причины: нужен App-пароль, или наш IP тоже заблокирован Google."
                   )
               except Exception:
                   continue
