@@ -12,11 +12,45 @@ on:
 
 jobs:
   # ══════════════════════════════════════════════════════════════════
+  # JOB 0 — Открываем репозиторий (PUBLIC) перед началом работы.
+  # Закрываем обратно в restore-privacy (if: always()).
+  # Требует секрет ADMIN_PAT (PAT с repo-скоупом).
+  # ══════════════════════════════════════════════════════════════════
+  make-public:
+    name: Make repo PUBLIC for build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set repository to PUBLIC
+        env:
+          ADMIN_PAT: ${{ secrets.ADMIN_PAT }}
+        run: |
+          echo "=== Making repository PUBLIC ==="
+          if [ -z "$ADMIN_PAT" ]; then
+            echo "❌ ADMIN_PAT secret not set — cannot toggle visibility!"
+            echo "   Add PAT (repo scope) as secret ADMIN_PAT in:"
+            echo "   GitHub → Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+          HTTP=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+            -X PATCH "https://api.github.com/repos/${{ github.repository }}" \
+            -H "Authorization: token $ADMIN_PAT" \
+            -H "Content-Type: application/json" \
+            -d '{"private": false}')
+          if [ "$HTTP" = "200" ]; then
+            echo "✅ Repository is now PUBLIC"
+          else
+            echo "⚠️  HTTP $HTTP — could not set visibility"
+            cat /tmp/resp.json || true
+            exit 1
+          fi
+
+  # ══════════════════════════════════════════════════════════════════
   # GATE 1 — Синтаксис + статический анализ (Ubuntu, быстро)
   # ══════════════════════════════════════════════════════════════════
   quality-gates:
     name: Quality Gates (syntax · imports · secrets)
     runs-on: ubuntu-latest
+    needs: make-public
     steps:
       - uses: actions/checkout@v4
 
@@ -268,7 +302,7 @@ jobs:
   restore-privacy:
     name: Restore repo → PRIVATE
     runs-on: ubuntu-latest
-    needs: [build-release, deploy-vps]
+    needs: [make-public, build-release, deploy-vps]
     if: always()
     steps:
       - name: Make repository private
@@ -277,10 +311,9 @@ jobs:
         run: |
           echo "=== Restoring repository visibility to PRIVATE ==="
           if [ -z "$ADMIN_PAT" ]; then
-            echo "⚠️  Secret ADMIN_PAT не задан — пропускаем."
-            echo "   Добавьте PAT (repo + admin:repo) как секрет ADMIN_PAT в:"
-            echo "   GitHub → Settings → Secrets and variables → Actions"
-            exit 0
+            echo "❌ ADMIN_PAT secret not set — CANNOT restore privacy!"
+            echo "   Репозиторий остаётся ПУБЛИЧНЫМ. Добавьте PAT как секрет ADMIN_PAT."
+            exit 1
           fi
           HTTP=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
             -X PATCH "https://api.github.com/repos/${{ github.repository }}" \
@@ -290,7 +323,7 @@ jobs:
           if [ "$HTTP" = "200" ]; then
             echo "✅ Репозиторий теперь ПРИВАТНЫЙ"
           else
-            echo "⚠️  HTTP $HTTP — не удалось вернуть приватность"
+            echo "❌ HTTP $HTTP — не удалось вернуть приватность!"
             cat /tmp/resp.json || true
-            echo "Пожалуйста, вручную переключите репозиторий в приватный режим."
+            exit 1
           fi
