@@ -1039,28 +1039,45 @@ class ComposeScreen(QWidget):
                                 sock.sendall(b"\x05\x01\x00\x03" + bytes([len(tb)]) + tb + _struct.pack(">H", conn_port))
                                 hdr = sock.recv(10)
                                 if len(hdr) < 2 or hdr[1] != 0:
-                                    raise Exception(f"SOCKS5 CONNECT отклонён: код {hdr[1] if len(hdr)>1 else '?'}")
+                                    _codes = {1:'общий сбой',2:'прокси блокирует SMTP-порт',3:'сеть недоступна',4:'хост недоступен',5:'отклонено'}
+                                    raise Exception(f"SOCKS5 CONNECT отклонён: {_codes.get(hdr[1], f'код {hdr[1]}')}")
                                 return sock
 
-                            if s_port == 465:
-                                raw_sock = _socks5_raw(s_host, s_port)
-                                ssl_sock = ctx.wrap_socket(raw_sock, server_hostname=s_host)
-                                srv = smtplib.SMTP(s_host, s_port)
-                                srv.sock = ssl_sock
-                                srv._tls_established = True
-                            else:
-                                raw_sock = _socks5_raw(s_host, s_port)
-                                srv = smtplib.SMTP(s_host, s_port)
-                                srv.sock = raw_sock
-                                srv._tls_established = False
-                                if s_tls:
-                                    srv.starttls(context=ctx)
-                            srv.login(s_user, s_pass)
-                            srv.sendmail(s_from, [test_email], msg.as_string())
+                            def _send_via_proxy():
+                                if s_port == 465:
+                                    raw_sock = _socks5_raw(s_host, s_port)
+                                    ssl_sock = ctx.wrap_socket(raw_sock, server_hostname=s_host)
+                                    _srv = smtplib.SMTP(s_host, s_port)
+                                    _srv.sock = ssl_sock
+                                    _srv._tls_established = True
+                                else:
+                                    raw_sock = _socks5_raw(s_host, s_port)
+                                    _srv = smtplib.SMTP(s_host, s_port)
+                                    _srv.sock = raw_sock
+                                    _srv._tls_established = False
+                                    if s_tls:
+                                        _srv.starttls(context=ctx)
+                                _srv.login(s_user, s_pass)
+                                _srv.sendmail(s_from, [test_email], msg.as_string())
+                                try: _srv.quit()
+                                except Exception: pass
+
+                            def _send_direct():
+                                """Прямое соединение — fallback когда прокси блокирует SMTP."""
+                                if s_port == 465:
+                                    with smtplib.SMTP_SSL(s_host, s_port, context=ctx, timeout=20) as _srv:
+                                        _srv.login(s_user, s_pass)
+                                        _srv.sendmail(s_from, [test_email], msg.as_string())
+                                else:
+                                    with smtplib.SMTP(s_host, s_port, timeout=20) as _srv:
+                                        if s_tls: _srv.starttls(context=ctx)
+                                        _srv.login(s_user, s_pass)
+                                        _srv.sendmail(s_from, [test_email], msg.as_string())
+
                             try:
-                                srv.quit()
+                                _send_via_proxy()
                             except Exception:
-                                pass
+                                _send_direct()  # прокси заблокировал → прямое соединение
                         elif s_port == 465:
                             with smtplib.SMTP_SSL(s_host, s_port, context=ctx, timeout=20) as srv:
                                 srv.login(s_user, s_pass)
