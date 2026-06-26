@@ -743,12 +743,11 @@ def _proxy_connect(
         except OSError as _socks_err:
             _msg = str(_socks_err)
             if "запрещено" in _msg or "код 2" in _msg or "not allowed" in _msg:
-                import socket as _sdirect
-                _s = _sdirect.socket(_sdirect.AF_INET, _sdirect.SOCK_STREAM)
-                _s.settimeout(timeout)
-                _s.connect((target_host, target_port))
-                return _s
-            raise
+                # FIX_B002: no direct connect — proxy-only policy, would leak real IP
+                raise OSError(
+                    f"SOCKS5: proxy {host}:{port} blocked SMTP-port {target_port}"
+                    f" (code 2). Change SMTP port (465/587/25) or use a different proxy."
+                )
     else:
         # auto_detect или неизвестная схема: пробуем SOCKS5 с коротким таймаутом,
         # при любой ошибке переключаемся на HTTP CONNECT
