@@ -8,6 +8,9 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Must be imported before uvicorn — ensures PyInstaller bundles all lazy deps.
+import core._ensure_imports  # noqa: F401, E402
+
 import uvicorn
 
 if __name__ == "__main__":

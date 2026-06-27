@@ -97,6 +97,15 @@ SMTP_HIDDEN = [
     "socket",
 ]
 
+# python-multipart — required by FastAPI for file/form upload endpoints.
+# Loaded lazily by FastAPI internals; not detected by PyInstaller static analysis.
+MULTIPART_HIDDEN = [
+    "multipart",
+    "multipart.multipart",
+    "multipart.decoders",
+    "multipart.exceptions",
+]
+
 WINDOWS_HIDDEN = [
     "win32com",
     "win32com.client",
@@ -111,6 +120,7 @@ ALL_HIDDEN = (
     + CRYPTO_HIDDEN
     + EMAIL_HIDDEN
     + SMTP_HIDDEN
+    + MULTIPART_HIDDEN
     + WINDOWS_HIDDEN
     + [
         "asyncio",

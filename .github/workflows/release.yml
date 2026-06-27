@@ -77,12 +77,14 @@ jobs:
       - name: "Verify Python imports"
         shell: pwsh
         run: |
-          python -c "from core.proxy import ProxyManager, parse_proxy, validate_proxy; print('proxy OK')"
+          python -c "import core._ensure_imports; print('ensure_imports OK')"
           python -c "from core.server import app; print('server OK')"
-          python -c "from core.storage import save_accounts, load_accounts; print('storage OK')"
           python -c "from core.sender import SendingEngine, test_smtp_connection; print('sender OK')"
           python -c "from core.models import SmtpAccount, Recipient, CampaignConfig, CampaignStatus; print('models OK')"
+          python -c "from core.storage import save_accounts, load_accounts; print('storage OK')"
           python -c "from core._version import APP_VERSION; print('version OK:', APP_VERSION)"
+          python -c "import multipart; print('multipart OK')"
+          python -c "import email.mime.text, email.mime.multipart, email.mime.application; print('email.mime OK')"
 
       # ── Build Python core (PyInstaller) ────────────────────────────────────
       - name: "Build Python core (PyInstaller)"

@@ -1,11 +1,11 @@
 # FMailSender core dependencies
-  fastapi>=0.115.0
-  uvicorn[standard]>=0.30.0
-  aiosmtplib>=3.0.0
-  cryptography>=41.0.0
-  dnspython>=2.4.0
-  requests>=2.31.0
-  PySocks>=1.7.1
-  wmi>=1.5.1; sys_platform == "win32"
-  pywin32>=306; sys_platform == "win32"
-  
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+aiosmtplib>=3.0.0
+cryptography>=41.0.0
+dnspython>=2.4.0
+requests>=2.31.0
+PySocks>=1.7.1
+wmi>=1.5.1; sys_platform == "win32"
+pywin32>=306; sys_platform == "win32"
