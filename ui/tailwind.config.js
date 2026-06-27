@@ -8,6 +8,7 @@ export default {
         surface: '#0d1117',
         surf2:   '#141424',
         surf3:   '#1c1c35',
+        dim:     '#3a3a66',
         muted:   '#6666aa',
         purple:  { DEFAULT: '#8b5cf6', light: '#a78bfa', dark: '#7c3aed' },
         cyan:    { DEFAULT: '#06b6d4', light: '#22d3ee', dark: '#0891b2' },

@@ -66,21 +66,21 @@
   .badge {
     @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium;
   }
-  .badge-ok    { @apply badge bg-success/15 text-success; }
-  .badge-error { @apply badge bg-error/15 text-error; }
-  .badge-warn  { @apply badge bg-warn/15 text-warn; }
-  .badge-idle  { @apply badge bg-muted/15 text-muted; }
-  .badge-cyan  { @apply badge bg-cyan/15 text-cyan; }
+  .badge-ok     { @apply badge bg-success/15 text-success; }
+  .badge-error  { @apply badge bg-error/15 text-error; }
+  .badge-warn   { @apply badge bg-warn/15 text-warn; }
+  .badge-idle   { @apply badge bg-muted/15 text-muted; }
+  .badge-cyan   { @apply badge bg-cyan/15 text-cyan; }
   .badge-purple { @apply badge bg-purple/15 text-purple; }
 
   /* ── Page ────────────────────────────────────────────────── */
-  .page { @apply space-y-5 animate-fade-in; }
+  .page        { @apply space-y-5 animate-fade-in; }
   .page-header { @apply flex items-center justify-between; }
-  .page-title { @apply text-xl font-semibold text-text; }
-  .page-sub { @apply text-sm text-muted mt-0.5; }
+  .page-title  { @apply text-xl font-semibold text-text; }
+  .page-sub    { @apply text-sm text-muted mt-0.5; }
 
   /* ── Table ───────────────────────────────────────────────── */
-  .tbl { @apply w-full text-sm; }
+  .tbl    { @apply w-full text-sm; }
   .tbl th {
     @apply px-4 py-2.5 text-left text-xs font-medium text-muted uppercase tracking-wider
            border-b border-dim/30 bg-surf2;
