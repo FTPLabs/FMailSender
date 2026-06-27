@@ -28,9 +28,11 @@ jobs:
     timeout-minutes: 120
 
     steps:
+      # ── Checkout ───────────────────────────────────────────────────────────
       - name: "Checkout"
         uses: actions/checkout@v4
 
+      # ── Toolchains ─────────────────────────────────────────────────────────
       - name: "Setup Node.js"
         uses: actions/setup-node@v4
         with:
@@ -51,6 +53,24 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      # ── Determine version ──────────────────────────────────────────────────
+      - name: "Determine release tag"
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            echo "name=FMailSender v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            TAG="${{ github.ref_name }}"
+            VER="${TAG#v}"
+            echo "tag=${TAG}"   >> $GITHUB_OUTPUT
+            echo "version=${VER}" >> $GITHUB_OUTPUT
+            echo "name=FMailSender ${TAG}" >> $GITHUB_OUTPUT
+          fi
+
+      # ── Python deps & verification ─────────────────────────────────────────
       - name: "Install Python deps"
         run: pip install -r requirements.txt pyinstaller
 
@@ -62,7 +82,9 @@ jobs:
           python -c "from core.storage import save_accounts, load_accounts; print('storage OK')"
           python -c "from core.sender import SendingEngine, test_smtp_connection; print('sender OK')"
           python -c "from core.models import SmtpAccount, Recipient, CampaignConfig, CampaignStatus; print('models OK')"
+          python -c "from core._version import APP_VERSION; print('version OK:', APP_VERSION)"
 
+      # ── Build Python core (PyInstaller) ────────────────────────────────────
       - name: "Build Python core (PyInstaller)"
         shell: pwsh
         run: |
@@ -73,12 +95,19 @@ jobs:
             --noconfirm
           $exe = "src-tauri/binaries/fmail-core.exe"
           if (-not (Test-Path $exe)) {
-            Write-Error "fmail-core.exe not found after PyInstaller!"
+            Write-Error "FAIL: fmail-core.exe not found after PyInstaller"
             exit 1
           }
-          Write-Host "fmail-core.exe: $([math]::Round((Get-Item $exe).Length/1MB,1)) MB"
+          $sz = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          Write-Host "OK: fmail-core.exe = $sz MB"
+          if ($sz -lt 5) {
+            Write-Error "FAIL: fmail-core.exe is suspiciously small ($sz MB). Build likely failed."
+            exit 1
+          }
+          # Tauri sidecar naming convention (needed if tauri build --bundles nsis is used)
           Copy-Item $exe "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe" -Force
 
+      # ── Build React UI ─────────────────────────────────────────────────────
       - name: "Install UI deps"
         working-directory: ui
         run: npm install
@@ -87,7 +116,17 @@ jobs:
         working-directory: ui
         run: npm run build
 
-      - name: "Install tauri CLI globally"
+      - name: "Verify UI dist"
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "ui/dist/index.html")) {
+            Write-Error "FAIL: ui/dist/index.html not found after npm run build"
+            exit 1
+          }
+          Write-Host "OK: ui/dist/ built successfully"
+
+      # ── Tauri CLI & icons ──────────────────────────────────────────────────
+      - name: "Install Tauri CLI"
         run: npm install -g @tauri-apps/cli@^2
 
       - name: "Generate Tauri icons"
@@ -96,63 +135,127 @@ jobs:
           $logo = "assets/images/fmail_logo.png"
           if (Test-Path $logo) {
             tauri icon $logo
-            Write-Host "Icons generated from $logo"
+            Write-Host "OK: icons generated from $logo"
           } else {
-            Write-Host "No custom logo found, using default icons"
+            Write-Warning "Logo not found at $logo — using default Tauri icons"
           }
+          # Icons dir must exist for tauri build
+          New-Item -ItemType Directory -Force -Path "src-tauri/icons" | Out-Null
 
-      - name: "Build Tauri portable EXE"
+      # ── Build Tauri (no-bundle: raw exe with embedded frontend) ────────────
+      - name: "Build Tauri portable binary"
         shell: pwsh
-        run: tauri build
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: tauri build --no-bundle
+        working-directory: .
 
-      - name: "Find built artifact"
-        id: artifact
+      - name: "Verify Tauri binary"
         shell: pwsh
         run: |
-          $bundle = "src-tauri/target/release/bundle/nsis"
-          Write-Host "Listing bundle dir:"
-          if (Test-Path $bundle) {
-            Get-ChildItem $bundle -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
-          } else {
-            Write-Error "Bundle dir not found: $bundle"
+          $exe = "src-tauri/target/release/fmail-sender.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Error "FAIL: fmail-sender.exe not found at $exe"
             exit 1
           }
-          $exe = Get-ChildItem -Path $bundle -Filter "*_portable.exe" -Recurse -ErrorAction SilentlyContinue |
-                 Select-Object -First 1
-          if (-not $exe) {
-            $exe = Get-ChildItem -Path $bundle -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue |
-                   Select-Object -First 1
-          }
-          if (-not $exe) {
-            Write-Error "No .exe found in $bundle"
-            exit 1
-          }
-          Write-Host "Artifact: $($exe.FullName)"
-          echo "path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
-          echo "name=$($exe.Name)"     >> $env:GITHUB_OUTPUT
+          $sz = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          Write-Host "OK: fmail-sender.exe = $sz MB"
 
-      - name: "Upload artifact"
+      # ── Assemble portable directory ────────────────────────────────────────
+      - name: "Assemble portable directory"
+        shell: pwsh
+        run: |
+          $ver  = "${{ steps.tag.outputs.version }}"
+          $pdir = "dist_portable"
+          New-Item -ItemType Directory -Force -Path $pdir | Out-Null
+
+          Copy-Item "src-tauri/target/release/fmail-sender.exe" "$pdir/FMailSender.exe" -Force
+          Copy-Item "src-tauri/binaries/fmail-core.exe"         "$pdir/fmail-core.exe"  -Force
+
+          Write-Host "Portable dir contents:"
+          Get-ChildItem $pdir | ForEach-Object {
+            $sz = [math]::Round($_.Length / 1MB, 1)
+            Write-Host "  $($_.Name) = $sz MB"
+          }
+
+      # ── Create portable launcher with NSIS ────────────────────────────────
+      # NSIS extracts both EXEs to %TEMP%\FMailSender, runs FMailSender.exe silently,
+      # waits for it to close, then cleans up. User gets a single .exe — no installer.
+      - name: "Create NSIS portable launcher"
+        id: nsis
+        shell: pwsh
+        run: |
+          $ver     = "${{ steps.tag.outputs.version }}"
+          $outName = "FMailSender-v${ver}-portable.exe"
+
+          $nsiScript = @"
+          Unicode true
+          SetCompressor /SOLID lzma
+          OutFile "$outName"
+          InstallDir "`$TEMP\FMailSender"
+          RequestExecutionLevel user
+          SilentInstall silent
+
+          Section
+            SetOutPath "`$INSTDIR"
+            File "dist_portable\FMailSender.exe"
+            File "dist_portable\fmail-core.exe"
+            ; Launch app and wait for it to close
+            ExecWait '"`$INSTDIR\FMailSender.exe"'
+            ; Cleanup temp files
+            Delete "`$INSTDIR\FMailSender.exe"
+            Delete "`$INSTDIR\fmail-core.exe"
+            RMDir  "`$INSTDIR"
+          SectionEnd
+          "@
+
+          $nsiScript | Out-File -FilePath "portable.nsi" -Encoding UTF8
+
+          # Run makensis (pre-installed on windows-latest)
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) {
+            $makensis = "makensis"
+          }
+          & $makensis portable.nsi
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: makensis returned $LASTEXITCODE"
+            exit 1
+          }
+          if (-not (Test-Path $outName)) {
+            Write-Error "FAIL: $outName not created"
+            exit 1
+          }
+          $sz = [math]::Round((Get-Item $outName).Length / 1MB, 1)
+          Write-Host "OK: $outName = $sz MB"
+          echo "exe_name=$outName" >> $env:GITHUB_OUTPUT
+          echo "exe_path=$(Resolve-Path $outName)" >> $env:GITHUB_OUTPUT
+
+      # ── Also create a simple ZIP for users who prefer manual extraction ────
+      - name: "Create portable ZIP"
+        id: zip
+        shell: pwsh
+        run: |
+          $ver     = "${{ steps.tag.outputs.version }}"
+          $zipName = "FMailSender-v${ver}-portable-zip.zip"
+          Compress-Archive -Path "dist_portable\*" -DestinationPath $zipName -Force
+          Write-Host "OK: $zipName = $([math]::Round((Get-Item $zipName).Length/1MB,1)) MB"
+          echo "zip_name=$zipName" >> $env:GITHUB_OUTPUT
+          echo "zip_path=$(Resolve-Path $zipName)" >> $env:GITHUB_OUTPUT
+
+      # ── Upload artifacts ────────────────────────────────────────────────────
+      - name: "Upload portable EXE artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: FMailSender-v${{ github.event.inputs.version || github.ref_name }}-portable
-          path: ${{ steps.artifact.outputs.path }}
+          name: FMailSender-v${{ steps.tag.outputs.version }}-portable-exe
+          path: ${{ steps.nsis.outputs.exe_path }}
           if-no-files-found: error
 
-      - name: "Determine release tag"
-        id: tag
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-            echo "name=FMailSender v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${{ github.ref_name }}"   >> $GITHUB_OUTPUT
-            echo "name=FMailSender ${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          fi
+      - name: "Upload portable ZIP artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMailSender-v${{ steps.tag.outputs.version }}-portable-zip
+          path: ${{ steps.zip.outputs.zip_path }}
+          if-no-files-found: error
 
+      # ── Create GitHub Release ───────────────────────────────────────────────
       - name: "Create GitHub Release"
         if: >
           (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
@@ -163,15 +266,25 @@ jobs:
           name: ${{ steps.tag.outputs.name }}
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
           generate_release_notes: true
-          files: ${{ steps.artifact.outputs.path }}
+          files: |
+            ${{ steps.nsis.outputs.exe_path }}
+            ${{ steps.zip.outputs.zip_path }}
           body: |
             ## ${{ steps.tag.outputs.name }}
 
-            **Portable EXE** — не требует установки. Просто запустите .exe файл.
-            Python не нужен — всё встроено.
+            ### Portable EXE — не требует установки
+
+            **`${{ steps.nsis.outputs.exe_name }}`** — скачайте и запустите. Всё.
+            - Python не нужен — всё встроено
+            - Установка не требуется, реестр не изменяется
+            - Данные хранятся в `%APPDATA%\FMailSender\`
+            - При закрытии приложения временные файлы очищаются автоматически
+
+            **`FMailSender-v${{ steps.tag.outputs.version }}-portable-zip.zip`** — альтернатива для ручного запуска.
+            Распакуйте и запустите `FMailSender.exe` из папки.
 
             ### Требования
             - Windows 10 x64 (build 1803+) или Windows 11
-            - WebView2 Runtime (предустановлен на Win11; на Win10 скачается автоматически)
+            - WebView2 Runtime (предустановлен на Win11; на Win10 [скачать](https://go.microsoft.com/fwlink/p/?LinkId=2124703))
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

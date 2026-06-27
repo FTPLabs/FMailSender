@@ -1,7 +1,8 @@
-// FMailSender Tauri shell v6.0
+// FMailSender Tauri shell v6.0.2
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::net::TcpStream;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -23,29 +24,52 @@ fn wait_for_core(timeout: Duration) -> bool {
     false
 }
 
-fn spawn_python_core(app: &tauri::App) -> Option<Child> {
-    let resource_path = app.path().resource_dir().ok()?;
+/// Returns candidate directories to search for the sidecar binary.
+/// Order: (1) Tauri resource_dir — correct for NSIS-installed bundles,
+///        (2) current exe's own directory — correct for portable / no-bundle builds.
+fn sidecar_search_dirs(app: &tauri::App) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
 
-    // Production: bundled PyInstaller binary (Tauri v2 sidecar naming)
-    let sidecar = resource_path.join("fmail-core-x86_64-pc-windows-msvc.exe");
-    if sidecar.exists() {
-        return Command::new(&sidecar)
-            .env("FMAIL_PORT", CORE_PORT.to_string())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok();
+    // 1. Tauri resource directory (NSIS install dir / bundle resources)
+    if let Ok(p) = app.path().resource_dir() {
+        dirs.push(p);
     }
 
-    // Fallback: bare name
-    let bare = resource_path.join("fmail-core.exe");
-    if bare.exists() {
-        return Command::new(&bare)
-            .env("FMAIL_PORT", CORE_PORT.to_string())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok();
+    // 2. Directory that contains the running executable (portable mode)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let parent_buf = parent.to_path_buf();
+            if !dirs.contains(&parent_buf) {
+                dirs.push(parent_buf);
+            }
+        }
+    }
+
+    dirs
+}
+
+fn spawn_python_core(app: &tauri::App) -> Option<Child> {
+    for dir in sidecar_search_dirs(app) {
+        // Tauri sidecar naming convention: <name>-<target-triple>.exe
+        let msvc = dir.join("fmail-core-x86_64-pc-windows-msvc.exe");
+        if msvc.exists() {
+            return Command::new(&msvc)
+                .env("FMAIL_PORT", CORE_PORT.to_string())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok();
+        }
+        // Bare name fallback (portable / extracted builds)
+        let bare = dir.join("fmail-core.exe");
+        if bare.exists() {
+            return Command::new(&bare)
+                .env("FMAIL_PORT", CORE_PORT.to_string())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok();
+        }
     }
 
     // Dev mode: python main.py from project root
@@ -77,7 +101,10 @@ fn main() {
 
             let timeout = Duration::from_secs(STARTUP_TIMEOUT_SECS);
             if !wait_for_core(timeout) {
-                eprintln!("[FMailSender] Python core did not start within {}s", STARTUP_TIMEOUT_SECS);
+                eprintln!(
+                    "[FMailSender] Python core did not start within {}s",
+                    STARTUP_TIMEOUT_SECS
+                );
             }
             Ok(())
         })

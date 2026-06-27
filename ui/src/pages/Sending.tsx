@@ -43,10 +43,13 @@ export default function Sending() {
   const ready  = status?.accounts.ready ?? 0
   const recs   = status?.recipients ?? 0
 
-  async function act(fn: () => Promise<any>) {
+  async function act(fn: () => Promise<unknown>) {
     setBusy(true)
     try { await fn(); const s = await api.status(); setStatus(s) }
-    catch (e: any) { alert(e.response?.data?.detail ?? e.message) }
+    catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } }; message?: string })
+      alert(msg?.response?.data?.detail ?? (e as Error).message)
+    }
     finally { setBusy(false) }
   }
 
@@ -151,7 +154,8 @@ export default function Sending() {
           )}
           {paused && (
             <>
-              <button onClick={() => act(api.campaign.start)} disabled={busy}
+              {/* FIX: was incorrectly calling start — must call resume to continue from pause */}
+              <button onClick={() => act(api.campaign.resume)} disabled={busy}
                 className="btn btn-primary px-6">
                 <Play size={15} /> Продолжить
               </button>

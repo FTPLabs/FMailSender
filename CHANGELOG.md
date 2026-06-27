@@ -1,3 +1,16 @@
+## [6.0.2] — 2026-06-27
+
+### 🔧 Исправления
+
+- **storage.py** — данные теперь хранятся в `%APPDATA%\FMailSender\` (не в temp-директории PyInstaller)
+- **api.ts** — добавлен отсутствующий метод `campaign.resume()`
+- **Sending.tsx** — кнопка «Продолжить» теперь вызывает `/api/campaign/resume`, а не `/api/campaign/start` (был баг)
+- **main.rs** — поиск sidecar теперь также проверяет директорию самого exe (portable-режим)
+- **Версии** синхронизированы: `_version.py`, `Cargo.toml`, `tauri.conf.json` — все `6.0.2`
+- **release.yml** — полностью переписан: теперь собирает portable `.exe` без установщика (NSIS-лаунчер + ZIP)
+
+---
+
 ## [6.0.0] — 2026-06-27
 
   ### 🚀 Major — Полный редизайн: Tauri v2 + React + Vite

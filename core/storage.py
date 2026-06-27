@@ -1,18 +1,34 @@
 """
 FMailSender — Storage layer v6.0
 All read/write operations for accounts, proxies, recipients, campaign config.
-Data lives in data/ directory (created automatically).
+Data lives in %APPDATA%/FMailSender/ (Windows) or ~/FMailSender/ (other).
+Works correctly both in dev mode and inside PyInstaller --onefile bundles.
 """
 from __future__ import annotations
 import json
+import os
+import sys
 from pathlib import Path
 from cryptography.fernet import Fernet
-import base64, hashlib
 
 from core.models import SmtpAccount, Recipient, CampaignConfig
 
-DATA_DIR = Path(__file__).parent.parent / "data"
-DATA_DIR.mkdir(exist_ok=True)
+
+def _get_data_dir() -> Path:
+    """Return persistent data directory.
+
+    PyInstaller --onefile: __file__ points to a temporary extraction directory
+    that is deleted after the process exits — unsuitable for persistent data.
+    Use %APPDATA%/FMailSender on Windows, ~/FMailSender elsewhere.
+    """
+    if getattr(sys, "frozen", False):
+        appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
+        return Path(appdata) / "FMailSender"
+    return Path(__file__).parent.parent / "data"
+
+
+DATA_DIR = _get_data_dir()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 ACCOUNTS_FILE   = DATA_DIR / "accounts.json"
 PROXIES_FILE    = DATA_DIR / "global_proxies.json"
@@ -72,7 +88,6 @@ def load_accounts() -> list[SmtpAccount]:
             d["password"] = _dec(d.get("password", ""))
             if d.get("access_token"):
                 d["access_token"] = _dec(d["access_token"])
-            # Proxy fields are session-only on load
             d["proxy"] = d.get("proxy", "")
             d["proxy_list"] = []
             accounts.append(SmtpAccount.from_dict(d))
