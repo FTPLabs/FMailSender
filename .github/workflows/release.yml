@@ -176,19 +176,29 @@ jobs:
             Write-Host "  $($_.Name) = $sz MB"
           }
 
+      # ── Install NSIS (Chocolatey is pre-installed on all GitHub Windows runners) ──
+      - name: "Install NSIS"
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress -y
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) {
+            Write-Error "FAIL: makensis still not found after choco install"
+            exit 1
+          }
+          Write-Host "OK: makensis found at $makensis"
+          & $makensis /VERSION
+
       # ── Create portable launcher with NSIS ────────────────────────────────
-      # portable.nsi is committed to the repo. NSIS is pre-installed on windows-latest.
+      # portable.nsi is committed to the repo.
       # Produces a single .exe: silently extracts to %TEMP%\FMailSender, runs app, cleans up.
       - name: "Create NSIS portable launcher"
         id: nsis
         shell: pwsh
         run: |
-          $ver     = "${{ steps.tag.outputs.version }}"
-          $outName = "FMailSender-v${ver}-portable.exe"
-
-          # makensis is pre-installed on windows-latest at this path
+          $ver      = "${{ steps.tag.outputs.version }}"
+          $outName  = "FMailSender-v${ver}-portable.exe"
           $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (-not (Test-Path $makensis)) { $makensis = "makensis" }
 
           # portable.nsi is committed to the repo; pass version via /D define
           & $makensis /DVERSION=$ver portable.nsi
