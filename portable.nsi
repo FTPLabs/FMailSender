@@ -1,17 +1,12 @@
 ; FMailSender Portable Launcher
-; Usage: makensis /DVERSION=6.0.2 portable.nsi
-; Creates a single .exe that silently extracts to %TEMP%\FMailSender,
-; runs FMailSender.exe, waits for it to close, then cleans up.
-; No installation, no registry changes, no admin rights needed.
+; Usage: makensis portable.nsi
+; Creates MailSender.exe — double-click to run, no installation required.
+; Silently extracts both executables to %TEMP%\FMailSender, runs FMailSender.exe,
+; waits for it to close, then cleans up temp files automatically.
 
 Unicode true
 SetCompressor /SOLID lzma
-
-!ifndef VERSION
-  !define VERSION "6.0.2"
-!endif
-
-OutFile "FMailSender-v${VERSION}-portable.exe"
+OutFile "MailSender.exe"
 InstallDir "$TEMP\FMailSender"
 RequestExecutionLevel user
 SilentInstall silent

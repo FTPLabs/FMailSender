@@ -52,12 +52,49 @@ CRYPTO_HIDDEN = [
     "cryptography.hazmat.backends.openssl",
 ]
 
+# email.mime.* — PyInstaller does not auto-collect stdlib subpackages;
+# must list each submodule explicitly to avoid ModuleNotFoundError at runtime.
+EMAIL_HIDDEN = [
+    "email",
+    "email.mime",
+    "email.mime.application",
+    "email.mime.audio",
+    "email.mime.base",
+    "email.mime.image",
+    "email.mime.message",
+    "email.mime.multipart",
+    "email.mime.nonmultipart",
+    "email.mime.text",
+    "email.generator",
+    "email.parser",
+    "email.policy",
+    "email.headerregistry",
+    "email.contentmanager",
+    "email.encoders",
+    "email.charset",
+    "email.header",
+    "email.utils",
+    "email.message",
+    "email.errors",
+    "email.feedparser",
+    "email.iterators",
+    "email.quoprimime",
+    "email.base64mime",
+    "email._parseaddr",
+    "email._header_value_parser",
+    "email._encoded_words",
+]
+
 SMTP_HIDDEN = [
     "aiosmtplib",
     "dns",
     "dns.resolver",
     "socks",
     "sockshandler",
+    "smtplib",
+    "imaplib",
+    "ssl",
+    "socket",
 ]
 
 WINDOWS_HIDDEN = [
@@ -69,13 +106,15 @@ WINDOWS_HIDDEN = [
 ]
 
 ALL_HIDDEN = (
-    UVICORN_HIDDEN + FASTAPI_HIDDEN + CRYPTO_HIDDEN + SMTP_HIDDEN + WINDOWS_HIDDEN + [
+    UVICORN_HIDDEN
+    + FASTAPI_HIDDEN
+    + CRYPTO_HIDDEN
+    + EMAIL_HIDDEN
+    + SMTP_HIDDEN
+    + WINDOWS_HIDDEN
+    + [
         "asyncio",
         "threading",
-        "smtplib",
-        "imaplib",
-        "ssl",
-        "socket",
     ]
 )
 

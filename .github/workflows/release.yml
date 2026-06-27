@@ -196,50 +196,26 @@ jobs:
         id: nsis
         shell: pwsh
         run: |
-          $ver      = "${{ steps.tag.outputs.version }}"
-          $outName  = "FMailSender-v${ver}-portable.exe"
           $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
-
-          # portable.nsi is committed to the repo; pass version via /D define
-          & $makensis /DVERSION=$ver portable.nsi
+          & $makensis portable.nsi
           if ($LASTEXITCODE -ne 0) {
             Write-Error "FAIL: makensis returned $LASTEXITCODE"
             exit 1
           }
-          if (-not (Test-Path $outName)) {
-            Write-Error "FAIL: $outName not created by NSIS"
+          if (-not (Test-Path "MailSender.exe")) {
+            Write-Error "FAIL: MailSender.exe not created by NSIS"
             exit 1
           }
-          $sz = [math]::Round((Get-Item $outName).Length / 1MB, 1)
-          Write-Host "OK: $outName = $sz MB"
-          echo "exe_name=$outName" >> $env:GITHUB_OUTPUT
-          echo "exe_path=$(Resolve-Path $outName)" >> $env:GITHUB_OUTPUT
+          $sz = [math]::Round((Get-Item "MailSender.exe").Length / 1MB, 1)
+          Write-Host "OK: MailSender.exe = $sz MB"
+          echo "exe_path=$(Resolve-Path MailSender.exe)" >> $env:GITHUB_OUTPUT
 
-      # ── Also create a simple ZIP for users who prefer manual extraction ────
-      - name: "Create portable ZIP"
-        id: zip
-        shell: pwsh
-        run: |
-          $ver     = "${{ steps.tag.outputs.version }}"
-          $zipName = "FMailSender-v${ver}-portable-zip.zip"
-          Compress-Archive -Path "dist_portable\*" -DestinationPath $zipName -Force
-          Write-Host "OK: $zipName = $([math]::Round((Get-Item $zipName).Length/1MB,1)) MB"
-          echo "zip_name=$zipName" >> $env:GITHUB_OUTPUT
-          echo "zip_path=$(Resolve-Path $zipName)" >> $env:GITHUB_OUTPUT
-
-      # ── Upload artifacts ────────────────────────────────────────────────────
-      - name: "Upload portable EXE artifact"
+      # ── Upload artifact ─────────────────────────────────────────────────────
+      - name: "Upload MailSender.exe artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: FMailSender-v${{ steps.tag.outputs.version }}-portable-exe
+          name: MailSender
           path: ${{ steps.nsis.outputs.exe_path }}
-          if-no-files-found: error
-
-      - name: "Upload portable ZIP artifact"
-        uses: actions/upload-artifact@v4
-        with:
-          name: FMailSender-v${{ steps.tag.outputs.version }}-portable-zip
-          path: ${{ steps.zip.outputs.zip_path }}
           if-no-files-found: error
 
       # ── Create GitHub Release ───────────────────────────────────────────────
@@ -253,22 +229,14 @@ jobs:
           name: ${{ steps.tag.outputs.name }}
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
           generate_release_notes: true
-          files: |
-            ${{ steps.nsis.outputs.exe_path }}
-            ${{ steps.zip.outputs.zip_path }}
+          files: ${{ steps.nsis.outputs.exe_path }}
           body: |
             ## ${{ steps.tag.outputs.name }}
 
-            ### Portable EXE — не требует установки
-
-            **`${{ steps.nsis.outputs.exe_name }}`** — скачайте и запустите. Всё.
-            - Python не нужен — всё встроено
+            **`MailSender.exe`** — скачайте и запустите. Всё.
             - Установка не требуется, реестр не изменяется
+            - Python не нужен — всё встроено
             - Данные хранятся в `%APPDATA%\FMailSender\`
-            - При закрытии приложения временные файлы очищаются автоматически
-
-            **`FMailSender-v${{ steps.tag.outputs.version }}-portable-zip.zip`** — альтернатива для ручного запуска.
-            Распакуйте и запустите `FMailSender.exe` из папки.
 
             ### Требования
             - Windows 10 x64 (build 1803+) или Windows 11
