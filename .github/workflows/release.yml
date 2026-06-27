@@ -177,8 +177,8 @@ jobs:
           }
 
       # ── Create portable launcher with NSIS ────────────────────────────────
-      # NSIS extracts both EXEs to %TEMP%\FMailSender, runs FMailSender.exe silently,
-      # waits for it to close, then cleans up. User gets a single .exe — no installer.
+      # portable.nsi is committed to the repo. NSIS is pre-installed on windows-latest.
+      # Produces a single .exe: silently extracts to %TEMP%\FMailSender, runs app, cleans up.
       - name: "Create NSIS portable launcher"
         id: nsis
         shell: pwsh
@@ -186,41 +186,18 @@ jobs:
           $ver     = "${{ steps.tag.outputs.version }}"
           $outName = "FMailSender-v${ver}-portable.exe"
 
-          $nsiScript = @"
-          Unicode true
-          SetCompressor /SOLID lzma
-          OutFile "$outName"
-          InstallDir "`$TEMP\FMailSender"
-          RequestExecutionLevel user
-          SilentInstall silent
-
-          Section
-            SetOutPath "`$INSTDIR"
-            File "dist_portable\FMailSender.exe"
-            File "dist_portable\fmail-core.exe"
-            ; Launch app and wait for it to close
-            ExecWait '"`$INSTDIR\FMailSender.exe"'
-            ; Cleanup temp files
-            Delete "`$INSTDIR\FMailSender.exe"
-            Delete "`$INSTDIR\fmail-core.exe"
-            RMDir  "`$INSTDIR"
-          SectionEnd
-          "@
-
-          $nsiScript | Out-File -FilePath "portable.nsi" -Encoding UTF8
-
-          # Run makensis (pre-installed on windows-latest)
+          # makensis is pre-installed on windows-latest at this path
           $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (-not (Test-Path $makensis)) {
-            $makensis = "makensis"
-          }
-          & $makensis portable.nsi
+          if (-not (Test-Path $makensis)) { $makensis = "makensis" }
+
+          # portable.nsi is committed to the repo; pass version via /D define
+          & $makensis /DVERSION=$ver portable.nsi
           if ($LASTEXITCODE -ne 0) {
             Write-Error "FAIL: makensis returned $LASTEXITCODE"
             exit 1
           }
           if (-not (Test-Path $outName)) {
-            Write-Error "FAIL: $outName not created"
+            Write-Error "FAIL: $outName not created by NSIS"
             exit 1
           }
           $sz = [math]::Round((Get-Item $outName).Length / 1MB, 1)
