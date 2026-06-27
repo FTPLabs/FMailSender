@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -55,11 +56,6 @@ from core.sender import (
     test_smtp_connection,
 )
 
-app = FastAPI(title="FMailSender Core", version=APP_VERSION)
-app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
-)
-
 # ── Global mutable state ──────────────────────────────────────────────────────
 _accounts: list[SmtpAccount]  = []
 _proxies:  list[str]          = []
@@ -70,13 +66,21 @@ _engine: Optional[SendingEngine] = None
 _engine_thread: Optional[threading.Thread] = None
 
 
-@app.on_event("startup")
-async def _startup():
+# BUG FIX: replaced deprecated @app.on_event("startup") with lifespan (FastAPI 0.93+)
+@asynccontextmanager
+async def _lifespan(application: FastAPI):
     global _accounts, _proxies, _recipients, _campaign_cfg
     _accounts     = load_accounts()
     _proxies      = load_proxies()
     _recipients   = load_recipients()
     _campaign_cfg = load_campaign()
+    yield
+
+
+app = FastAPI(title="FMailSender Core", version=APP_VERSION, lifespan=_lifespan)
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+)
 
 
 # ── Pydantic request schemas ──────────────────────────────────────────────────
