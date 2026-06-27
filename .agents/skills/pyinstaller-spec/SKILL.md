@@ -1,63 +1,83 @@
 ---
 name: pyinstaller-spec
-description: PyInstaller spec файл и build.py для FMailSender — скрытые импорты, data files, onefile сборка. Активируй при ошибках сборки EXE.
+description: PyInstaller spec для FMailSender v6 (FastAPI backend). Скрытые импорты, data-файлы, onefile сборка. Активируй при ошибках сборки fmail-core.exe.
 ---
 
-# PyInstaller Spec — FMailSender
+# PyInstaller Spec — FMailSender v6 (FastAPI core)
 
-## build.py — главный скрипт
+## Команда сборки
 
-```python
-# build.py вызывает PyInstaller с нужными параметрами
-import subprocess, sys
+```bash
+# Из корня репозитория:
+pyinstaller fmail-core.spec \
+  --distpath src-tauri/binaries \
+  --noconfirm
 
-subprocess.run([
-    sys.executable, "-m", "PyInstaller",
-    "--onefile",
-    "--windowed",
-    "--name", "FMailSender",
-    "--icon", "assets/icon.ico",
-    "--add-data", "data;data",
-    "--add-data", "i18n;i18n",
-    "--add-data", "templates;templates",
-    "--hidden-import", "aiosmtplib",
-    "--hidden-import", "socks",
-    "--hidden-import", "cryptography",
-    "--hidden-import", "PyQt6.sip",
-    "main.py"
-], check=True)
+# CI (PowerShell):
+pyinstaller fmail-core.spec `
+  --distpath "src-tauri/binaries" `
+  --workpath "C:/tmp/pyinstaller-build" `
+  --noconfirm
 ```
 
-## Частые ошибки сборки
+## Обязательные настройки spec
+
+```python
+# PyInstaller >= 6.0: НЕТ cipher= аргумента
+pyz = PYZ(a.pure, a.zipped_data)  # ✅
+
+# UPX: ВЫКЛЮЧИТЬ на CI (UPX не установлен)
+upx=False  # ✅
+# upx=True  # ❌ GitHub runner не имеет UPX
+
+# console=False: без консольного окна
+console=False  # ✅
+```
+
+## Data files
+
+```python
+datas = [(str(ROOT / "core"), "core")]
+if (ROOT / "data").exists():
+    datas.append((str(ROOT / "data"), "data"))
+if (ROOT / "i18n").exists():
+    datas.append((str(ROOT / "i18n"), "i18n"))
+```
+
+## Частые ошибки
 
 | Ошибка | Причина | Решение |
 |--------|---------|---------|
-| ModuleNotFoundError в runtime | Hidden import | Добавить --hidden-import |
-| FileNotFoundError для data файла | Data не включён | --add-data "src;dst" |
-| Icon not found | Путь к иконке неверный | Проверить assets/icon.ico |
-| PyQt6 crash | PyQt6.sip не включён | --hidden-import PyQt6.sip |
+| `ModuleNotFoundError: uvicorn.loops` | Не в hiddenimports | Добавить uvicorn скрытые импорты |
+| `UPX is not available` | upx=True, UPX не установлен | Изменить на `upx=False` |
+| `cipher=block_cipher` SyntaxError | Устаревший синтаксис | Убрать `cipher=` из PYZ() |
+| `FileNotFoundError: data/spam_words.json` | data/ не в datas | Добавить в `datas` |
+| Runtime ImportError на cryptography | Не в hiddenimports | Добавить `cryptography.hazmat.backends.openssl` |
 
-## Добавление новой зависимости в EXE
+## Sidecar naming для Tauri
 
-1. Добавить в `requirements.txt`
-2. Если это pure Python пакет — PyInstaller найдёт сам
-3. Если нужен hidden import:
-   - `--hidden-import mypackage`
-   - или в spec файле: `hiddenimports=['mypackage']`
-4. Если нужны data файлы:
-   - `--add-data "src_dir;dst_dir"` (Windows: `;` разделитель)
-
-## Проверка размера EXE
-
-После сборки проверяем:
-```powershell
-$size = [math]::Round((Get-Item 'dist\FMailSender.exe').Length / 1MB, 1)
-Write-Host "EXE: $size MB"
-# Норма: 50-150 MB для PyQt6 приложения
+```bash
+# После pyinstaller:
+cp src-tauri/binaries/fmail-core.exe \
+   src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe
 ```
 
-## Антивирус ложные срабатывания
+## Проверка после сборки
 
-PyInstaller EXE часто помечается антивирусом как подозрительный.
-Решение: подпись кода (Code Signing Certificate) или исключение.
-Текущий статус: без подписи — пользователи должны добавить в исключения.
+```powershell
+$exe = "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
+if (Test-Path $exe) {
+    $sz = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+    Write-Host "OK: fmail-core.exe $sz MB"  # норма: 25-45 MB
+} else {
+    Write-Error "FAIL: sidecar binary не найден"
+}
+```
+
+## Добавление новой Python зависимости в EXE
+
+1. Добавить в `requirements.txt`
+2. Если pure Python — PyInstaller найдёт автоматически
+3. Если нужен hidden import — добавить в список `ALL_HIDDEN` в spec
+4. Если нужны data-файлы — добавить в `datas`
+5. Пересобрать: `pyinstaller fmail-core.spec --distpath src-tauri/binaries --noconfirm`
