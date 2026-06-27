@@ -1,51 +1,55 @@
 @tailwind base;
-  @tailwind components;
-  @tailwind utilities;
+@tailwind components;
+@tailwind utilities;
 
-  @layer base {
-    * { box-sizing: border-box; }
-    html, body, #root { height: 100%; margin: 0; }
-    body {
-      background-color: #040410;
-      color: #e8e8ff;
-      font-family: 'Inter', system-ui, sans-serif;
-      -webkit-font-smoothing: antialiased;
-    }
-    ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: #0d1117; }
-    ::-webkit-scrollbar-thumb { background: #3a3a66; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #6666aa; }
+@layer base {
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; margin: 0; }
+  body {
+    background-color: #040410;
+    color: #e8e8ff;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: #0d1117; }
+  ::-webkit-scrollbar-thumb { background: #3a3a66; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #6666aa; }
+}
 
-  @layer components {
-    .btn-primary {
-      @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-purple text-white font-medium text-sm
-             hover:bg-purple-light transition-all duration-150 shadow-glow-sm active:scale-95;
-    }
-    .btn-secondary {
-      @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-surf3 text-text-muted font-medium text-sm
-             hover:bg-surf2 hover:text-text transition-all duration-150 border border-text-dim;
-    }
-    .btn-danger {
-      @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-error/20 text-error font-medium text-sm
-             hover:bg-error/30 transition-all duration-150 border border-error/30;
-    }
-    .card {
-      @apply bg-surface rounded-xl border border-text-dim/30 p-5;
-    }
-    .card-hover {
-      @apply card hover:border-purple/50 transition-all duration-200 cursor-pointer;
-    }
-    .input {
-      @apply w-full bg-surf2 border border-text-dim rounded-lg px-3 py-2 text-sm text-text
-             placeholder:text-muted focus:outline-none focus:border-purple focus:ring-1 focus:ring-purple/30
-             transition-all duration-150;
-    }
-    .label { @apply text-xs font-medium text-muted uppercase tracking-wider mb-1 block; }
-    .badge-ok    { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-success/15 text-success; }
-    .badge-error { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-error/15 text-error; }
-    .badge-warn  { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-warn/15 text-warn; }
-    .badge-idle  { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-muted/15 text-muted; }
-    .badge-cyan  { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-cyan/15 text-cyan; }
+@layer utilities {
+  .text-muted { color: #6666aa; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-purple text-white font-medium text-sm
+           hover:bg-purple-light transition-all duration-150 shadow-glow-sm active:scale-95;
   }
-  
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-surf3 text-text-muted font-medium text-sm
+           hover:bg-surf2 hover:text-text transition-all duration-150 border border-text-dim;
+  }
+  .btn-danger {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-error/20 text-error font-medium text-sm
+           hover:bg-error/30 transition-all duration-150 border border-error/30;
+  }
+  .card {
+    @apply bg-surface rounded-xl border border-text-dim/30 p-5;
+  }
+  .card-hover {
+    @apply card hover:border-purple/50 transition-all duration-200 cursor-pointer;
+  }
+  .input {
+    @apply w-full bg-surf2 border border-text-dim rounded-lg px-3 py-2 text-sm text-text
+           focus:outline-none focus:border-purple focus:ring-1 focus:ring-purple/30
+           transition-all duration-150;
+  }
+  .input::placeholder { color: #6666aa; }
+  .label { @apply text-xs font-medium text-muted uppercase tracking-wider mb-1 block; }
+  .badge-ok    { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-success/15 text-success; }
+  .badge-error { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-error/15 text-error; }
+  .badge-warn  { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-warn/15 text-warn; }
+  .badge-idle  { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-muted/15 text-muted; }
+  .badge-cyan  { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-cyan/15 text-cyan; }
+}
