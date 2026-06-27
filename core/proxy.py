@@ -168,3 +168,20 @@ def check_smtp_via_proxy(proxy_url: str, timeout: int = 8) -> bool:
         return banner.startswith(b"220")
     except Exception:
         return False
+
+
+def validate_proxy(proxy_url: str, timeout: int = 7) -> dict:
+    """FIX: was missing — server.py imports this.
+    Run connectivity + SMTP check and return a unified result dict.
+    """
+    ok, error, ping_ms = check_proxy(proxy_url, timeout=timeout)
+    smtp_ok = False
+    if ok:
+        smtp_ok = check_smtp_via_proxy(proxy_url, timeout=timeout)
+    return {
+        "proxy":    proxy_url,
+        "ok":       ok,
+        "smtp_ok":  smtp_ok,
+        "error":    error,
+        "ping_ms":  ping_ms,
+    }

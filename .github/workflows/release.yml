@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 6.0.1)"
+        description: "Version (e.g. 6.0.2)"
         required: true
-        default: "6.0.0"
+        default: "6.0.2"
       prerelease:
         description: "Pre-release?"
         type: boolean
@@ -21,7 +21,7 @@ env:
 
 jobs:
   build:
-    name: "Build Windows Installer"
+    name: "Build Windows Portable EXE"
     runs-on: windows-latest
     permissions:
       contents: write
@@ -54,6 +54,15 @@ jobs:
       - name: "Install Python deps + PyInstaller"
         run: pip install -r requirements.txt pyinstaller
 
+      - name: "Verify Python imports (catch missing symbols before build)"
+        shell: pwsh
+        run: |
+          python -c "from core.proxy import ProxyManager, parse_proxy, validate_proxy; print('proxy OK')"
+          python -c "from core.server import app; print('server OK')"
+          python -c "from core.storage import save_accounts, load_accounts; print('storage OK')"
+          python -c "from core.sender import SendingEngine, test_smtp_connection; print('sender OK')"
+          python -c "from core.models import SmtpAccount, Recipient, CampaignConfig, CampaignStatus; print('models OK')"
+
       - name: "Install UI deps"
         working-directory: ui
         run: npm install
@@ -85,7 +94,7 @@ jobs:
             exit 1
           }
           Copy-Item $exe "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
-          Write-Host "Binary copied to: src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
+          Write-Host "Sidecar: src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
 
       - name: "Verify sidecar binary exists"
         shell: pwsh
@@ -95,51 +104,46 @@ jobs:
             Write-Error "Sidecar binary missing: $sidecar"
             exit 1
           }
-          Write-Host "Sidecar OK: $sidecar"
+          Write-Host "Sidecar OK: $($sidecar) ($([math]::Round((Get-Item $sidecar).Length/1MB,1)) MB)"
 
-      - name: "Build Tauri (.exe installer)"
+      - name: "Build Tauri portable EXE"
         shell: pwsh
-        run: tauri build
+        run: tauri build --bundles nsis
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: "Find build artifacts"
+      - name: "Find portable EXE artifact"
         id: artifacts
         shell: pwsh
         run: |
-          $bundle = "src-tauri/target/release/bundle"
+          $bundle = "src-tauri/target/release/bundle/nsis"
           if (-not (Test-Path $bundle)) {
-            Write-Error "Bundle directory not found: $bundle"
-            Get-ChildItem "src-tauri/target/release" -ErrorAction SilentlyContinue
+            Write-Error "NSIS bundle directory not found: $bundle"
+            Get-ChildItem "src-tauri/target/release/bundle" -ErrorAction SilentlyContinue
             exit 1
           }
-          $exe = Get-ChildItem -Path $bundle -Filter "*_x64-setup.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          # Portable NSIS produces a file with _portable suffix
+          $exe = Get-ChildItem -Path $bundle -Filter "*_portable.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $exe) {
+            # Fallback: any .exe in nsis bundle
             $exe = Get-ChildItem -Path $bundle -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           }
-          $msi = Get-ChildItem -Path $bundle -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($exe) {
+            Write-Host "Portable EXE: $($exe.FullName) ($([math]::Round($exe.Length/1MB,1)) MB)"
             echo "exe_path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
-            Write-Host "EXE: $($exe.FullName)"
+            echo "exe_name=$($exe.Name)" >> $env:GITHUB_OUTPUT
           } else {
-            Write-Warning "No .exe installer found in bundle"
-          }
-          if ($msi) {
-            echo "msi_path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
-            Write-Host "MSI: $($msi.FullName)"
-          } else {
-            Write-Warning "No .msi installer found in bundle"
+            Write-Error "No portable .exe found in $bundle"
+            exit 1
           }
 
-      - name: "Upload build artifacts"
+      - name: "Upload portable EXE as artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: FMailSender-Windows-v6
-          path: |
-            src-tauri/target/release/bundle/**/*.exe
-            src-tauri/target/release/bundle/**/*.msi
-          if-no-files-found: warn
+          name: FMailSender-Windows-Portable-v${{ github.event.inputs.version || github.ref_name }}
+          path: ${{ steps.artifacts.outputs.exe_path }}
+          if-no-files-found: error
 
       - name: "Determine release tag"
         id: tag
@@ -163,17 +167,16 @@ jobs:
           name: ${{ steps.tag.outputs.name }}
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
           generate_release_notes: true
-          files: |
-            ${{ steps.artifacts.outputs.exe_path }}
-            ${{ steps.artifacts.outputs.msi_path }}
+          files: ${{ steps.artifacts.outputs.exe_path }}
           body: |
             ## ${{ steps.tag.outputs.name }}
 
-            Windows installer — Tauri v2 + React + Python FastAPI.
-            No Python installation required on the user machine.
+            **Portable EXE** — Tauri v2 + React + Python FastAPI.
+            No installation required. Just run the .exe file.
+            No Python installation needed on the user machine.
 
             ### Requirements
             - Windows 10 x64 (build 1803+) or Windows 11
-            - 100 MB free disk space
+            - WebView2 Runtime (pre-installed on Win11; auto-downloaded on Win10)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
