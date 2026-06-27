@@ -4,7 +4,8 @@ import { api, type AppStatus } from '../api'
 
 function StatCard({ label, value, sub, icon: Icon, color }: {
   label: string; value: string | number; sub?: string
-  icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  icon: React.ElementType<any>
   color: string
 }) {
   return (
