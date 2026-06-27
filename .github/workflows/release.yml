@@ -81,7 +81,7 @@ jobs:
 
       - name: "Install UI deps"
         working-directory: ui
-        run: npm ci
+        run: npm install
 
       - name: "Build React UI"
         working-directory: ui
