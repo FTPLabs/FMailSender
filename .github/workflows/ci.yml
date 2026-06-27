@@ -1,222 +1,192 @@
 name: CI Checks
 
-  on:
-    push:
-      branches: [main]
-    pull_request:
-      branches: [main]
-    workflow_dispatch: {}
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
 
-  env:
-    PYTHON_VERSION: '3.11'
-    NODE_VERSION: '20'
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
 
-  jobs:
-    # ── 1. Python checks ─────────────────────────────────────────────────────────
-    python-checks:
-      name: Python — Syntax, Lint & Style
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v4
+jobs:
+  # ── 1. Python: syntax, lint, style ──────────────────────────────────────
+  python-checks:
+    name: Python — Syntax, Lint & Style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-        - uses: actions/setup-python@v5
-          with:
-            python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
-        - name: Install Python check tools
-          run: pip3 install pyflakes flake8 --quiet
+      - name: Install check tools
+        run: pip3 install pyflakes flake8 --quiet
 
-        - name: py_compile — syntax check all .py files
-          run: |
-            echo "=== py_compile syntax check ==="
-            FAILED=0
+      - name: py_compile — syntax check all .py files
+        run: |
+          echo "=== py_compile syntax check ==="
+          FAILED=0
+          while IFS= read -r -d "" f; do
+            if ! python3 -m py_compile "$f" 2>/tmp/err; then
+              echo "FAIL: $f"; cat /tmp/err; FAILED=1
+            else
+              echo "OK:   $f"
+            fi
+          done < <(find . -name "*.py"
+            -not -path "./.git/*"
+            -not -path "./.venv/*"
+            -not -path "./venv/*"
+            -not -path "./__pycache__/*"
+            -not -path "./node_modules/*"
+            -print0)
+          [ "$FAILED" -eq 0 ] || { echo "SYNTAX ERRORS FOUND"; exit 1; }
+          echo "All .py files passed syntax check."
+
+      - name: pyflakes — import & usage check
+        run: |
+          python3 -m pyflakes . 2>&1 | grep -v "__pycache__" | grep -v ".venv" | grep -v "node_modules" || true
+          echo "pyflakes done"
+
+      - name: flake8 — style, indentation & whitespace
+        run: |
+          flake8 . --select=E1,E2,E3,E7,W1,W2,W3,W6
+            --exclude=.git,.venv,venv,__pycache__,node_modules,build,dist
+            --max-line-length=200 --statistics || true
+          echo "flake8 done (informational)"
+
+  # ── 2. TypeScript / React ────────────────────────────────────────────────
+  typescript-checks:
+    name: TypeScript — Type-check & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: npm install
+        run: npm install
+
+      - name: tsc — strict type check
+        run: npx tsc --noEmit
+
+      - name: vite build — production bundle smoke test
+        run: npm run build
+
+  # ── 3. Rust / Tauri ──────────────────────────────────────────────────────
+  rust-checks:
+    name: Rust — Clippy & Format
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: cargo fmt — format check
+        run: cargo fmt --all -- --check
+        continue-on-error: true
+
+      - name: cargo clippy — lint
+        run: cargo clippy --all-targets -- -D warnings
+        continue-on-error: true
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+
+  # ── 4. Smoke tests ───────────────────────────────────────────────────────
+  smoke-tests:
+    name: Python Core — Smoke Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip3 install -r requirements.txt --quiet || true
+          pip3 install pytest requests --quiet
+
+      - name: Smoke — syntax-check core/ and server/
+        run: |
+          FAILED=0
+          for DIR in core server; do
+            [ -d "$DIR" ] || continue
             while IFS= read -r -d "" f; do
               if ! python3 -m py_compile "$f" 2>/tmp/err; then
                 echo "FAIL: $f"; cat /tmp/err; FAILED=1
               else
-                echo "OK:   $f"
+                echo "OK: $f"
               fi
-            done < <(find . -name "*.py" \
-              -not -path "./.git/*" \
-              -not -path "./.venv/*" \
-              -not -path "./venv/*" \
-              -not -path "./__pycache__/*" \
-              -not -path "./node_modules/*" \
-              -print0)
-            [ "$FAILED" -eq 0 ] || { echo "=== SYNTAX ERRORS FOUND ==="; exit 1; }
-            echo "All .py files passed syntax check."
+            done < <(find "$DIR" -name "*.py" -not -path "*/__pycache__/*" -print0)
+          done
+          [ "$FAILED" -eq 0 ] || exit 1
 
-        - name: pyflakes — import & usage check
-          run: |
-            echo "=== pyflakes check ==="
-            python3 -m pyflakes . 2>&1 \
-              | grep -v "__pycache__" \
-              | grep -v ".venv" \
-              | grep -v "node_modules" \
-              || true
-            echo "pyflakes done"
+      - name: Smoke — FastAPI health check
+        run: |
+          python3 - <<'PYEOF'
+          import subprocess, time, sys, os, urllib.request
+          p = subprocess.Popen(
+              ['python3', 'main.py'],
+              env={**os.environ, 'FMAIL_PORT': '17531'},
+              stdout=subprocess.PIPE, stderr=subprocess.PIPE
+          )
+          time.sleep(8)
+          try:
+              r = urllib.request.urlopen('http://127.0.0.1:17531/api/health', timeout=5)
+              print('Health:', r.status)
+          except Exception as e:
+              print('WARN:', e)
+          finally:
+              p.terminate()
+          sys.exit(0)
+          PYEOF
+          echo "FastAPI smoke test done"
 
-        - name: flake8 — style, indentation & whitespace (E/W errors)
-          run: |
-            echo "=== flake8 style check ==="
-            flake8 . \
-              --select=E1,E2,E3,E7,W1,W2,W3,W6 \
-              --exclude=.git,.venv,venv,__pycache__,node_modules,build,dist \
-              --max-line-length=200 \
-              --statistics \
-              || true
-            echo "flake8 done (informational)"
+      - name: Smoke — pytest tests/
+        run: |
+          if find tests -name "*.py" 2>/dev/null | grep -q .; then
+            python3 -m pytest tests/ -x -q --tb=short || true
+          else
+            echo "No tests found — skipping"
+          fi
 
-    # ── 2. TypeScript / React checks ────────────────────────────────────────────
-    typescript-checks:
-      name: TypeScript — Type-check & Build
-      runs-on: ubuntu-latest
-      defaults:
-        run:
-          working-directory: ui
-      steps:
-        - uses: actions/checkout@v4
+  # ── 5. Secret scan ───────────────────────────────────────────────────────
+  secret-scan:
+    name: Security — Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-        - uses: actions/setup-node@v4
-          with:
-            node-version: ${{ env.NODE_VERSION }}
+      - name: Install ripgrep
+        run: sudo apt-get install -y ripgrep 2>/dev/null || true
 
-        - name: npm install
-          run: npm install
-
-        - name: tsc — strict type check (noEmit)
-          run: npx tsc --noEmit
-
-        - name: vite build — production bundle smoke test
-          run: npm run build
-
-    # ── 3. Rust / Tauri checks ───────────────────────────────────────────────────
-    rust-checks:
-      name: Rust — Clippy & Format
-      runs-on: windows-latest
-      defaults:
-        run:
-          working-directory: src-tauri
-      steps:
-        - uses: actions/checkout@v4
-
-        - uses: dtolnay/rust-toolchain@stable
-          with:
-            components: clippy, rustfmt
-
-        - uses: Swatinem/rust-cache@v2
-          with:
-            workspaces: src-tauri
-
-        - name: cargo fmt — format check (informational)
-          run: cargo fmt --all -- --check
-          continue-on-error: true
-
-        - name: cargo clippy — lint (warnings as errors)
-          run: cargo clippy --all-targets -- -D warnings
-          continue-on-error: true
-          env:
-            TAURI_SIGNING_PRIVATE_KEY: ""
-            TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-
-    # ── 4. Smoke tests ───────────────────────────────────────────────────────────
-    smoke-tests:
-      name: Python Core — Smoke Tests
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v4
-
-        - uses: actions/setup-python@v5
-          with:
-            python-version: ${{ env.PYTHON_VERSION }}
-
-        - name: Install Python dependencies
-          run: |
-            pip3 install -r requirements.txt --quiet || true
-            pip3 install pytest requests --quiet
-
-        - name: Smoke — syntax-check all core modules
-          run: |
-            echo "=== Smoke: py_compile on core/ and server/ ==="
-            FAILED=0
-            for DIR in core server; do
-              [ -d "$DIR" ] || continue
-              while IFS= read -r -d "" f; do
-                if ! python3 -m py_compile "$f" 2>/tmp/err; then
-                  echo "FAIL: $f"; cat /tmp/err; FAILED=1
-                else
-                  echo "OK: $f"
-                fi
-              done < <(find "$DIR" -name "*.py" -not -path "*/__pycache__/*" -print0)
-            done
-            [ "$FAILED" -eq 0 ] || exit 1
-
-        - name: Smoke — FastAPI app health check
-          run: |
-            echo "=== Smoke: FastAPI startup ==="
-            python3 -c "
-            import subprocess, time, sys, os
-            env = {**os.environ, 'FMAIL_PORT': '17531'}
-            p = subprocess.Popen(
-                ['python3', 'main.py'],
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            time.sleep(8)
-            try:
-                import urllib.request
-                r = urllib.request.urlopen('http://127.0.0.1:17531/api/health', timeout=5)
-                print('Health:', r.status, r.read()[:200])
-            except Exception as e:
-                print('WARN (health check):', e)
-            finally:
-                p.terminate()
-                out, err = p.communicate(timeout=5)
-                if err:
-                    print('stderr:', err.decode()[:500])
-            sys.exit(0)
-            " 2>&1 || true
-            echo "FastAPI smoke test done"
-
-        - name: Smoke — run tests/ directory
-          run: |
-            if find tests -name "*.py" 2>/dev/null | head -1 | grep -q .; then
-              python3 -m pytest tests/ -x -q --tb=short 2>&1 || true
-            else
-              echo "No test files in tests/ — skipping"
-            fi
-
-    # ── 5. Security / secret scan ───────────────────────────────────────────────
-    secret-scan:
-      name: Security — Secret & Credential Scan
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v4
-
-        - name: Install ripgrep
-          run: sudo apt-get install -y ripgrep 2>/dev/null || true
-
-        - name: Scan for hardcoded secrets (informational)
-          run: |
-            echo "=== Secret scan ==="
-            FOUND=0
-            check() {
-              local label="$1"; shift
-              local result
-              result=$(rg --no-heading -l "$@" \
-                --glob '!.git' --glob '!*.pyc' \
-                --glob '!node_modules' --glob '!target' . 2>/dev/null || true)
-              if [ -n "$result" ]; then
-                echo "⚠️  $label found in:"; echo "$result"; FOUND=1
-              fi
-            }
-            check "GitHub tokens" \
-              -e 'ghp_[A-Za-z0-9]{36}' \
-              -e 'github_pat_[A-Za-z0-9_]{82}'
-            check "AWS Access Keys" -e 'AKIA[0-9A-Z]{16}'
-            check "Private keys" -e 'BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY'
-            check "Telegram bot tokens" -e '[0-9]{8,12}:[A-Za-z0-9_-]{35}'
-            [ "$FOUND" -eq 0 ] && echo "✅ No secrets found" || echo "⚠️  Review findings above"
-            exit 0
-  
+      - name: Scan for secrets (informational)
+        run: |
+          FOUND=0
+          rg_check() { local r; r=$(rg --no-heading -l "$@" --glob "!.git" --glob "!*.pyc" --glob "!node_modules" --glob "!target" . 2>/dev/null || true); [ -n "$r" ] && { echo "WARNING: $r"; FOUND=1; } || true; }
+          rg_check -e 'ghp_[A-Za-z0-9]{36}' -e 'github_pat_[A-Za-z0-9_]{82}'
+          rg_check -e 'AKIA[0-9A-Z]{16}'
+          rg_check -e 'BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY'
+          rg_check -e '[0-9]{8,12}:[A-Za-z0-9_-]{35}'
+          [ "$FOUND" -eq 0 ] && echo "No secrets found" || echo "Review warnings above"
+          exit 0
