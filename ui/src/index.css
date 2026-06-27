@@ -17,17 +17,13 @@
   ::-webkit-scrollbar-thumb:hover { background: #6666aa; }
 }
 
-@layer utilities {
-  .text-muted { color: #6666aa; }
-}
-
 @layer components {
   .btn-primary {
     @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-purple text-white font-medium text-sm
            hover:bg-purple-light transition-all duration-150 shadow-glow-sm active:scale-95;
   }
   .btn-secondary {
-    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-surf3 text-text-muted font-medium text-sm
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-surf3 text-muted font-medium text-sm
            hover:bg-surf2 hover:text-text transition-all duration-150 border border-text-dim;
   }
   .btn-danger {
