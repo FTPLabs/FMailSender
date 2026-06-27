@@ -23,7 +23,7 @@ jobs:
   build:
     name: "Build Windows Installer"
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: "Checkout"
@@ -50,15 +50,15 @@ jobs:
           workspaces: src-tauri -> target
 
       - name: "Install Python deps + PyInstaller"
-        run: |
-          pip install -r requirements.txt pyinstaller
-          pip list
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: "Install UI deps (npm install)"
+        working-directory: ui
+        run: npm install
 
       - name: "Build React UI"
         working-directory: ui
-        run: |
-          npm ci
-          npm run build
+        run: npm run build
 
       - name: "Build Python core (PyInstaller)"
         shell: pwsh
@@ -79,6 +79,7 @@ jobs:
           Copy-Item $exe "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
 
       - name: "Build Tauri (.exe installer)"
+        working-directory: src-tauri
         run: cargo tauri build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -125,7 +126,12 @@ jobs:
             ${{ steps.artifacts.outputs.msi_path }}
           body: |
             ## FMailSender ${{ github.ref_name }}
-            Windows installer built with Tauri v2 + React + Python FastAPI.
-            No Python installation required.
+
+            Windows installer — Tauri v2 + React + Python FastAPI.
+            No Python installation required on the user machine.
+
+            ### Requirements
+            - Windows 10 x64 (build 1803+) or Windows 11
+            - 100 MB free disk space
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
