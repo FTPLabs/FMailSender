@@ -23,7 +23,7 @@ jobs:
   build:
     name: "Build Windows Installer"
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: "Checkout"
@@ -52,13 +52,19 @@ jobs:
       - name: "Install Python deps + PyInstaller"
         run: pip install -r requirements.txt pyinstaller
 
-      - name: "Install UI deps (npm install)"
+      - name: "Install UI deps"
         working-directory: ui
         run: npm install
 
       - name: "Build React UI"
         working-directory: ui
         run: npm run build
+
+      - name: "Install tauri-cli"
+        run: npm install -g @tauri-apps/cli@^2
+
+      - name: "Generate Tauri icons from logo"
+        run: tauri icon assets/images/fmail_logo.png
 
       - name: "Build Python core (PyInstaller)"
         shell: pwsh
@@ -73,14 +79,25 @@ jobs:
             $sz = (Get-Item $exe).Length / 1MB
             Write-Host "fmail-core.exe: $([math]::Round($sz,1)) MB"
           } else {
-            Write-Error "fmail-core.exe not found!"
+            Write-Error "fmail-core.exe not found after PyInstaller build!"
             exit 1
           }
           Copy-Item $exe "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
+          Write-Host "Binary copied to: src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
+
+      - name: "Verify sidecar binary exists"
+        shell: pwsh
+        run: |
+          $sidecar = "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
+          if (-not (Test-Path $sidecar)) {
+            Write-Error "Sidecar binary missing: $sidecar"
+            exit 1
+          }
+          Write-Host "Sidecar OK: $sidecar"
 
       - name: "Build Tauri (.exe installer)"
-        working-directory: src-tauri
-        run: cargo tauri build
+        shell: pwsh
+        run: tauri build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -90,16 +107,27 @@ jobs:
         shell: pwsh
         run: |
           $bundle = "src-tauri/target/release/bundle"
+          if (-not (Test-Path $bundle)) {
+            Write-Error "Bundle directory not found: $bundle"
+            Get-ChildItem "src-tauri/target/release" -ErrorAction SilentlyContinue
+            exit 1
+          }
           $exe = Get-ChildItem -Path $bundle -Filter "*_x64-setup.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $exe) { $exe = Get-ChildItem -Path $bundle -Filter "*.exe" -Recurse | Select-Object -First 1 }
+          if (-not $exe) {
+            $exe = Get-ChildItem -Path $bundle -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
           $msi = Get-ChildItem -Path $bundle -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($exe) {
             echo "exe_path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
             Write-Host "EXE: $($exe.FullName)"
+          } else {
+            Write-Warning "No .exe installer found in bundle"
           }
           if ($msi) {
             echo "msi_path=$($msi.FullName)" >> $env:GITHUB_OUTPUT
             Write-Host "MSI: $($msi.FullName)"
+          } else {
+            Write-Warning "No .msi installer found in bundle"
           }
 
       - name: "Upload build artifacts"
@@ -111,21 +139,33 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
           if-no-files-found: warn
 
+      - name: "Determine release tag"
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            echo "name=FMailSender v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "name=FMailSender ${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: "Create GitHub Release"
         if: >
           (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
           github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "FMailSender ${{ github.ref_name }}"
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.name }}
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
           generate_release_notes: true
           files: |
             ${{ steps.artifacts.outputs.exe_path }}
             ${{ steps.artifacts.outputs.msi_path }}
           body: |
-            ## FMailSender ${{ github.ref_name }}
+            ## ${{ steps.tag.outputs.name }}
 
             Windows installer — Tauri v2 + React + Python FastAPI.
             No Python installation required on the user machine.
