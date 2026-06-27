@@ -42,9 +42,6 @@
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"
-      },
-      "nsis": {
-        "installMode": "portable"
       }
     }
   },
