@@ -7,15 +7,8 @@
   ],
   "permissions": [
     "core:default",
-    "shell:allow-open",
-    "dialog:allow-open",
-    "dialog:allow-save",
-    "dialog:allow-message",
-    "dialog:allow-ask",
-    "fs:allow-read-text-file",
-    "fs:allow-write-text-file",
-    "fs:allow-read-dir",
-    "fs:allow-exists",
-    "fs:allow-create-dir"
+    "shell:default",
+    "dialog:default",
+    "fs:default"
   ]
 }
