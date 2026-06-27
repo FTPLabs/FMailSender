@@ -1,39 +1,106 @@
 ---
 name: build-guard
-description: Проверяет готовность проекта к сборке .exe через PyInstaller и к созданию GitHub Release. Активируй перед любым запуском build.py, push с тегом, или workflow_dispatch. Документирует patch-систему обновлений.
+description: Проверяет готовность проекта к сборке через Tauri v2 + PyInstaller + React/Vite. Активируй перед любым push тегом v* или workflow_dispatch в release.yml.
 ---
 
-# Build Guard — Проверка перед сборкой EXE и релизом
+# Build Guard — FMailSender v6 (Tauri + FastAPI + React)
 
-## Когда использовать
+## Архитектура сборки
 
-- Перед `python build.py` или `pyinstaller FMailSender.spec`
-- Перед пушем тега `v*` (триггер build.yml)
-- После изменений в `core/`, `gui/`, `main.py`, `build.py`
-- Когда EXE падает при запуске с ImportError/ModuleNotFoundError
-
----
-
-## Блок 1 — PyInstaller 6.x совместимость
-
-```bash
-grep -n "cipher=block_cipher" build.py && echo "FAIL: устаревший cipher= — удали" || echo "OK"
+```
+React (Vite) → ui/dist/
+Python (PyInstaller) → src-tauri/binaries/fmail-core.exe
+Tauri CLI → src-tauri/target/release/bundle/*.exe + *.msi
 ```
 
-**Исправление:**
-```python
-# ❌ PyInstaller < 6.0
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-# ✅ PyInstaller >= 6.0
-pyz = PYZ(a.pure, a.zipped_data)
+## Блок 1 — Vite base path (КРИТИЧНО для Tauri)
+
+```bash
+grep -n "base:" ui/vite.config.ts && echo "OK: base задан" || echo "FAIL: base: './' отсутствует — WebView не загрузит ресурсы"
+```
+
+**Должно быть:**
+```typescript
+export default defineConfig({
+  base: './',   // обязательно для Tauri WebView
+  ...
+})
 ```
 
 ---
 
-## Блок 2 — aiosmtplib >= 3.0
+## Блок 2 — tauri-cli установлен
 
 ```bash
-grep -n "start_tls=" core/sender.py && echo "FAIL: убран в aiosmtplib 3.0" || echo "OK"
+# В release.yml должен быть шаг:
+grep -n "npm install -g @tauri-apps/cli" .github/workflows/release.yml && echo "OK" || echo "FAIL: tauri-cli не установлен в CI"
+```
+
+**Правильный вызов в CI:**
+```yaml
+- name: Install tauri-cli
+  run: npm install -g @tauri-apps/cli@^2
+
+- name: Generate Tauri icons
+  run: tauri icon assets/images/fmail_logo.png
+
+- name: Build Tauri
+  run: tauri build
+```
+
+---
+
+## Блок 3 — Иконки (КРИТИЧНО)
+
+```bash
+ls src-tauri/icons/ 2>/dev/null && echo "OK: icons существуют" || echo "WARN: icons сгенерируются в CI через 'tauri icon'"
+```
+
+Иконки генерируются в CI автоматически. Источник: `assets/images/fmail_logo.png`.
+
+---
+
+## Блок 4 — beforeBuildCommand не сломает CI
+
+```bash
+python3 -c "
+import json
+c = json.load(open('src-tauri/tauri.conf.json'))
+cmd = c.get('build', {}).get('beforeBuildCommand', '')
+if cmd and 'ui' in cmd and not cmd.startswith('cd ../ui'):
+    print(f'FAIL: beforeBuildCommand={cmd!r} — путь ui/ неверен из src-tauri/')
+    print('Исправление: пустая строка или cd ../ui && npm run build')
+else:
+    print(f'OK: beforeBuildCommand={cmd!r}')
+"
+```
+
+---
+
+## Блок 5 — Sidecar binary правильно назван
+
+```bash
+# После PyInstaller:
+ls src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe && echo "OK" || echo "FAIL: sidecar binary не найден"
+```
+
+Tauri ищет: `binaries/fmail-core-x86_64-pc-windows-msvc.exe` (суффикс цели Rust).
+
+---
+
+## Блок 6 — PyInstaller spec (PyInstaller >= 6.0)
+
+```bash
+grep -n "cipher=block_cipher" fmail-core.spec && echo "FAIL: устаревший cipher=" || echo "OK: PyInstaller 6.x"
+grep -n "upx=True" fmail-core.spec && echo "WARN: UPX может не быть в CI — используй upx=False" || echo "OK: upx=False"
+```
+
+---
+
+## Блок 7 — aiosmtplib >= 3.0
+
+```bash
+grep -rn "start_tls=" core/sender.py && echo "FAIL: start_tls= убран в aiosmtplib 3.0" || echo "OK"
 ```
 
 **Правильный паттерн:**
@@ -49,91 +116,23 @@ await smtp.starttls()
 
 ---
 
-## Блок 3 — datetime.utcnow() deprecated
+## Блок 8 — Tag name при workflow_dispatch
 
 ```bash
-grep -rn "datetime.utcnow()" core/ gui/ main.py && echo "WARN: замени на datetime.now(timezone.utc)" || echo "OK"
+grep -n "steps.tag.outputs.tag" .github/workflows/release.yml && echo "OK: tag формируется правильно" || echo "FAIL: tag_name возьмёт имя ветки вместо версии"
 ```
 
----
-
-## Блок 4 — hiddenimports полнота
-
-```bash
-python3 -c "
-import os
-screens = ['gui.screens.' + f[:-3] for f in os.listdir('gui/screens') if f.endswith('.py') and f != '__init__.py']
-cores = ['core.' + f[:-3] for f in os.listdir('core') if f.endswith('.py') and f != '__init__.py']
-bp = open('build.py').read()
-missing = [m for m in screens + cores if m not in bp]
-print('MISSING:', missing) if missing else print('OK: все модули в hiddenimports')
-"
-```
-
----
-
-## Блок 5 — Синтаксис (AST)
-
-```bash
-python3 -c "
-import ast, os
-errors = []
-for root, dirs, files in os.walk('.'):
-    dirs[:] = [d for d in dirs if d not in ('.git','__pycache__','venv','build','dist')]
-    for f in files:
-        if f.endswith('.py'):
-            path = os.path.join(root, f)
-            try: ast.parse(open(path).read())
-            except SyntaxError as e: errors.append(f'{path}:{e.lineno}: {e.msg}')
-[print(e) for e in errors] or print('OK: синтаксических ошибок нет')
-raise SystemExit(1) if errors else None
-"
-```
-
----
-
-## Блок 6 — Patch-система (v2.0+)
-
-Начиная с v3.4.2 FMailSender поддерживает **patch-обновления**:
-
-### Как работает
-1. `main.py` при старте добавляет `_patches/` в `sys.path[0]`
-2. Каждый релиз содержит `patch_manifest_vX.Y.Z.json` с SHA-256 изменённых .py
-3. Клиент скачивает только изменённые файлы (~КБ вместо ~МБ полного EXE)
-4. Файлы помещаются в `_patches/core/...`, `_patches/gui/...` рядом с EXE
-5. При следующем запуске Python загружает их вместо встроенных
-
-### Генерация патча (CI/CD делает автоматически)
-```bash
-python make_patch.py v3.4.1 v3.4.2
-# → dist/patch_manifest_v3.4.2.json
-```
-
-### Структура манифеста
-```json
-{
-  "version": "3.4.2",
-  "base_version": "3.4.1",
-  "files": [
-    {
-      "path": "core/updater.py",
-      "sha256": "abc123...",
-      "url": "https://raw.githubusercontent.com/FTPLabs/FMailSender/v3.4.2/core/updater.py",
-      "size": 8192
-    }
-  ]
-}
-```
-
-### Проверка _patches injection в main.py
-```bash
-grep -n "_patch_dir\|_patches" main.py || echo "WARN: patch loader не найден в main.py"
-```
-
-### Очистка патчей (сброс к состоянию EXE)
-```python
-from core.updater import clear_patches
-clear_patches()
+**Правильно:**
+```yaml
+- name: Determine release tag
+  id: tag
+  shell: bash
+  run: |
+    if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+      echo "tag=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+    else
+      echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+    fi
 ```
 
 ---
@@ -141,53 +140,48 @@ clear_patches()
 ## Полный pre-build чеклист
 
 ```bash
-echo "=== Build Guard v2.0 ==="
+echo "=== Build Guard v6.0 (Tauri) ==="
 
-# 1. Синтаксис
-python3 -c "import ast,os; [ast.parse(open(os.path.join(r,f)).read()) for r,d,fs in os.walk('.') for f in fs if f.endswith('.py') and '.git' not in r and '__pycache__' not in r]" && echo "1. Syntax OK" || echo "1. SYNTAX ERROR"
+# 1. Vite base
+grep -q "base:" ui/vite.config.ts && echo "1. Vite base OK" || echo "1. FAIL: base: './' отсутствует"
 
-# 2. PyInstaller 6.x
-! grep -q "cipher=block_cipher" build.py && echo "2. PyInstaller 6.x OK" || echo "2. FAIL: cipher="
+# 2. tauri-cli в CI
+grep -q "@tauri-apps/cli" .github/workflows/release.yml && echo "2. tauri-cli OK" || echo "2. FAIL: tauri-cli не установлен"
 
-# 3. aiosmtplib
-! grep -q "start_tls=" core/sender.py && echo "3. aiosmtplib OK" || echo "3. FAIL: start_tls="
+# 3. beforeBuildCommand
+python3 -c "
+import json; c = json.load(open('src-tauri/tauri.conf.json'))
+cmd = c['build'].get('beforeBuildCommand','')
+print('3. beforeBuildCommand OK' if not (cmd and 'cd ui' in cmd and not '../ui' in cmd) else '3. FAIL: неверный путь')
+"
 
-# 4. datetime
-! grep -rq "datetime.utcnow()" core/ && echo "4. datetime OK" || echo "4. WARN: utcnow()"
+# 4. PyInstaller 6.x
+! grep -q "cipher=block_cipher" fmail-core.spec && echo "4. PyInstaller 6.x OK" || echo "4. FAIL: cipher="
 
-# 5. patch loader
-grep -q "_patch_dir" main.py && echo "5. Patch loader OK" || echo "5. WARN: patch loader нет"
+# 5. UPX
+! grep -q "upx=True" fmail-core.spec && echo "5. UPX OK (False)" || echo "5. WARN: upx=True может упасть"
 
-# 6. Версия
-python3 -c "from core._version import APP_VERSION; print(f'6. Version: {APP_VERSION}')"
+# 6. aiosmtplib
+! grep -rq "start_tls=" core/sender.py && echo "6. aiosmtplib OK" || echo "6. FAIL: start_tls="
+
+# 7. Python синтаксис
+python3 -m py_compile main.py core/server.py core/sender.py && echo "7. Python syntax OK" || echo "7. SYNTAX ERROR"
+
+# 8. Tag name
+grep -q "steps.tag.outputs" .github/workflows/release.yml && echo "8. Tag name OK" || echo "8. FAIL: tag_name неверен"
 
 echo "=== Done ==="
 ```
 
 ---
 
-## Дерево артефактов релиза
-
-```
-dist/
-├── FMailSender.exe               ← полный EXE (всегда)
-├── FMailSender_v3.4.2.exe        ← копия с тегом в имени
-└── patch_manifest_v3.4.2.json   ← только изменённые файлы
-```
-
----
-
-## После сборки — smoke test
+## Триггер сборки
 
 ```bash
-./dist/FMailSender.exe --check
-# Ожидается: "FMailSender v3.4.2 — startup check OK" и exit 0
-```
+# По тегу:
+git tag v6.0.1
+git push origin v6.0.1
 
-## Создание релиза
-
-```bash
-git tag v3.4.2
-git push origin v3.4.2
-# GitHub Actions сам соберёт EXE, прогонит 6 gate'ов и создаст Release
+# Вручную через GitHub Actions:
+# Actions → Build & Release → Run workflow → Version: 6.0.1
 ```
