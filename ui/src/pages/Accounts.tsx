@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
   import { motion, AnimatePresence } from 'framer-motion'
   import { Plus, Trash2, TestTube, Upload, CheckCircle, XCircle, Clock,
-           ChevronDown, ChevronRight, RefreshCw, Globe } from 'lucide-react'
+           ChevronDown, ChevronRight, RefreshCw, Globe, Users } from 'lucide-react'
   import { api, type Account } from '../api'
 
   const KNOWN_HOSTS: Record<string, {host: string; port: number; use_ssl: boolean}> = {

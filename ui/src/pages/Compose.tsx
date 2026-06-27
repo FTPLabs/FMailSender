@@ -122,7 +122,7 @@ import { useEffect, useState } from 'react'
           {preview && cfg.body_html && (
             <div className="border border-text-dim/20 rounded-lg overflow-hidden">
               <div className="bg-surf3 px-3 py-1.5 text-xs text-muted border-b border-text-dim/20">
-                Превью HTML ({{name}} → Иван)
+                {'Превью HTML ({{name}} → Иван)'}
               </div>
               <iframe
                 className="w-full bg-white"
