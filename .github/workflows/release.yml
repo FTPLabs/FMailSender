@@ -31,30 +31,30 @@ jobs:
       - name: "Checkout"
         uses: actions/checkout@v4
 
-      - name: "Setup Node.js ${{ env.NODE_VERSION }}"
+      - name: "Setup Node.js"
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: "Setup Python ${{ env.PYTHON_VERSION }}"
+      - name: "Setup Python"
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: "Setup Rust (stable)"
+      - name: "Setup Rust stable"
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: "Cache Rust build"
+      - name: "Cache Rust"
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
 
-      - name: "Install Python deps + PyInstaller"
+      - name: "Install Python deps"
         run: pip install -r requirements.txt pyinstaller
 
-      - name: "Verify Python imports (catch missing symbols before build)"
+      - name: "Verify Python imports"
         shell: pwsh
         run: |
           python -c "from core.proxy import ProxyManager, parse_proxy, validate_proxy; print('proxy OK')"
@@ -62,20 +62,6 @@ jobs:
           python -c "from core.storage import save_accounts, load_accounts; print('storage OK')"
           python -c "from core.sender import SendingEngine, test_smtp_connection; print('sender OK')"
           python -c "from core.models import SmtpAccount, Recipient, CampaignConfig, CampaignStatus; print('models OK')"
-
-      - name: "Install UI deps"
-        working-directory: ui
-        run: npm install
-
-      - name: "Build React UI"
-        working-directory: ui
-        run: npm run build
-
-      - name: "Install tauri-cli"
-        run: npm install -g @tauri-apps/cli@^2
-
-      - name: "Generate Tauri icons from logo"
-        run: tauri icon assets/images/fmail_logo.png
 
       - name: "Build Python core (PyInstaller)"
         shell: pwsh
@@ -86,63 +72,73 @@ jobs:
             --workpath "C:/tmp/pyinstaller-build" `
             --noconfirm
           $exe = "src-tauri/binaries/fmail-core.exe"
-          if (Test-Path $exe) {
-            $sz = (Get-Item $exe).Length / 1MB
-            Write-Host "fmail-core.exe: $([math]::Round($sz,1)) MB"
-          } else {
-            Write-Error "fmail-core.exe not found after PyInstaller build!"
+          if (-not (Test-Path $exe)) {
+            Write-Error "fmail-core.exe not found after PyInstaller!"
             exit 1
           }
-          Copy-Item $exe "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
-          Write-Host "Sidecar: src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
+          Write-Host "fmail-core.exe: $([math]::Round((Get-Item $exe).Length/1MB,1)) MB"
+          Copy-Item $exe "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe" -Force
 
-      - name: "Verify sidecar binary exists"
+      - name: "Install UI deps"
+        working-directory: ui
+        run: npm ci
+
+      - name: "Build React UI"
+        working-directory: ui
+        run: npm run build
+
+      - name: "Install tauri CLI globally"
+        run: npm install -g @tauri-apps/cli@^2
+
+      - name: "Generate Tauri icons"
         shell: pwsh
         run: |
-          $sidecar = "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
-          if (-not (Test-Path $sidecar)) {
-            Write-Error "Sidecar binary missing: $sidecar"
-            exit 1
+          $logo = "assets/images/fmail_logo.png"
+          if (Test-Path $logo) {
+            tauri icon $logo
+            Write-Host "Icons generated from $logo"
+          } else {
+            Write-Host "No custom logo found, using default icons"
           }
-          Write-Host "Sidecar OK: $($sidecar) ($([math]::Round((Get-Item $sidecar).Length/1MB,1)) MB)"
 
       - name: "Build Tauri portable EXE"
         shell: pwsh
-        run: tauri build --bundles nsis
+        run: tauri build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: "Find portable EXE artifact"
-        id: artifacts
+      - name: "Find built artifact"
+        id: artifact
         shell: pwsh
         run: |
           $bundle = "src-tauri/target/release/bundle/nsis"
-          if (-not (Test-Path $bundle)) {
-            Write-Error "NSIS bundle directory not found: $bundle"
-            Get-ChildItem "src-tauri/target/release/bundle" -ErrorAction SilentlyContinue
-            exit 1
-          }
-          # Portable NSIS produces a file with _portable suffix
-          $exe = Get-ChildItem -Path $bundle -Filter "*_portable.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $exe) {
-            # Fallback: any .exe in nsis bundle
-            $exe = Get-ChildItem -Path $bundle -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          }
-          if ($exe) {
-            Write-Host "Portable EXE: $($exe.FullName) ($([math]::Round($exe.Length/1MB,1)) MB)"
-            echo "exe_path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
-            echo "exe_name=$($exe.Name)" >> $env:GITHUB_OUTPUT
+          Write-Host "Listing bundle dir:"
+          if (Test-Path $bundle) {
+            Get-ChildItem $bundle -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
           } else {
-            Write-Error "No portable .exe found in $bundle"
+            Write-Error "Bundle dir not found: $bundle"
             exit 1
           }
+          $exe = Get-ChildItem -Path $bundle -Filter "*_portable.exe" -Recurse -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if (-not $exe) {
+            $exe = Get-ChildItem -Path $bundle -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+          }
+          if (-not $exe) {
+            Write-Error "No .exe found in $bundle"
+            exit 1
+          }
+          Write-Host "Artifact: $($exe.FullName)"
+          echo "path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          echo "name=$($exe.Name)"     >> $env:GITHUB_OUTPUT
 
-      - name: "Upload portable EXE as artifact"
+      - name: "Upload artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: FMailSender-Windows-Portable-v${{ github.event.inputs.version || github.ref_name }}
-          path: ${{ steps.artifacts.outputs.exe_path }}
+          name: FMailSender-v${{ github.event.inputs.version || github.ref_name }}-portable
+          path: ${{ steps.artifact.outputs.path }}
           if-no-files-found: error
 
       - name: "Determine release tag"
@@ -153,7 +149,7 @@ jobs:
             echo "tag=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
             echo "name=FMailSender v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
           else
-            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ github.ref_name }}"   >> $GITHUB_OUTPUT
             echo "name=FMailSender ${{ github.ref_name }}" >> $GITHUB_OUTPUT
           fi
 
@@ -167,16 +163,15 @@ jobs:
           name: ${{ steps.tag.outputs.name }}
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
           generate_release_notes: true
-          files: ${{ steps.artifacts.outputs.exe_path }}
+          files: ${{ steps.artifact.outputs.path }}
           body: |
             ## ${{ steps.tag.outputs.name }}
 
-            **Portable EXE** — Tauri v2 + React + Python FastAPI.
-            No installation required. Just run the .exe file.
-            No Python installation needed on the user machine.
+            **Portable EXE** — не требует установки. Просто запустите .exe файл.
+            Python не нужен — всё встроено.
 
-            ### Requirements
-            - Windows 10 x64 (build 1803+) or Windows 11
-            - WebView2 Runtime (pre-installed on Win11; auto-downloaded on Win10)
+            ### Требования
+            - Windows 10 x64 (build 1803+) или Windows 11
+            - WebView2 Runtime (предустановлен на Win11; на Win10 скачается автоматически)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

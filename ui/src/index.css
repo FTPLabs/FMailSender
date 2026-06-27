@@ -11,41 +11,86 @@
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  ::-webkit-scrollbar { width: 5px; height: 5px; }
-  ::-webkit-scrollbar-track { background: #0d1117; }
-  ::-webkit-scrollbar-thumb { background: #3a3a66; border-radius: 3px; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #3a3a66; border-radius: 4px; }
   ::-webkit-scrollbar-thumb:hover { background: #6666aa; }
 }
 
 @layer components {
+  /* ── Buttons ─────────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-sm
+           transition-all duration-150 active:scale-95 cursor-pointer select-none
+           disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100;
+  }
   .btn-primary {
-    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-purple text-white font-medium text-sm
-           hover:bg-purple-light transition-all duration-150 shadow-glow-sm active:scale-95;
+    @apply btn bg-purple text-white hover:bg-purple-light shadow-glow-sm;
   }
   .btn-secondary {
-    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-surf3 text-muted font-medium text-sm
-           hover:bg-surf2 hover:text-text transition-all duration-150 border border-text-dim;
+    @apply btn bg-surf2 text-muted hover:bg-surf3 hover:text-text border border-dim;
   }
   .btn-danger {
-    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-error/20 text-error font-medium text-sm
-           hover:bg-error/30 transition-all duration-150 border border-error/30;
+    @apply btn bg-error/15 text-error hover:bg-error/25 border border-error/30;
   }
+  .btn-ghost {
+    @apply btn text-muted hover:text-text hover:bg-surf2;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1.5 text-xs gap-1.5;
+  }
+
+  /* ── Cards ───────────────────────────────────────────────── */
   .card {
-    @apply bg-surface rounded-xl border border-text-dim/30 p-5;
+    @apply bg-surface rounded-xl border border-dim/40 p-5;
   }
-  .card-hover {
-    @apply card hover:border-purple/50 transition-all duration-200 cursor-pointer;
+  .card-sm {
+    @apply bg-surface rounded-lg border border-dim/40 p-4;
   }
+  .card-inset {
+    @apply bg-surf2 rounded-lg border border-dim/30 p-4;
+  }
+
+  /* ── Form ────────────────────────────────────────────────── */
   .input {
-    @apply w-full bg-surf2 border border-text-dim rounded-lg px-3 py-2 text-sm text-text
-           focus:outline-none focus:border-purple focus:ring-1 focus:ring-purple/30
+    @apply w-full bg-surf2 border border-dim rounded-lg px-3 py-2 text-sm text-text
+           placeholder:text-muted
+           focus:outline-none focus:border-purple/60 focus:ring-1 focus:ring-purple/20
            transition-all duration-150;
   }
-  .input::placeholder { color: #6666aa; }
-  .label { @apply text-xs font-medium text-muted uppercase tracking-wider mb-1 block; }
-  .badge-ok    { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-success/15 text-success; }
-  .badge-error { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-error/15 text-error; }
-  .badge-warn  { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-warn/15 text-warn; }
-  .badge-idle  { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-muted/15 text-muted; }
-  .badge-cyan  { @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-cyan/15 text-cyan; }
+  .label {
+    @apply text-xs font-medium text-muted uppercase tracking-wider mb-1 block;
+  }
+
+  /* ── Badges ──────────────────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium;
+  }
+  .badge-ok    { @apply badge bg-success/15 text-success; }
+  .badge-error { @apply badge bg-error/15 text-error; }
+  .badge-warn  { @apply badge bg-warn/15 text-warn; }
+  .badge-idle  { @apply badge bg-muted/15 text-muted; }
+  .badge-cyan  { @apply badge bg-cyan/15 text-cyan; }
+  .badge-purple { @apply badge bg-purple/15 text-purple; }
+
+  /* ── Page ────────────────────────────────────────────────── */
+  .page { @apply space-y-5 animate-fade-in; }
+  .page-header { @apply flex items-center justify-between; }
+  .page-title { @apply text-xl font-semibold text-text; }
+  .page-sub { @apply text-sm text-muted mt-0.5; }
+
+  /* ── Table ───────────────────────────────────────────────── */
+  .tbl { @apply w-full text-sm; }
+  .tbl th {
+    @apply px-4 py-2.5 text-left text-xs font-medium text-muted uppercase tracking-wider
+           border-b border-dim/30 bg-surf2;
+  }
+  .tbl td { @apply px-4 py-2.5 border-b border-dim/20; }
+  .tbl tr { @apply hover:bg-surf2/60 transition-colors; }
+
+  /* ── Empty state ─────────────────────────────────────────── */
+  .empty {
+    @apply flex flex-col items-center justify-center py-16 text-muted text-center;
+  }
+  .empty svg { @apply mb-3 opacity-20; }
 }

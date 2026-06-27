@@ -34,7 +34,6 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.icns",
       "icons/icon.ico"
     ],
     "externalBin": [
@@ -45,10 +44,7 @@
         "type": "embedBootstrapper"
       },
       "nsis": {
-        "languages": [
-          "Russian",
-          "English"
-        ],
+        "languages": ["Russian", "English"],
         "displayLanguageSelector": true,
         "installMode": "portable"
       }
