@@ -60,25 +60,37 @@ SMTP_HIDDEN = [
     "sockshandler",
 ]
 
-ALL_HIDDEN = UVICORN_HIDDEN + FASTAPI_HIDDEN + CRYPTO_HIDDEN + SMTP_HIDDEN + [
-    "asyncio",
-    "threading",
-    "smtplib",
-    "imaplib",
-    "ssl",
-    "socket",
+WINDOWS_HIDDEN = [
     "win32com",
     "win32com.client",
     "wmi",
+    "win32api",
+    "win32con",
 ]
+
+ALL_HIDDEN = (
+    UVICORN_HIDDEN + FASTAPI_HIDDEN + CRYPTO_HIDDEN + SMTP_HIDDEN + WINDOWS_HIDDEN + [
+        "asyncio",
+        "threading",
+        "smtplib",
+        "imaplib",
+        "ssl",
+        "socket",
+    ]
+)
+
+# Build datas list — only include directories that exist
+datas = [(str(ROOT / "core"), "core")]
+if (ROOT / "data").exists():
+    datas.append((str(ROOT / "data"), "data"))
+if (ROOT / "i18n").exists():
+    datas.append((str(ROOT / "i18n"), "i18n"))
 
 a = Analysis(
     [str(ROOT / "main.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[
-        (str(ROOT / "core"), "core"),
-    ],
+    datas=datas,
     hiddenimports=ALL_HIDDEN,
     hookspath=[],
     hooksconfig={},
@@ -107,7 +119,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
