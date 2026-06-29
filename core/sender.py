@@ -1002,7 +1002,9 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                 _pfx = f" через прокси {_proxy_parsed.hostname}" if _proxy_parsed else ""
                 return True, f"{msg} [авто-порт {_port}{_pfx}]"
             if ok is False:
-                return False, f"Неверный логин или пароль (порт {_port}). {msg}"
+                # FIX v6.1 (code review): сохраняем оригинальное сообщение из _attempt
+                # вместо шаблонного "Неверный логин/пароль" — может быть policy error.
+                return False, msg
 
     # ── Шаг 4 (FIX v4.4.3): прямое подключение когда прокси-IP заблокирован ──
     # Если все попытки через прокси провалились (пустой SMTP-баннер = SMTP-сервер
