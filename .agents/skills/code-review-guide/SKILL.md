@@ -1,6 +1,6 @@
 ---
   name: code-review-guide
-  description: Чеклист code review для FMailSender v6 (Tauri+React+FastAPI). Активируй при проверке PR, после написания крупных фич, перед релизом.
+  description: "Чеклист code review для FMailSender v6 (Tauri+React+FastAPI). Активируй при проверке PR, после крупных фич, перед релизом."
   ---
 
   # Code Review Guide — FMailSender v6
@@ -13,14 +13,14 @@
   - [ ] SendingEngine.run() запускается в daemon thread, не в asyncio loop
 
   ### Memory Management
-  - [ ] Завершённые engine-потоки не держат ссылки на_accounts/_recipients
-  - [ ] Нет утечек asyncio задач (gather, создавать задачи через asyncio.gather)
+  - [ ] Завершённые engine-потоки не держат ссылки на _accounts/_recipients
+  - [ ] Нет утечек asyncio задач (использовать asyncio.gather)
 
   ### Error Handling
   - [ ] Все сетевые операции в try/except
   - [ ] SMTP таймаут: 15-30с; HTTP API таймаут: 5-10с
   - [ ] Ошибки понятны пользователю (русский текст, без трейсбэков)
-  - [ ] except Exception: pass → ЗАПРЕЩЁН (всегда логируй: logger.warning/error)
+  - [ ] except Exception: pass ЗАПРЕЩЁН (логируй: logger.warning/error)
 
   ### Security
   - [ ] Нет секретов в коде (см. secret-guard)
@@ -29,7 +29,7 @@
   - [ ] uvicorn только на 127.0.0.1 (никогда 0.0.0.0)
 
   ### Code Quality (ponytail)
-  - [ ] Минимальный код — нет дублирования
+  - [ ] Минимальный код, нет дублирования
   - [ ] Новые зависимости обоснованы (stdlib предпочтительна)
   - [ ] Функции до ~50 строк, файлы до ~800 строк
 
@@ -68,14 +68,14 @@
   ## 4. CI/CD (.github/workflows/)
 
   ### release.yml
-  - [ ] Repo → PUBLIC в начале (Step 0), PRIVATE в конце (always:)
+  - [ ] Repo PUBLIC в начале (Step 0), PRIVATE в конце (always)
   - [ ] PAT_TOKEN задан в GitHub Secrets
   - [ ] upx=False в fmail-core.spec (UPX не установлен в CI)
-  - [ ] Версия синхронизируется в: tauri.conf.json, Cargo.toml, core/_version.py, ui/src/version.ts
+  - [ ] Версия синхронизируется: tauri.conf.json, Cargo.toml, core/_version.py, ui/src/version.ts
   - [ ] Exe валидируется по размеру (> 5 МБ) перед публикацией
 
   ### toggle_and_build.py
-  - [ ] WORKFLOW = "release.yml" (не "build.yml"!)
+  - [ ] WORKFLOW = "release.yml" (не "build.yml")
   - [ ] GITHUB_TOKEN имеет права: repo + admin:repo (для смены видимости)
 
   ### PyInstaller spec (fmail-core.spec)
@@ -86,7 +86,7 @@
 
   ### aiosmtplib 3.x
   - [ ] Нет start_tls= параметра (удалён в aiosmtplib 3.0)
-  - [ ] STARTTLS: smtp.connect() → await smtp.starttls() (отдельный вызов)
+  - [ ] STARTTLS: smtp.connect() затем await smtp.starttls() (отдельный вызов)
 
   ## Rate limits
   - [ ] MAX_CONCURRENT = 4 (не менять на большее)
