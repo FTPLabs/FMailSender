@@ -91,7 +91,7 @@ Tauri ищет: `binaries/fmail-core-x86_64-pc-windows-msvc.exe` (суффикс
 ## Блок 6 — PyInstaller spec (PyInstaller >= 6.0)
 
 ```bash
-grep -n "cipher=block_cipher" fmail-core.spec && echo "FAIL: устаревший cipher=" || echo "OK: PyInstaller 6.x"
+grep -n "^cipher\|PYZ.*cipher=" fmail-core.spec && echo "FAIL: устаревший cipher= в PYZ()" || echo "OK: PyInstaller 6.x (комментарии с 'cipher=' не считаются)"
 grep -n "upx=True" fmail-core.spec && echo "WARN: UPX может не быть в CI — используй upx=False" || echo "OK: upx=False"
 ```
 

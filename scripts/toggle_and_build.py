@@ -7,7 +7,7 @@ toggle_and_build.py — Публичный репо → Сборка EXE → П�
 
 Схема работы:
   1. Делает репозиторий ПУБЛИЧНЫМ через GitHub API
-  2. Триггерит workflow_dispatch на build.yml с нужным тегом
+  2. Триггерит workflow_dispatch на release.yml с нужным тегом
   3. Ждёт завершения сборки
   4. Workflow сам делает репо приватным в последнем job (restore-privacy)
 
@@ -34,7 +34,7 @@ except ImportError:
     sys.exit("❌ Установите requests: pip install requests")
 
 REPO     = os.environ.get("GITHUB_REPO", "FTPLabs/FMailSender")
-WORKFLOW = "build.yml"
+WORKFLOW = "release.yml"
 
 
 def _headers() -> dict:
