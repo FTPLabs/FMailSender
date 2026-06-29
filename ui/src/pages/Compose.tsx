@@ -68,7 +68,7 @@ export default function Compose() {
         {/* Sender */}
         <div className="card space-y-4">
           <h2 className="text-sm font-semibold text-[#e8e8ff]">Отправитель</h2>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Имя отправителя</label>
               <input className="input" placeholder="Company Name" value={cfg.from_name ?? ''}
@@ -90,7 +90,7 @@ export default function Compose() {
         {/* Send settings */}
         <div className="card space-y-4">
           <h2 className="text-sm font-semibold text-[#e8e8ff]">Настройки отправки</h2>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="label">Задержка мин. (сек)</label>
               <input className="input" type="number" min="0.1" step="0.1" value={cfg.delay_min ?? 1}
