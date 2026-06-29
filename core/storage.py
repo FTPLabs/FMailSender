@@ -6,12 +6,15 @@ Works correctly both in dev mode and inside PyInstaller --onefile bundles.
 """
 from __future__ import annotations
 import json
+import logging
 import os
 import sys
 from pathlib import Path
 from cryptography.fernet import Fernet
 
 from core.models import SmtpAccount, Recipient, CampaignConfig
+
+logger = logging.getLogger("fmailsender.storage")
 
 
 def _get_data_dir() -> Path:
@@ -54,14 +57,16 @@ def _fernet() -> Fernet:
 def _enc(s: str) -> str:
     try:
         return _fernet().encrypt(s.encode()).decode()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Encrypt failed: %s", exc)
         return s
 
 
 def _dec(s: str) -> str:
     try:
         return _fernet().decrypt(s.encode()).decode()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Decrypt failed (returning raw): %s", exc)
         return s
 
 
@@ -92,7 +97,8 @@ def load_accounts() -> list[SmtpAccount]:
             d["proxy_list"] = []
             accounts.append(SmtpAccount.from_dict(d))
         return accounts
-    except Exception:
+    except Exception as exc:
+        logger.error("Failed to load accounts from %s: %s", ACCOUNTS_FILE, exc)
         return []
 
 
@@ -115,7 +121,8 @@ def load_proxies() -> list[str]:
         try:
             data = json.loads(PROXIES_FILE.read_text(encoding="utf-8"))
             _proxy_cache = [str(p) for p in data if p]
-        except Exception:
+        except Exception as exc:
+            logger.error("Failed to load proxies from %s: %s", PROXIES_FILE, exc)
             _proxy_cache = []
     return list(_proxy_cache)
 
@@ -134,7 +141,8 @@ def load_recipients() -> list[Recipient]:
         return []
     try:
         return [Recipient.from_dict(d) for d in json.loads(RECIPIENTS_FILE.read_text(encoding="utf-8"))]
-    except Exception:
+    except Exception as exc:
+        logger.error("Failed to load recipients from %s: %s", RECIPIENTS_FILE, exc)
         return []
 
 
@@ -152,5 +160,6 @@ def load_campaign() -> CampaignConfig:
     try:
         d = json.loads(CAMPAIGN_FILE.read_text(encoding="utf-8"))
         return CampaignConfig(**d)
-    except Exception:
+    except Exception as exc:
+        logger.error("Failed to load campaign config from %s: %s", CAMPAIGN_FILE, exc)
         return CampaignConfig()
