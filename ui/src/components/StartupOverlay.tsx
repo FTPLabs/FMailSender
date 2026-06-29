@@ -16,7 +16,7 @@ import { useStatus } from '../contexts/StatusContext'
 import { getBaseUrl } from '../api'
 import { FRONTEND_VERSION } from '../version'
 
-const TIMEOUT_SECS = 30
+const TIMEOUT_SECS = 60
 
 const MESSAGES: Array<{ at: number; text: string }> = [
   { at: 0,  text: 'Инициализация...'         },
