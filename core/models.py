@@ -3,6 +3,8 @@ FMailSender — Data models v6.0
 Single source of truth for all data structures.
 """
 from __future__ import annotations
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -32,6 +34,52 @@ class SmtpAccount:
     last_test_msg: str = ""
     sent_today: int = 0
     sent_this_hour: int = 0
+
+    def __post_init__(self) -> None:
+        self._lock: threading.Lock = threading.Lock()
+        self._day_reset: float = time.time()
+        self._hour_reset: float = time.time()
+
+    def _tick_resets(self) -> None:
+        """Сбрасывает часовой и суточный счётчики при смене периода."""
+        now = time.time()
+        if now - self._day_reset >= 86400:
+            self.sent_today = 0
+            self.sent_this_hour = 0
+            self._day_reset = now
+            self._hour_reset = now
+        elif now - self._hour_reset >= 3600:
+            self.sent_this_hour = 0
+            self._hour_reset = now
+
+    @property
+    def can_send(self) -> bool:
+        """Thread-safe проверка лимитов."""
+        if not self.is_active:
+            return False
+        with self._lock:
+            self._tick_resets()
+            return self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit
+
+    def try_increment(self) -> bool:
+        """Атомарная проверка + инкремент. Устраняет TOCTOU race condition."""
+        if not self.is_active:
+            return False
+        with self._lock:
+            self._tick_resets()
+            if self.sent_today < self.daily_limit and self.sent_this_hour < self.hourly_limit:
+                self.sent_today += 1
+                self.sent_this_hour += 1
+                return True
+            return False
+
+    def decrement_sent(self) -> None:
+        """Откатывает инкремент если отправка провалилась."""
+        with self._lock:
+            if self.sent_today > 0:
+                self.sent_today -= 1
+            if self.sent_this_hour > 0:
+                self.sent_this_hour -= 1
 
     def to_dict(self) -> dict:
         return {
