@@ -176,8 +176,8 @@ jobs:
         run: |
           tauri build --target x86_64-pc-windows-msvc --verbose 2>&1
 
-          $nsis = Get-ChildItem -Recurse "src-tauri/target" -Filter "*setup*.exe","*Setup*.exe" -ErrorAction SilentlyContinue |
-            Where-Object { $_.Length -gt 5MB } |
+          $nsis = Get-ChildItem -Recurse "src-tauri/target" -ErrorAction SilentlyContinue |
+            Where-Object { ($_.Name -like "*setup*.exe" -or $_.Name -like "*Setup*.exe") -and $_.Length -gt 5MB } |
             Sort-Object Length -Descending |
             Select-Object -First 1
 
