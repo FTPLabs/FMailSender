@@ -8,7 +8,9 @@
   body {
     background-color: #040410;
     color: #e8e8ff;
-    font-family: 'Inter', system-ui, sans-serif;
+    /* 'Segoe UI' — Windows system font; falls back to system-ui / -apple-system.
+       Google Fonts CDN removed: no external requests, no IP leak. */
+    font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
   ::-webkit-scrollbar { width: 4px; height: 4px; }

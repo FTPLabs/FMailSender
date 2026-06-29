@@ -18,8 +18,10 @@ export default {
         warn:    '#f59e0b',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        // System fonts — no CDN dependency, no external IP leak.
+        // 'Segoe UI' is the default Windows UI font (clean, matches the app's aesthetic).
+        sans: ['"Segoe UI"', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+        mono: ['Consolas', '"Courier New"', 'ui-monospace', 'monospace'],
       },
       boxShadow: {
         'glow-purple': '0 0 24px rgba(139,92,246,.35)',

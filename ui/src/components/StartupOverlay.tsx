@@ -6,38 +6,60 @@
  * - Прогресс-бар заполняется до ~90% за 30 секунд (реальный таймаут Tauri).
  * - При online=true: анимация заполнения до 100%, затем fadeOut.
  * - Сообщения меняются по elapsed-времени.
+ * - Стабильность версий: если backend.version ≠ FRONTEND_VERSION,
+ *   значит WebView2 загрузил старый index.html из кэша.
+ *   Принудительный window.location.reload() исправит это.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Zap } from 'lucide-react'
 import { useStatus } from '../contexts/StatusContext'
+import { getBaseUrl } from '../api'
+import { FRONTEND_VERSION } from '../version'
 
-const TIMEOUT_SECS = 30   // Tauri ждёт core максимум 30с
+const TIMEOUT_SECS = 30
 
 const MESSAGES: Array<{ at: number; text: string }> = [
-  { at: 0,  text: 'Инициализация...'             },
-  { at: 3,  text: 'Запуск Python ядра...'        },
-  { at: 8,  text: 'Загрузка зависимостей...'     },
-  { at: 14, text: 'Старт FastAPI сервера...'     },
-  { at: 20, text: 'Соединение с бэкендом...'     },
-  { at: 26, text: 'Почти готово...'              },
+  { at: 0,  text: 'Инициализация...'         },
+  { at: 3,  text: 'Запуск Python ядра...'    },
+  { at: 8,  text: 'Загрузка зависимостей...' },
+  { at: 14, text: 'Старт FastAPI сервера...' },
+  { at: 20, text: 'Соединение с бэкендом...' },
+  { at: 26, text: 'Почти готово...'          },
 ]
 
 export default function StartupOverlay() {
   const { online } = useStatus()
 
-  const [elapsed,   setElapsed]   = useState(0)
-  const [progress,  setProgress]  = useState(0)
-  const [visible,   setVisible]   = useState(true)
-  const [fadeOut,   setFadeOut]   = useState(false)
-  const [version,   setVersion]   = useState('')
+  const [elapsed,  setElapsed]  = useState(0)
+  const [progress, setProgress] = useState(0)
+  const [visible,  setVisible]  = useState(true)
+  const [fadeOut,  setFadeOut]  = useState(false)
+  const [version,  setVersion]  = useState('')
 
+  // Fetch backend version and check for stale WebView2 cache.
   useEffect(() => {
     if (!online) return
-    fetch('http://127.0.0.1:7531/api/health')
+    fetch(`${getBaseUrl()}/api/health`)
       .then(r => r.json())
-      .then((d: { version?: string }) => { if (d?.version) setVersion(`v${d.version}`) })
+      .then((d: { version?: string }) => {
+        if (!d?.version) return
+        setVersion(`v${d.version}`)
+
+        // Stale-cache guard: if the backend reports a different version than
+        // what this JS bundle was built with, the old index.html was loaded
+        // from WebView2's disk cache instead of the new bundle on disk.
+        // A forced reload fetches a fresh index.html and picks up new JS chunks.
+        if (d.version !== FRONTEND_VERSION) {
+          console.warn(
+            `[FMailSender] Version mismatch: backend=${d.version} frontend=${FRONTEND_VERSION}. Reloading…`
+          )
+          // Short delay so the user briefly sees the overlay before reload
+          setTimeout(() => window.location.reload(), 600)
+        }
+      })
       .catch(() => {})
   }, [online])
+
   const startedAt = useRef(Date.now())
   const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -49,7 +71,6 @@ export default function StartupOverlay() {
       setElapsed(sec)
 
       if (!online) {
-        // Ease towards 90% over TIMEOUT_SECS
         const target = Math.min(sec / TIMEOUT_SECS, 1) * 90
         setProgress(p => p + (target - p) * 0.15)
       }
@@ -70,10 +91,7 @@ export default function StartupOverlay() {
 
   if (!visible) return null
 
-  const msg = [...MESSAGES]
-    .reverse()
-    .find(m => elapsed >= m.at)?.text ?? MESSAGES[0].text
-
+  const msg  = [...MESSAGES].reverse().find(m => elapsed >= m.at)?.text ?? MESSAGES[0].text
   const dots = '.'.repeat(Math.floor(elapsed * 2) % 4)
 
   return (
@@ -90,15 +108,13 @@ export default function StartupOverlay() {
         <div
           className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#8b5cf6] to-[#06b6d4]
                      flex items-center justify-center shadow-[0_0_40px_rgba(139,92,246,0.4)]"
-          style={{
-            animation: 'pulse-glow 2s ease-in-out infinite',
-          }}
+          style={{ animation: 'pulse-glow 2s ease-in-out infinite' }}
         >
           <Zap size={28} className="text-white" />
         </div>
         <div className="text-center">
           <div className="text-xl font-semibold text-[#e8e8ff] tracking-tight">FMail Sender</div>
-          <div className="text-xs text-[#6666aa] mt-1">{version || 'v6.0'}</div>
+          <div className="text-xs text-[#6666aa] mt-1">{version || `v${FRONTEND_VERSION}`}</div>
         </div>
       </div>
 
@@ -109,31 +125,24 @@ export default function StartupOverlay() {
             className="h-full rounded-full bg-gradient-to-r from-[#8b5cf6] to-[#06b6d4]"
             style={{
               width: `${Math.round(progress)}%`,
-              transition: online
-                ? 'width 0.3s ease-out'
-                : 'width 0.2s linear',
+              transition: online ? 'width 0.3s ease-out' : 'width 0.2s linear',
             }}
           />
         </div>
-
-        {/* Status text */}
         <div className="text-center text-xs text-[#6666aa] min-h-[1rem]">
-          {online ? (
-            <span className="text-[#10b981]">Готово</span>
-          ) : (
-            <span>{msg}{dots}</span>
-          )}
+          {online
+            ? <span className="text-[#10b981]">Готово</span>
+            : <span>{msg}{dots}</span>
+          }
         </div>
       </div>
 
-      {/* Elapsed time (only if taking a while) */}
       {elapsed > 5 && !online && (
         <div className="mt-4 text-[10px] text-[#3a3a66]">
           {Math.round(elapsed)}с / {TIMEOUT_SECS}с
         </div>
       )}
 
-      {/* Timeout hint */}
       {elapsed > TIMEOUT_SECS + 2 && !online && (
         <div className="mt-6 max-w-xs text-center text-xs text-[#ef4444]/70 px-4">
           Python ядро не ответило в течение {TIMEOUT_SECS}с.

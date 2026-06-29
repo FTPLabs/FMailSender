@@ -76,8 +76,8 @@ jobs:
             echo "|---|------|--------|"
           } >> $GITHUB_STEP_SUMMARY
 
-      # ── Sync version into build manifests ──────────────────────────────────
-      - name: "Sync version → tauri.conf.json + Cargo.toml"
+      # ── Sync version into ALL build manifests ───────────────────────────────
+      - name: "Sync version → tauri.conf.json + Cargo.toml + _version.py + version.ts"
         shell: pwsh
         run: |
           $ver = "${{ steps.tag.outputs.version }}"
@@ -100,7 +100,34 @@ jobs:
           $cargo | Set-Content "src-tauri/Cargo.toml" -Encoding UTF8
           Write-Host "Cargo.toml     → version = $ver"
 
-          "| 1 | Version sync → **v$ver** | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          # core/_version.py — single source of truth for Python backend
+          Set-Content "core/_version.py" -Encoding UTF8 -Value @"
+"""
+FMailSender — Application version (single source of truth).
+Imported by core/server.py and build pipeline.
+"""
+APP_VERSION = "$ver"
+"@
+          Write-Host "core/_version.py → APP_VERSION = $ver"
+
+          # ui/src/version.ts — single source of truth for JS frontend
+          # Used by StartupOverlay to detect stale WebView2 cache after updates.
+          Set-Content "ui/src/version.ts" -Encoding UTF8 -Value @"
+/**
+ * FMailSender — Frontend build version.
+ *
+ * Must stay in sync with core/_version.py (APP_VERSION).
+ * Updated automatically by the release pipeline on every version tag.
+ *
+ * Used by StartupOverlay to detect a stale WebView2 cache:
+ * if the backend reports a different version, it means the old index.html
+ * was loaded from cache → force window.location.reload() to get fresh files.
+ */
+export const FRONTEND_VERSION = "$ver"
+"@
+          Write-Host "ui/src/version.ts → FRONTEND_VERSION = $ver"
+
+          "| 1 | Version sync → **v$ver** (all manifests) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
 
       # ── Python deps & verification ──────────────────────────────────────────
       - name: "Install Python deps"
@@ -200,107 +227,68 @@ jobs:
       - name: "tauri build — NSIS installer"
         id: tauri_build
         shell: pwsh
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
-          # tauri.conf.json already sets "targets": ["nsis"] — just build
-          tauri build
+          tauri build --target x86_64-pc-windows-msvc --verbose 2>&1
 
-          # Find the NSIS installer (Tauri places it under bundle/nsis/)
-          $found = Get-ChildItem -Recurse -Path "src-tauri/target" -Filter "*-setup.exe" -ErrorAction SilentlyContinue |
-                   Select-Object -First 1
-          if (-not $found) {
-            Write-Host "Searching all .exe under target/release/bundle..."
-            Get-ChildItem -Recurse "src-tauri/target/release/bundle" -ErrorAction SilentlyContinue |
-              ForEach-Object { Write-Host $_.FullName }
+          # Locate installer (Tauri v2 bundles to different paths by target)
+          $installer = Get-ChildItem -Recurse "src-tauri/target" `
+            -Include "*.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "*setup*" -or $_.Name -like "*Setup*" -or $_.Name -like "*_en-US.exe" } |
+            Select-Object -First 1
+
+          if (-not $installer) {
             Write-Error "FAIL: NSIS installer not found in src-tauri/target"
             exit 1
           }
 
-          $sz   = [math]::Round($found.Length / 1MB, 1)
-          $path = $found.FullName
-          Write-Host "NSIS installer: $path ($sz MB)"
+          $sz = [math]::Round($installer.Length / 1MB, 1)
+          Write-Host "Installer: $($installer.FullName) ($sz MB)"
 
-          echo "installer_path=$path" >> $env:GITHUB_OUTPUT
-          echo "installer_size=$sz"   >> $env:GITHUB_OUTPUT
+          "installer_path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+          "installer_size=$sz"                    >> $env:GITHUB_OUTPUT
           "| 5 | Tauri NSIS installer ($sz MB) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
 
-      # ── Rename installer to versioned filename ──────────────────────────────
-      - name: "Rename installer → versioned filename"
+      # ── Name the installer ──────────────────────────────────────────────────
+      - name: "Copy installer to workspace root"
         id: installer
         shell: pwsh
         run: |
-          $ver  = "${{ steps.tag.outputs.version }}"
           $src  = "${{ steps.tauri_build.outputs.installer_path }}"
+          $ver  = "${{ steps.tag.outputs.version }}"
           $name = "FMailSender-v${ver}-setup.exe"
           Copy-Item $src $name -Force
-          Write-Host "Installer: $name"
-          echo "name=$name" >> $env:GITHUB_OUTPUT
+          Write-Host "Installer → $name"
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "| 6 | Installer renamed → $name | ✅ |" >> $env:GITHUB_STEP_SUMMARY
 
-      # ── Assemble portable directory ─────────────────────────────────────────
-      - name: "Assemble portable directory"
-        shell: pwsh
-        run: |
-          $pdir = "dist_portable"
-          New-Item -ItemType Directory -Force -Path $pdir | Out-Null
-          Copy-Item "src-tauri/target/release/fmail-sender.exe" "$pdir/FMailSender.exe" -Force
-          Copy-Item "src-tauri/binaries/fmail-core.exe"         "$pdir/fmail-core.exe"  -Force
-          Write-Host "Portable dir:"
-          Get-ChildItem $pdir | ForEach-Object {
-            Write-Host ("  {0,-30} {1,6} MB" -f $_.Name, [math]::Round($_.Length/1MB,1))
-          }
-
-      # ── Install NSIS (for portable wrapper) ────────────────────────────────
-      - name: "Install NSIS"
-        shell: pwsh
-        run: |
-          choco install nsis --no-progress -y
-          $mk = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (-not (Test-Path $mk)) { Write-Error "makensis not found after choco install"; exit 1 }
-          Write-Host "makensis ready"
-
-      # ── Build portable launcher (portable.nsi) ──────────────────────────────
-      - name: "Build portable launcher (NSIS)"
+      # ── Portable build ──────────────────────────────────────────────────────
+      - name: "Build portable archive"
         id: portable
         shell: pwsh
         run: |
-          $mk  = "C:\Program Files (x86)\NSIS\makensis.exe"
-          $ver = "${{ steps.tag.outputs.version }}"
+          $ver  = "${{ steps.tag.outputs.version }}"
+          $name = "FMailSender-v${ver}-portable.zip"
 
-          & $mk portable.nsi
-          if ($LASTEXITCODE -ne 0) { Write-Error "makensis exit $LASTEXITCODE"; exit 1 }
-          if (-not (Test-Path "MailSender.exe")) { Write-Error "MailSender.exe not created"; exit 1 }
+          # Locate the built NSIS exe (same as the installer, just repackaged)
+          $exe = "${{ steps.tauri_build.outputs.installer_path }}"
 
-          $name = "FMailSender-v${ver}-portable.exe"
-          Rename-Item "MailSender.exe" $name
+          # Build a flat portable folder: the exe + sidecar + README
+          New-Item -ItemType Directory -Force -Path "portable_tmp" | Out-Null
+          Copy-Item $exe             "portable_tmp\FMailSender.exe"    -Force
+          Copy-Item "src-tauri\binaries\fmail-core-x86_64-pc-windows-msvc.exe" `
+                    "portable_tmp\"  -ErrorAction SilentlyContinue
+
+          # Create zip
+          Compress-Archive -Path "portable_tmp\*" -DestinationPath $name -Force
           $sz = [math]::Round((Get-Item $name).Length / 1MB, 1)
-          Write-Host "Portable: $name ($sz MB)"
+          Write-Host "Portable → $name ($sz MB)"
 
-          echo "name=$name"  >> $env:GITHUB_OUTPUT
-          echo "size=$sz"    >> $env:GITHUB_OUTPUT
-          "| 6 | Portable launcher ($sz MB) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "size=$sz"   >> $env:GITHUB_OUTPUT
+          "| 7 | Portable archive ($sz MB) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
 
-      # ── Upload artifacts ────────────────────────────────────────────────────
-      - name: "Upload installer artifact"
-        uses: actions/upload-artifact@v4
-        with:
-          name: FMailSender-setup
-          path: ${{ steps.installer.outputs.name }}
-          if-no-files-found: error
-
-      - name: "Upload portable artifact"
-        uses: actions/upload-artifact@v4
-        with:
-          name: FMailSender-portable
-          path: ${{ steps.portable.outputs.name }}
-          if-no-files-found: error
-
-      # ── Create GitHub Release ───────────────────────────────────────────────
+      # ── GitHub Release ──────────────────────────────────────────────────────
       - name: "Create GitHub Release"
-        if: >
-          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
-          github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}

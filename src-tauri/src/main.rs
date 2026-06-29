@@ -1,4 +1,5 @@
-// FMailSender Tauri shell v6.0.5
+// FMailSender Tauri shell v6.0.6
+// Fixes: port-based process kill (handles renamed/relocated binary), tighter socket wait.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::net::TcpStream;
@@ -9,8 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
-const CORE_PORT: u16 = 7531;
-const CORE_HOST: &str = "127.0.0.1";
+const CORE_PORT:           u16 = 7531;
+const CORE_HOST:           &str = "127.0.0.1";
 const STARTUP_TIMEOUT_SECS: u64 = 30;
 
 fn wait_for_core(timeout: Duration) -> bool {
@@ -24,17 +25,42 @@ fn wait_for_core(timeout: Duration) -> bool {
     false
 }
 
-/// Kill any leftover fmail-core process so the new sidecar can bind port 7531.
+/// Kill any process that is listening on CORE_PORT, then also kill by exe name.
 ///
-/// Problem this solves: after installing a new version, the old fmail-core.exe
-/// from a previous session may still be running and holding port 7531.
-/// Tauri's wait_for_core() then sees the port open and considers the core
-/// "started" — but the UI is talking to the OLD server with stale state and
-/// old code (including any bugs that were already fixed in the new build).
-/// Killing first guarantees the new binary is the one that answers on 7531.
+/// Why two-stage kill?
+/// ─ Port-based kill (PowerShell Get-NetTCPConnection): handles the upgrade
+///   scenario where the old process is renamed or lives in a different path.
+///   It finds whichever PID holds port 7531 and terminates it.
+/// ─ Name-based kill (taskkill /IM): belt-and-suspenders fallback for cases
+///   where Get-NetTCPConnection fails or the binary isn't yet listening (rare).
+///
+/// A 1 second sleep after kills gives Windows time to release the TCP socket
+/// and free file handles on the old exe before we try to write the new one.
 fn kill_existing_core() {
     #[cfg(target_os = "windows")]
     {
+        // Stage 1 — kill by port (most reliable; works regardless of exe name/path)
+        let _ = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                &format!(
+                    "$pids = (Get-NetTCPConnection -LocalPort {port} -State Listen \
+                     -ErrorAction SilentlyContinue | \
+                     Select-Object -ExpandProperty OwningProcess -ErrorAction SilentlyContinue); \
+                     if ($pids) {{ foreach ($p in @($pids)) {{ \
+                       Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }} }}",
+                    port = CORE_PORT
+                ),
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+
+        // Stage 2 — kill by exe name (belt-and-suspenders)
         for name in &["fmail-core-x86_64-pc-windows-msvc.exe", "fmail-core.exe"] {
             let _ = Command::new("taskkill")
                 .args(["/F", "/IM", name])
@@ -42,8 +68,9 @@ fn kill_existing_core() {
                 .stderr(Stdio::null())
                 .status();
         }
-        // Give the OS a moment to free the socket before spawning the new process
-        thread::sleep(Duration::from_millis(800));
+
+        // Give the OS time to release the socket and flush file handles
+        thread::sleep(Duration::from_millis(1000));
     }
 }
 
@@ -53,12 +80,10 @@ fn kill_existing_core() {
 fn sidecar_search_dirs(app: &tauri::App) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
 
-    // 1. Tauri resource directory (NSIS install dir / bundle resources)
     if let Ok(p) = app.path().resource_dir() {
         dirs.push(p);
     }
 
-    // 2. Directory that contains the running executable (portable mode)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let parent_buf = parent.to_path_buf();
@@ -75,36 +100,27 @@ fn spawn_python_core(app: &tauri::App) -> Option<Child> {
     for dir in sidecar_search_dirs(app) {
         // Tauri sidecar naming convention: <name>-<target-triple>.exe
         let msvc = dir.join("fmail-core-x86_64-pc-windows-msvc.exe");
-        if msvc.exists() {
-            return Command::new(&msvc)
-                .env("FMAIL_PORT", CORE_PORT.to_string())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .ok();
-        }
-        // Bare name fallback (portable / extracted builds)
-        let bare = dir.join("fmail-core.exe");
-        if bare.exists() {
-            return Command::new(&bare)
-                .env("FMAIL_PORT", CORE_PORT.to_string())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .ok();
+        let plain = dir.join("fmail-core.exe");
+
+        let bin = if msvc.exists() {
+            msvc
+        } else if plain.exists() {
+            plain
+        } else {
+            continue;
+        };
+
+        if let Some(child) = Command::new(&bin)
+            .env("FMAIL_PORT", CORE_PORT.to_string())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()
+        {
+            return Some(child);
         }
     }
-
-    // Dev mode: python main.py from project root
-    let python = if cfg!(target_os = "windows") { "python" } else { "python3" };
-    Command::new(python)
-        .arg("main.py")
-        .current_dir(std::env::current_dir().unwrap_or_default())
-        .env("FMAIL_PORT", CORE_PORT.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()
+    None
 }
 
 #[tauri::command]
@@ -119,10 +135,8 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(move |app| {
-            // Kill any leftover core process from a previous session or version
-            // BEFORE spawning the new sidecar. Fixes the upgrade scenario where
-            // the old fmail-core.exe is still bound to port 7531, causing Tauri
-            // to connect to the old server instead of the freshly-built one.
+            // Kill any leftover core process before spawning the new sidecar.
+            // Uses port-based kill first (reliable on upgrade), then name-based.
             kill_existing_core();
 
             let child = spawn_python_core(app);

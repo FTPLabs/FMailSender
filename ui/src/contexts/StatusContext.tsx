@@ -2,13 +2,14 @@
  * StatusContext — единый real-time канал статуса для всего приложения.
  *
  * Стратегия:
- *  1. Быстрый startup polling (500 мс) до первого успешного ответа → online=true.
- *  2. После online: открывает SSE /api/events.
- *  3. При 3+ ошибках SSE подряд → fallback polling 2с.
- *  4. Каждые 60с в режиме fallback пробует восстановить SSE (re-probe).
- *  5. Pause при скрытой вкладке (Page Visibility API), resume при возврате.
- *  6. Экспоненциальный backoff реконнекта до 5с.
- *  7. Валидация payload перед setStatus.
+ *  1. initBaseUrl() — определяем рабочий адрес (127.0.0.1 vs localhost) до первого poll.
+ *  2. Быстрый startup polling (500 мс) до первого успешного ответа → online=true.
+ *  3. После online: открывает SSE /api/events.
+ *  4. При 3+ ошибках SSE подряд → fallback polling 2с.
+ *  5. Каждые 60с в режиме fallback пробует восстановить SSE (re-probe).
+ *  6. Pause при скрытой вкладке (Page Visibility API), resume при возврате.
+ *  7. Экспоненциальный backoff реконнекта до 5с.
+ *  8. Валидация payload перед setStatus.
  *
  * Экспортирует:
  *   const { status, online, refresh } = useStatus()
@@ -22,12 +23,13 @@ import {
   useRef,
   useState,
 } from 'react'
-import { api, type AppStatus } from '../api'
+import { api, initBaseUrl, getBaseUrl, type AppStatus } from '../api'
 
-const SSE_URL             = 'http://127.0.0.1:7531/api/events'
-const STARTUP_POLL_MS     = 500     // агрессивный polling до первого ответа
-const IDLE_POLL_MS        = 2000    // fallback polling после деградации SSE
-const SSE_REPROBE_MS      = 60_000  // re-probe SSE после деградации
+const STARTUP_POLL_MS  = 500      // агрессивный polling до первого ответа
+const IDLE_POLL_MS     = 2000     // fallback polling после деградации SSE
+const SSE_REPROBE_MS   = 60_000   // re-probe SSE после деградации
+
+function sseUrl(): string { return `${getBaseUrl()}/api/events` }
 
 function isValidStatus(data: unknown): data is AppStatus {
   if (!data || typeof data !== 'object') return false
@@ -62,8 +64,8 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reprobeRef   = useRef<ReturnType<typeof setInterval> | null>(null)
   const failCount    = useRef(0)
-  const useSSE       = useRef(false)    // start false — SSE opens only after online
-  const isOnline     = useRef(false)    // sync mirror of online state
+  const useSSE       = useRef(false)
+  const isOnline     = useRef(false)
 
   const markOnline = useCallback(() => {
     if (!isOnline.current) {
@@ -95,7 +97,6 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
     pollRef.current = setInterval(refresh, intervalMs)
 
     if (intervalMs !== STARTUP_POLL_MS) {
-      // Re-probe SSE periodically after fallback
       reprobeRef.current = setInterval(() => {
         if (document.hidden) return
         useSSE.current    = true
@@ -115,12 +116,12 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
     closeSSE()
     if (!useSSE.current || document.hidden) return
 
-    const es = new EventSource(SSE_URL)
+    const es = new EventSource(sseUrl())
     esRef.current = es
 
     es.onopen = () => {
       failCount.current = 0
-      stopPolling()   // SSE восстановлено — останавливаем fallback polling
+      stopPolling()
     }
 
     es.onmessage = (e) => {
@@ -153,8 +154,11 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { connectSSERef.current = connectSSE }, [connectSSE])
 
   useEffect(() => {
-    // Phase 1: fast startup polling until first backend response
-    startPolling(STARTUP_POLL_MS)
+    // Phase 0: probe 127.0.0.1 vs localhost to find the working address (VPN-safe)
+    initBaseUrl().finally(() => {
+      // Phase 1: fast startup polling until first backend response
+      startPolling(STARTUP_POLL_MS)
+    })
 
     // Phase 2: as soon as backend is online, switch to SSE
     const checkOnline = setInterval(() => {

@@ -54,22 +54,16 @@
 | [socks5-internals](.agents/skills/socks5-internals/SKILL.md) | SOCKS5 raw socket |
 | [http-connect-proxy](.agents/skills/http-connect-proxy/SKILL.md) | HTTP CONNECT |
 | [proxy-smtp-requirements](.agents/skills/proxy-smtp-requirements/SKILL.md) | Требования к прокси |
-| [proxy-country-cache](.agents/skills/proxy-country-cache/SKILL.md) | Кэш страны прокси (v4.4.0) |
+| [proxy-country-cache](.agents/skills/proxy-country-cache/SKILL.md) | Кэш страны прокси |
 | [rate-limit-strategy](.agents/skills/rate-limit-strategy/SKILL.md) | MAX_CONCURRENT, Semaphore |
 | [debug-network](.agents/skills/debug-network/SKILL.md) | Отладка сетевых проблем |
 
-### GUI и PyQt6
+### React / Tauri UI (v6 архитектура)
 | Скилл | Назначение |
 |-------|-----------|
-| [gui-inspector](.agents/skills/gui-inspector/SKILL.md) | Инспекция координат и дизайна |
-| [pyqt6-threading-guide](.agents/skills/pyqt6-threading-guide/SKILL.md) | QThread паттерны |
-| [pyqt6-table-patterns](.agents/skills/pyqt6-table-patterns/SKILL.md) | QTableWidget |
-| [gui-ux-principles](.agents/skills/gui-ux-principles/SKILL.md) | UX принципы |
-| [gui-status](.agents/skills/gui-status/SKILL.md) | Status bar |
-| [memory-management-qt](.agents/skills/memory-management-qt/SKILL.md) | Qt GC и утечки |
-| [error-messages-ru](.agents/skills/error-messages-ru/SKILL.md) | Русские ошибки для UI |
-| [color-palette](.agents/skills/color-palette/SKILL.md) | CyberPro цветовая система |
-| [fps-optimization](.agents/skills/fps-optimization/SKILL.md) | 60 FPS, анимации |
+| [error-messages-ru](.agents/skills/error-messages-ru/SKILL.md) | Русские тексты ошибок для UI |
+| [color-palette](.agents/skills/color-palette/SKILL.md) | Цветовая система (theme.ts) |
+| [tauri-fastapi](.agents/skills/tauri-fastapi/SKILL.md) | Tauri + Python sidecar |
 
 ### Качество и Безопасность
 | Скилл | Назначение |
@@ -102,41 +96,33 @@
 |-------|-----------|
 | [windows-exe-build](.agents/skills/windows-exe-build/SKILL.md) | PyInstaller EXE |
 | [pyinstaller-spec](.agents/skills/pyinstaller-spec/SKILL.md) | spec файл, hidden imports |
-| [release-workflow](.agents/skills/release-workflow/SKILL.md) | Полный процесс релиза |
-| [changelog-guide](.agents/skills/changelog-guide/SKILL.md) | Как писать CHANGELOG |
-| [vps-server-guide](.agents/skills/vps-server-guide/SKILL.md) | Деплой на VPS |
+| [build-guard](.agents/skills/build-guard/SKILL.md) | Чеклист перед сборкой |
+| [changelog-guard](.agents/skills/changelog-guard/SKILL.md) | Как писать CHANGELOG |
 
 ### Мультиагентная система
 | Скилл | Назначение |
 |-------|-----------|
 | [agent-roles](.agents/skills/agent-roles/SKILL.md) | Кто что делает |
-| [parallel-agent-guide](.agents/skills/parallel-agent-guide/SKILL.md) | Параллельная работа |
 
 ### Защитные guard-скиллы
 | Скилл | Активация |
 |-------|-----------|
-| [gui-style-guard](.agents/skills/gui-style-guard/SKILL.md) | При изменении gui/ |
 | [build-guard](.agents/skills/build-guard/SKILL.md) | При сборке EXE |
 | [smtp-engine-guard](.agents/skills/smtp-engine-guard/SKILL.md) | При изменении core/sender.py |
-| [openai-guard](.agents/skills/openai-guard/SKILL.md) | При изменении core/ai_fixer.py |
-| [server-deploy-guard](.agents/skills/server-deploy-guard/SKILL.md) | При изменении server/ |
-| [license-server-guard](.agents/skills/license-server-guard/SKILL.md) | При изменении server/bot.py |
-| [patch-updater-guard](.agents/skills/patch-updater-guard/SKILL.md) | При изменении updater.py |
-| [i18n-guard](.agents/skills/i18n-guard/SKILL.md) | При изменении текстов UI |
-| [changelog-guard](.agents/skills/changelog-guard/SKILL.md) | При каждом релизе |
+| [license-server-guard](.agents/skills/license-server-guard/SKILL.md) | При изменении server/ |
+| [cancel-guard](.agents/skills/cancel-guard/SKILL.md) | При остановке рассылки |
+| [patch-updater-guard](.agents/skills/patch-updater-guard/SKILL.md) | При изменении обновлений |
+| [session-only-data](.agents/skills/session-only-data/SKILL.md) | Сессионные данные (прокси) |
+| [openai-guard](.agents/skills/openai-guard/SKILL.md) | При вызовах OpenAI API |
 
 ---
 
-## 🤖 Специализированные агенты
+## 🤖 Агентные роли и промпты
 
-Промпты в `.agents/prompts/`. При каждом старте: загрузить нужный промпт → следовать session-boot протоколу.
-
-| Агент | Файл | Специализация | Скиллов |
-|-------|------|--------------|---------|
-| Architect | [architect.md](.agents/prompts/architect.md) | Архитектура, рефакторинг | 5 |
-| GUI Agent | [gui-agent.md](.agents/prompts/gui-agent.md) | PyQt6 UI, дизайн | 6 |
-| GUI Inspector | [gui-inspector-agent.md](.agents/prompts/gui-inspector-agent.md) | Проверка координат и CyberPro | 8 |
-| SMTP Expert | [smtp-expert.md](.agents/prompts/smtp-expert.md) | SMTP протокол, провайдеры | 7 |
+| Агент | Промпт | Специализация | Скиллов |
+|-------|--------|--------------|---------|
+| Architect | [architect.md](.agents/prompts/architect.md) | Архитектура, рефакторинг | 6 |
+| SMTP Expert | [smtp-expert.md](.agents/prompts/smtp-expert.md) | SMTP, аутентификация | 9 |
 | Proxy Expert | [proxy-expert.md](.agents/prompts/proxy-expert.md) | SOCKS5/HTTP прокси | 6 |
 | Code Reviewer | [code-reviewer.md](.agents/prompts/code-reviewer.md) | Code review | 5 |
 | Security Agent | [security-agent.md](.agents/prompts/security-agent.md) | Безопасность, секреты | 3 |
@@ -145,7 +131,7 @@
 | Debugger | [debugger.md](.agents/prompts/debugger.md) | Отладка сложных проблем | 6 |
 | Orchestrator | [orchestrator.md](.agents/prompts/orchestrator.md) | Координация агентов | 2 |
 | Cleanup Agent | [cleanup-agent.md](.agents/prompts/cleanup-agent.md) | Удаление мусора, дубликатов | 5 |
-| Optimizer Agent | [optimizer-agent.md](.agents/prompts/optimizer-agent.md) | FPS, RAM, startup, EXE | 8 |
+| Optimizer Agent | [optimizer-agent.md](.agents/prompts/optimizer-agent.md) | RAM, startup, EXE size | 8 |
 | Audit Agent | [audit-agent.md](.agents/prompts/audit-agent.md) | Полный аудит всех систем | 9 |
 
 ---
@@ -154,15 +140,15 @@
 
 | Задача | Основной агент | Параллельно |
 |--------|---------------|-------------|
-| Новая GUI фича | GUI Agent | Code Reviewer |
+| Новая UI фича (React) | Architect | Code Reviewer |
 | SMTP ошибки | SMTP Expert | Debugger |
 | Прокси проблемы | Proxy Expert | Debugger |
-| Баг в UI | GUI Inspector + Debugger | — |
+| Баг в UI (React/Tauri) | Debugger | — |
 | Релиз PATCH | DevOps | Security Agent |
 | Релиз MINOR/MAJOR | Audit Agent → DevOps | — |
 | Рефакторинг | Architect → Code Reviewer | Tester |
 | Очистка репо | Cleanup Agent | — |
-| Оптимизация | Optimizer Agent | GUI Inspector |
+| Оптимизация | Optimizer Agent | — |
 | Полный аудит | Audit Agent | — |
 
 ---
@@ -171,9 +157,9 @@
 
 1. **Секреты не в коде** — secret-guard (приоритет №1)
 2. **Синтаксис проверять до push** — python-syntax-guard
-3. **CyberPro дизайн** — только Colors.* / Spacing.* — gui-style-guard
+3. **Дизайн через theme.ts** — только цвета из tailwind.config.js / theme.ts
 4. **Минимальный код** — ponytail (stdlib > зависимость)
-5. **Thread safety** — Qt только из UI потока
+5. **Thread safety** — SendingEngine только из потока; React — только из UI
 6. **MAX_CONCURRENT = 4** — не менять!
 7. **Нет моковых данных** — no-mock-data
 8. **Отчёт в конце задачи** — agent-report (обязательно)
@@ -182,38 +168,57 @@
 
 ---
 
-## 📁 Структура файлов
+## 📁 Структура файлов v6 (Tauri + Python + React)
 
 ```
-main.py              — точка входа
+main.py              — точка входа: uvicorn на :7531
 core/
-  sender.py          — SMTP engine (SmtpAccount, _test_smtp_sync, configs)
-  smtp_validator.py  — валидация (_try_smtp_connect, PROXY_BLOCKS_SMTP)
-  ai_fixer.py        — OpenAI spam fixer
+  server.py          — FastAPI: все эндпоинты (/api/*)
+  models.py          — SmtpAccount, Recipient, CampaignConfig, CampaignStatus
+  sender.py          — SMTP движок (SendingEngine, test_smtp_connection)
+  storage.py         — Fernet-зашифрованное хранилище (data/*.json)
+  proxy.py           — ProxyManager: parse/rotate/check SOCKS5+HTTP
+  oauth2_refresh.py  — Microsoft OAuth2 refresh_token
   spam_checker.py    — спам-скор 0-100
   warmup.py          — прогрев аккаунтов
   bounce.py          — IMAP bounce parser
-  updater.py         — auto-updater с patch
-  license.py         — JWT лицензии
-  _version.py        — APP_VERSION (источник истины для версии)
-gui/
-  app.py             — MainWindow, sidebar
-  theme.py           — Colors, Spacing, Typography (ЕДИНСТВЕННЫЙ источник стилей)
-  screens/
-    screen_accounts.py — аккаунты, TestWorker, _CountryWorker, _proxy_country_cache
-    screen_sender.py   — рассылка
-    screen_*.py
-  widgets/
-    animated_bg.py   — фоновая анимация (ограничь до 30 FPS, MAX_PARTICLES=30)
+  html_generator.py  — генерация HTML писем
+  uniqueizer.py      — anti-spam obfuscation (Spintax, Unicode, HTML randomize)
+  inbox_tester.py    — inbox delivery testing
+  reply_monitor.py   — IMAP reply monitoring
+  send_checkpoint.py — checkpoint/resume for campaigns
+  _version.py        — APP_VERSION (источник истины для Python)
+  _ensure_imports.py — PyInstaller import guard
+ui/src/
+  version.ts         — FRONTEND_VERSION (источник истины для JS; обновляется CI)
+  api.ts             — HTTP клиент (все запросы к :7531 здесь)
+  App.tsx            — React Router + Layout wrapper
+  theme.ts           — design tokens (цвета, типографика)
+  components/
+    Layout.tsx       — Sidebar + main area
+    StartupOverlay.tsx — startup screen + stale-cache guard
+  contexts/
+    StatusContext.tsx — SSE/polling real-time статус
+  pages/
+    Dashboard.tsx    — статистика
+    Accounts.tsx     — SMTP аккаунты
+    Recipients.tsx   — получатели
+    Compose.tsx      — редактор письма
+    Sending.tsx      — управление рассылкой
+    Proxies.tsx      — прокси
+    Inbox.tsx        — входящие / bounce
+src-tauri/
+  src/main.rs        — Rust shell: kill old core, spawn new, WebView2
+  tauri.conf.json    — конфиг окна, sidecar, CSP
+  Cargo.toml         — Rust зависимости
 server/
-  bot.py             — Telegram Bot + FastAPI (120k chars — читай offset/limit!)
+  bot.py             — Telegram Bot + FastAPI (лицензии, платежи)
   database.py        — aiosqlite
-  crypto_pay.py      — CryptoBot
   config.py          — env config
-i18n/                — Qt Linguist переводы (.ts, .qm)
+  crypto_pay.py, lzt_pay.py, xrocket_pay.py — платёжные провайдеры
 .agents/
-  skills/            — 63 специализированных скилла
-  prompts/           — 14 агентных промптов
+  skills/            — специализированные скиллы
+  prompts/           — агентные промпты
   memory/            — MEMORY.md (персистентная память)
 ```
 
@@ -226,14 +231,36 @@ i18n/                — Qt Linguist переводы (.ts, .qm)
 2. Паттерн: create blobs → create tree (base_tree) → create commit → PATCH ref
 3. Owner: `FTPLabs`, Repo: `FMailSender`, Branch: `main`
 4. Батчи по 8 файлов при создании блобов
-5. Детали: `.agents/skills/release-workflow/SKILL.md`
+5. Детали: `.agents/skills/github-push/SKILL.md`
 
 ---
 
-## 📊 Известные исправления (v4.4.0)
+## 📊 Известные исправления и архитектурные решения
 
+### v6.0.6 (текущая)
+- `kill_existing_core()` — двухэтапный kill: сначала по порту 7531 (PowerShell
+  `Get-NetTCPConnection`), затем по имени процесса. Решает upgrade-сценарий где
+  старый fmail-core.exe держит порт и Tauri подключается к старой версии.
+- `initBaseUrl()` в api.ts — пробует 127.0.0.1 и localhost; берёт первый
+  рабочий. Решает проблему с VPN-клиентами блокирующими 127.0.0.1.
+- `FRONTEND_VERSION` в ui/src/version.ts — StartupOverlay сравнивает с
+  backend version; при несовпадении (stale WebView2 cache) → принудительный
+  window.location.reload().
+- CSP в tauri.conf.json — блокирует WebView2 от внешних соединений:
+  `connect-src http://127.0.0.1:7531 http://localhost:7531`. Предотвращает
+  утечку реального IP через browser-side requests.
+- Google Fonts CDN удалён из index.html — загрузка с fonts.googleapis.com
+  выдавала реальный IP пользователя при каждом запуске, минуя VPN/прокси.
+  Заменено на системные шрифты (Segoe UI / system-ui).
+
+### v6.0.5
+- `asyncio.get_running_loop()` — внутри корутин всегда `get_running_loop()`,
+  не `get_event_loop()` (deprecated Python 3.10+)
+- duck-compat models↔sender — models.SmtpAccount обязан иметь _lock,
+  _day_reset, _hour_reset в __post_init__
+- `data/` в .gitignore — критично, иначе зашифрованные пароли попадут в репо
+
+### v6.0.x (общее)
 - `PROXY_BLOCKS_SMTP` только при SOCKS5 General Failure (не таймаут)
-- `_proxy_country_cache` — кэш страны прокси, не сбрасывается при _refresh_table
-- `MAX_CONCURRENT = 4` (было 10)
-- `Semaphore(3)` для ip-api.com
-- `_test_workers` очищаются после завершения
+- `MAX_CONCURRENT = 4` (было 10) — разумный параллелизм без блокировок
+- `Semaphore(3)` для ip-api.com rate limit
