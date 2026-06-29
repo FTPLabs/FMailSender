@@ -1,7 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { LayoutDashboard, Users, Mail, FileText, Send, Shield, Zap } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { api, type AppStatus } from '../api'
+import { useStatus } from '../contexts/StatusContext'
 
 const NAV = [
   { to: '/dashboard',  icon: LayoutDashboard, label: 'Дашборд' },
@@ -23,14 +22,7 @@ const STATE_DOT: Record<string, string> = {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
-  const [status, setStatus] = useState<AppStatus | null>(null)
-
-  useEffect(() => {
-    const poll = () => api.status().then(setStatus).catch(() => {})
-    poll()
-    const id = setInterval(poll, 3000)
-    return () => clearInterval(id)
-  }, [])
+  const { status } = useStatus()
 
   const st = status?.campaign
 
