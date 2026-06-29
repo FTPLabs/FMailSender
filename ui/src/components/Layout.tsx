@@ -97,9 +97,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* ── Main ────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto flex flex-col">
         <div key={location.pathname}
-          className="p-6 min-h-full animate-fade-in">
+          className="p-6 flex-1 flex flex-col animate-fade-in">
           {children}
         </div>
       </main>
