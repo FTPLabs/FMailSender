@@ -74,7 +74,7 @@
   .badge-purple { @apply badge bg-purple/15 text-purple; }
 
   /* ── Page ────────────────────────────────────────────────── */
-  .page        { @apply space-y-5 animate-fade-in; }
+  .page        { @apply space-y-5 animate-fade-in mx-auto w-full; }
   .page-header { @apply flex items-center justify-between; }
   .page-title  { @apply text-xl font-semibold text-text; }
   .page-sub    { @apply text-sm text-muted mt-0.5; }
