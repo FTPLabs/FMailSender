@@ -720,67 +720,35 @@ async def get_events(request: Request):
     )
 
 
-  # ── License ───────────────────────────────────────────────────────────────────
+# ── License ────────────────────────────────────────────────────────────────────────────
 
-  @app.get("/api/license")
-  def get_license():
-      """Возвращает статус текущей лицензии."""
-      try:
-          from core.license import get_license_status
-          return get_license_status()
-      except ImportError:
-          return {"valid": True, "plan": "unlimited", "note": "license module not found"}
-      except Exception as exc:
-          return {"valid": False, "error": str(exc)}
-
-
-  @app.post("/api/license/activate")
-  async def activate_license(body: dict):
-      """Активирует лицензионный ключ."""
-      key = body.get("key", "").strip()
-      if not key:
-          raise HTTPException(400, "Лицензионный ключ не указан")
-      try:
-          from core.license import activate_license_key
-          result = await asyncio.get_running_loop().run_in_executor(
-              None, activate_license_key, key
-          )
-          return result
-      except ImportError:
-          return {"success": True, "message": "Лицензия принята"}
-      except Exception as exc:
-          raise HTTPException(400, str(exc))
-
-  # ── License ───────────────────────────────────────────────────────────────────
-
-  @app.get("/api/license")
-  def get_license():
-      """Returns current license status."""
-      try:
-          from core.license import get_license_status
-          return get_license_status()
-      except ImportError:
-          return {"valid": True, "plan": "unlimited", "note": "license module not available"}
-      except Exception as exc:
-          return {"valid": False, "error": str(exc)}
+@app.get("/api/license")
+def get_license():
+    """Returns current license status."""
+    try:
+        from core.license import get_license_status
+        return get_license_status()
+    except ImportError:
+        return {"valid": True, "plan": "unlimited", "note": "license module not available"}
+    except Exception as exc:
+        return {"valid": False, "error": str(exc)}
 
 
-  @app.post("/api/license/activate")
-  async def activate_license(req: Request):
-      """Activates a license key on this machine."""
-      body = await req.json()
-      key = (body.get("key") or "").strip()
-      if not key:
-          raise HTTPException(status_code=400, detail="Лицензионный ключ не указан")
-      try:
-          from core.license import activate_license_key
-          loop = asyncio.get_running_loop()
-          result = await loop.run_in_executor(None, activate_license_key, key)
-          return result
-      except ImportError:
-          return {"success": True, "message": "Ключ сохранён (оффлайн-режим)"}
-      except RuntimeError as exc:
-          raise HTTPException(status_code=400, detail=str(exc))
-      except Exception as exc:
-          raise HTTPException(status_code=500, detail=str(exc))
-  
+@app.post("/api/license/activate")
+async def activate_license(req: Request):
+    """Activates a license key on this machine."""
+    body = await req.json()
+    key = (body.get("key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Лицензионный ключ не указан")
+    try:
+        from core.license import activate_license_key
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, activate_license_key, key)
+        return result
+    except ImportError:
+        return {"success": True, "message": "Ключ сохранён (оффлайн-режим)"}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
