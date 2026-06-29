@@ -84,15 +84,17 @@ export default function Proxies() {
   const ok   = Object.values(results).filter(r => r.ok).length
   const fail = Object.values(results).filter(r => !r.ok).length
 
+  const hasResults = Object.keys(results).length > 0
+
   return (
-    <div className="page max-w-3xl">
+    <div className="page flex-1 flex flex-col">
       {/* Header */}
       <div className="page-header">
         <div>
           <h1 className="page-title">Прокси</h1>
           <p className="page-sub">
             Всего: <span className="text-[#e8e8ff] font-medium">{proxies.length}</span>
-            {Object.keys(results).length > 0 && (
+            {hasResults && (
               <>
                 {' · '}<span className="text-[#10b981]">{ok} ОК</span>
                 {' · '}<span className="text-[#ef4444]">{fail} ошибок</span>
@@ -142,66 +144,71 @@ export default function Proxies() {
         <code className="text-[#8b5cf6]">host:port:user:pass</code>
       </div>
 
-      {/* Textarea editor */}
-      <div className="card space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-[#e8e8ff]">Список прокси</h2>
-          <button onClick={save} className="btn btn-primary btn-sm">
-            Сохранить
-          </button>
+      {/* Main layout: editor + results side by side when results exist */}
+      <div className={`flex-1 flex ${hasResults ? 'gap-5' : 'flex-col'} min-h-0`}>
+        {/* Textarea editor */}
+        <div className={`card flex flex-col space-y-3 ${hasResults ? 'flex-1 min-w-0' : 'flex-1'}`}>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-[#e8e8ff]">Список прокси</h2>
+            <button onClick={save} className="btn btn-primary btn-sm">
+              Сохранить
+            </button>
+          </div>
+          <textarea
+            className="input font-mono text-xs leading-relaxed resize-none flex-1"
+            style={{ minHeight: '200px' }}
+            placeholder={'socks5://user:pass@1.2.3.4:1080\nhttp://1.2.3.5:8080\n1.2.3.6:1080:user:pass'}
+            value={textarea}
+            onChange={e => setTextarea(e.target.value)}
+            spellCheck={false}
+          />
+          <p className="text-xs text-[#6666aa] flex-shrink-0">
+            После редактирования нажмите <span className="text-[#e8e8ff]">Сохранить</span>.
+            Кнопка <span className="text-[#e8e8ff]">Распределить</span> назначит прокси аккаунтам равномерно.
+          </p>
         </div>
-        <textarea
-          className="input font-mono text-xs leading-relaxed resize-none"
-          style={{ height: '260px' }}
-          placeholder={'socks5://user:pass@1.2.3.4:1080\nhttp://1.2.3.5:8080\n1.2.3.6:1080:user:pass'}
-          value={textarea}
-          onChange={e => setTextarea(e.target.value)}
-          spellCheck={false}
-        />
-        <p className="text-xs text-[#6666aa]">
-          После редактирования нажмите <span className="text-[#e8e8ff]">Сохранить</span>.
-          Кнопка <span className="text-[#e8e8ff]">Распределить</span> назначит прокси аккаунтам равномерно.
-        </p>
+
+        {/* Check results — shown as right column when results exist */}
+        {hasResults && (
+          <div className="card p-0 overflow-hidden flex flex-col" style={{ width: '420px', flexShrink: 0 }}>
+            <div className="px-4 py-2.5 border-b border-[#3a3a66]/30 bg-[#141424] flex-shrink-0">
+              <h2 className="text-xs font-semibold text-[#6666aa] uppercase tracking-wider">
+                Результаты проверки
+              </h2>
+            </div>
+            <div className="flex-1 overflow-y-auto divide-y divide-[#3a3a66]/20">
+              {proxies.map(proxy => {
+                const r = results[proxy]
+                if (!r) return null
+                return (
+                  <div key={proxy} className="px-4 py-2.5 flex items-center gap-3 text-xs hover:bg-[#141424]/60">
+                    {r.ok
+                      ? <CheckCircle size={12} className="text-[#10b981] flex-shrink-0" />
+                      : <XCircle size={12} className="text-[#ef4444] flex-shrink-0" />
+                    }
+                    <span className="font-mono text-[#e8e8ff] flex-1 truncate">{proxy}</span>
+                    {r.ping_ms != null && (
+                      <span className="text-[#6666aa] tabular-nums">{r.ping_ms}ms</span>
+                    )}
+                    {r.smtp_ok && (
+                      <span className="badge badge-ok">SMTP</span>
+                    )}
+                    {!r.ok && r.error && (
+                      <span className="text-[#ef4444]/80 max-w-[160px] truncate" title={r.error}>
+                        {r.error}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Check results */}
-      {Object.keys(results).length > 0 && (
-        <div className="card p-0 overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-[#3a3a66]/30 bg-[#141424]">
-            <h2 className="text-xs font-semibold text-[#6666aa] uppercase tracking-wider">Результаты проверки</h2>
-          </div>
-          <div className="max-h-64 overflow-y-auto divide-y divide-[#3a3a66]/20">
-            {proxies.map(proxy => {
-              const r = results[proxy]
-              if (!r) return null
-              return (
-                <div key={proxy} className="px-4 py-2.5 flex items-center gap-3 text-xs hover:bg-[#141424]/60">
-                  {r.ok
-                    ? <CheckCircle size={12} className="text-[#10b981] flex-shrink-0" />
-                    : <XCircle size={12} className="text-[#ef4444] flex-shrink-0" />
-                  }
-                  <span className="font-mono text-[#e8e8ff] flex-1 truncate">{proxy}</span>
-                  {r.ping_ms != null && (
-                    <span className="text-[#6666aa] tabular-nums">{r.ping_ms}ms</span>
-                  )}
-                  {r.smtp_ok && (
-                    <span className="badge badge-ok">SMTP</span>
-                  )}
-                  {!r.ok && r.error && (
-                    <span className="text-[#ef4444]/80 max-w-[200px] truncate" title={r.error}>
-                      {r.error}
-                    </span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
       {/* Empty state */}
-      {!loading && proxies.length === 0 && Object.keys(results).length === 0 && (
-        <div className="empty">
+      {!loading && proxies.length === 0 && !hasResults && (
+        <div className="empty flex-1">
           <Shield size={36} />
           <p className="font-medium text-sm text-[#e8e8ff] mb-1">Прокси не загружены</p>
           <p className="text-xs">Вставьте список выше или импортируйте .txt файл</p>
