@@ -196,7 +196,7 @@ async def test_account_endpoint(body: AccountIn):
 @app.post("/api/accounts/test-all")
 async def test_all_accounts():
     results = []
-    sem = asyncio.Semaphore(4)
+    sem = asyncio.Semaphore(10)
 
     async def _one(i: int, acc: SmtpAccount):
         async with sem:
@@ -211,6 +211,85 @@ async def test_all_accounts():
     fail_cnt = sum(1 for a in _accounts if a.last_test_ok is False)
     return {"results": sorted(results, key=lambda x: x["index"]),
             "ok": ok_cnt, "failed": fail_cnt, "total": len(_accounts)}
+
+
+@app.get("/api/accounts/test-all/stream")
+async def test_all_stream(request: Request):
+    """
+    SSE: tests all accounts with 10 concurrent workers.
+    Streams each result immediately as it completes — no waiting for the full batch.
+
+    Per-result event:
+      data: {"index":0,"email":"u@h.com","ok":true,"message":"OK","done":1,"total":61}
+
+    Final event:
+      data: {"complete":true,"ok":N,"failed":N,"total":N}
+    """
+    accounts_snapshot = list(_accounts)
+    total = len(accounts_snapshot)
+
+    async def _gen():
+        if not accounts_snapshot:
+            yield f"data: {json.dumps({'complete': True, 'ok': 0, 'failed': 0, 'total': 0})}\n\n"
+            return
+
+        q: asyncio.Queue = asyncio.Queue()
+        sem = asyncio.Semaphore(10)
+
+        async def _one(i: int, acc: SmtpAccount):
+            async with sem:
+                try:
+                    ok, msg = await test_smtp_connection(acc)
+                except asyncio.CancelledError:
+                    q.put_nowait({"i": i, "email": acc.email, "ok": False, "msg": "отменено"})
+                    return
+                except Exception as exc:
+                    ok, msg = False, str(exc)
+                acc.last_test_ok  = ok
+                acc.last_test_msg = msg
+                q.put_nowait({"i": i, "email": acc.email, "ok": ok, "msg": msg})
+
+        tasks = [asyncio.create_task(_one(i, a)) for i, a in enumerate(accounts_snapshot)]
+        ok_n = fail_n = done_n = 0
+
+        while done_n < total:
+            if await request.is_disconnected():
+                for t in tasks:
+                    t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                return
+            try:
+                r = await asyncio.wait_for(q.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            done_n += 1
+            if r["ok"]:
+                ok_n += 1
+            else:
+                fail_n += 1
+            payload = {
+                "index":   r["i"],
+                "email":   r["email"],
+                "ok":      r["ok"],
+                "message": r["msg"],
+                "done":    done_n,
+                "total":   total,
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+
+        await asyncio.gather(*tasks, return_exceptions=True)
+        save_accounts(accounts_snapshot)
+        yield f"data: {json.dumps({'complete': True, 'ok': ok_n, 'failed': fail_n, 'total': total})}\n\n"
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":     "no-cache",
+            "Connection":        "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/accounts/import-txt")
