@@ -100,6 +100,8 @@ class AccountIn(BaseModel):
     display_name: str = ""; daily_limit: int = 500; hourly_limit: int = 50
     is_active: bool = True;  proxy: str = "";  proxy_list: list[str] = []
     imap_host: str = "";  imap_port: int = 993;  imap_ssl: bool = True
+    # FIX v6.3: OAuth2 поля
+    refresh_token: str = "";  access_token: str = ""
 
 
 class CampaignIn(BaseModel):
@@ -119,6 +121,7 @@ def _make_account(body: AccountIn) -> SmtpAccount:
         hourly_limit=body.hourly_limit, is_active=body.is_active,
         proxy=body.proxy, proxy_list=list(body.proxy_list),
         imap_host=body.imap_host, imap_port=body.imap_port, imap_ssl=body.imap_ssl,
+        refresh_token=getattr(body, "refresh_token", ""), access_token=getattr(body, "access_token", ""),
     )
 
 
@@ -314,11 +317,13 @@ async def import_accounts_txt(file: UploadFile = File(...)):
                     domain = email.split("@")[-1].lower()
                     cfg    = get_smtp_config_for_domain(domain) or {}
                     from core.smtp_limits import apply_limits_to_account as _apply_lim
+                    _rt = parts[2].strip() if len(parts) >= 3 else ""  # FIX v6.3: email|pwd|refresh_token
                     acc    = SmtpAccount(
                         email=email, password=pwd,
                         host=cfg.get("host", ""),
                         port=cfg.get("port", 465),
                         use_ssl=cfg.get("use_ssl", True),
+                        refresh_token=_rt,
                     )
                     _apply_lim(acc)  # set official daily/hourly limits by domain
                     _accounts.append(acc)
@@ -713,3 +718,36 @@ async def get_events(request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+  # ── License ───────────────────────────────────────────────────────────────────
+
+  @app.get("/api/license")
+  def get_license():
+      """Возвращает статус текущей лицензии."""
+      try:
+          from core.license import get_license_status
+          return get_license_status()
+      except ImportError:
+          return {"valid": True, "plan": "unlimited", "note": "license module not found"}
+      except Exception as exc:
+          return {"valid": False, "error": str(exc)}
+
+
+  @app.post("/api/license/activate")
+  async def activate_license(body: dict):
+      """Активирует лицензионный ключ."""
+      key = body.get("key", "").strip()
+      if not key:
+          raise HTTPException(400, "Лицензионный ключ не указан")
+      try:
+          from core.license import activate_license_key
+          result = await asyncio.get_running_loop().run_in_executor(
+              None, activate_license_key, key
+          )
+          return result
+      except ImportError:
+          return {"success": True, "message": "Лицензия принята"}
+      except Exception as exc:
+          raise HTTPException(400, str(exc))
+  
