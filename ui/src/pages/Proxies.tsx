@@ -144,8 +144,8 @@ export default function Proxies() {
         <code className="text-[#8b5cf6]">host:port:user:pass</code>
       </div>
 
-      {/* Main layout: editor + results side by side when results exist */}
-      <div className={`flex-1 flex ${hasResults ? 'gap-5' : 'flex-col'} min-h-0`}>
+      {/* Main layout: editor + results — column on small, row on lg+ when results exist */}
+      <div className={`flex-1 flex min-h-0 ${hasResults ? 'flex-col lg:flex-row gap-5' : 'flex-col'}`}>
         {/* Textarea editor */}
         <div className={`card flex flex-col space-y-3 ${hasResults ? 'flex-1 min-w-0' : 'flex-1'}`}>
           <div className="flex items-center justify-between">
