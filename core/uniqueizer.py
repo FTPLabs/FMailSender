@@ -308,11 +308,28 @@ def technique_uuid_fingerprint(html: str) -> str:
 # ============================================================
 # Tracking pixel (опционально, выключен по умолчанию)
 # ============================================================
-def technique_tracking_pixel(html: str) -> str:
+def technique_tracking_pixel(html: str, tracking_base_url: str = "") -> str:
+  """Embed a tracking pixel using a real external URL.
+
+  IMPORTANT: data:URI pixels do NOT work for open tracking — no HTTP request
+  is made by the email client. Also, inline base64 images are a spam signal
+  (SpamAssassin MIME_BASE64_TEXT +1.0, Gmail spam heuristic).
+
+  This function is a NO-OP unless ``tracking_base_url`` is provided.
+  Set tracking_base_url to your tracking server URL, e.g.:
+    "https://track.yourdomain.com/open"
+  The full pixel URL will be: {tracking_base_url}/{uid}.gif
+
+  If tracking_base_url is empty (default), the function returns html unchanged.
+  """
+  if not tracking_base_url or not tracking_base_url.strip():
+      # No tracking server configured — skip silently (safe default)
+      return html
   uid = str(uuid.uuid4())
-  gif_b64 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+  base = tracking_base_url.rstrip("/")
+  pixel_url = f"{base}/{uid}.gif"
   pixel = (
-      f'<img src="data:image/gif;base64,{gif_b64}" width="1" height="1" '
+      f'<img src="{pixel_url}" width="1" height="1" '
       f'alt="" style="display:block;width:1px;height:1px;border:0;" '
       f'data-track-id="{uid}"/>'
   )

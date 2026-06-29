@@ -40,6 +40,19 @@ except ImportError:
   _HAS_AIOSMTPLIB = False
 
 try:
+  from core.dkim_signer import (
+      load_configs as _dkim_load_configs,
+      sign_message_bytes as _dkim_sign,
+      get_config_for_domain as _dkim_get_cfg,
+  )
+  _HAS_DKIM_SIGNER = True
+except ImportError:
+  _HAS_DKIM_SIGNER = False
+  def _dkim_load_configs(): return []
+  def _dkim_sign(b, _cfg): return b
+  def _dkim_get_cfg(d, cfgs): return None
+
+try:
   from core.oauth2_refresh import (
       get_valid_access_token as _get_oauth_token,
       is_ms_domain as _is_ms_domain,
@@ -1108,6 +1121,147 @@ async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
       )
 
 
+class _SmtpConnectionCache:
+  """Thread-safe per-(account, proxy) SMTP connection reuse pool.
+
+  Uses checkout/checkin pattern so a connection is never used concurrently
+  by two threads. Connections are recycled after MAX_REUSE sends or
+  MAX_IDLE_SECS of idle time (servers close idle connections around 5-10 min).
+  """
+  MAX_REUSE = 50      # reconnect after this many sends per connection
+  MAX_IDLE_SECS = 90  # recycle if idle > 90 s (safer than server 300 s limit)
+
+  def __init__(self):
+      self._lock = threading.Lock()
+      # key → (smtp_conn, sent_count, last_used_ts)
+      self._cache: dict[str, tuple] = {}
+
+  @staticmethod
+  def _key(account_email: str, proxy: str) -> str:
+      return f"{account_email}::{proxy or 'direct'}"
+
+  def checkout(self, account_email: str, proxy: str):
+      """Remove and return (conn, count) if reusable, else None."""
+      key = self._key(account_email, proxy)
+      with self._lock:
+          entry = self._cache.pop(key, None)
+      if entry is None:
+          return None
+      conn, count, last_used = entry
+      if count >= self.MAX_REUSE or (time.time() - last_used) > self.MAX_IDLE_SECS:
+          try:
+              conn.close()
+          except Exception:
+              pass
+          return None
+      return conn, count
+
+  def checkin(self, account_email: str, proxy: str, conn, count: int) -> None:
+      """Return conn to pool after successful use."""
+      key = self._key(account_email, proxy)
+      with self._lock:
+          self._cache[key] = (conn, count + 1, time.time())
+
+  def invalidate(self, account_email: str, proxy: str) -> None:
+      """Discard cached connection for this key (e.g. after error)."""
+      key = self._key(account_email, proxy)
+      with self._lock:
+          entry = self._cache.pop(key, None)
+      if entry:
+          try:
+              entry[0].close()
+          except Exception:
+              pass
+
+  def clear(self) -> None:
+      with self._lock:
+          entries, self._cache = list(self._cache.values()), {}
+      for conn, _, _ in entries:
+          try:
+              conn.quit()
+          except Exception:
+              pass
+
+
+# Per-destination-domain hourly send limits to prevent burst blocks.
+# These are conservative limits per source IP/account.
+_DOMAIN_HOURLY_LIMITS: dict[str, int] = {
+    "gmail.com": 150,
+    "googlemail.com": 150,
+    "yahoo.com": 100,
+    "ymail.com": 100,
+    "rocketmail.com": 100,
+    "aol.com": 100,
+    "outlook.com": 120,
+    "hotmail.com": 120,
+    "hotmail.co.uk": 120,
+    "hotmail.de": 120,
+    "hotmail.fr": 120,
+    "hotmail.ru": 120,
+    "live.com": 120,
+    "msn.com": 120,
+    "gmx.com": 60,
+    "gmx.net": 60,
+    "gmx.de": 60,
+    "web.de": 80,
+    "yandex.ru": 100,
+    "yandex.com": 100,
+    "mail.ru": 100,
+}
+_DEFAULT_DOMAIN_HOURLY = 200
+
+
+class _DomainRateLimiter:
+  """Track per-destination-domain hourly send counts to prevent burst blocks.
+
+  Gmail, Yahoo, Outlook all have implicit per-source-IP rate limits per
+  destination. Exceeding them triggers 421 "try again later" or
+  permanent blocks. This tracks sends per destination domain per hour
+  and throttles when approaching limits.
+  """
+
+  def __init__(self):
+      self._lock = threading.Lock()
+      # domain → (sent_count, window_start_ts)
+      self._counters: dict[str, tuple[int, float]] = {}
+
+  def _get_limit(self, domain: str) -> int:
+      return _DOMAIN_HOURLY_LIMITS.get(domain.lower(), _DEFAULT_DOMAIN_HOURLY)
+
+  def can_send(self, destination_domain: str) -> bool:
+      """Return True if we are within the hourly limit for this domain."""
+      d = destination_domain.lower()
+      limit = self._get_limit(d)
+      with self._lock:
+          count, start = self._counters.get(d, (0, time.time()))
+          if time.time() - start >= 3600:
+              self._counters[d] = (0, time.time())
+              return True
+          return count < limit
+
+  def record(self, destination_domain: str) -> None:
+      """Increment counter for this domain after a successful send."""
+      d = destination_domain.lower()
+      with self._lock:
+          count, start = self._counters.get(d, (0, time.time()))
+          if time.time() - start >= 3600:
+              self._counters[d] = (1, time.time())
+          else:
+              self._counters[d] = (count + 1, start)
+
+  def current_count(self, destination_domain: str) -> int:
+      d = destination_domain.lower()
+      with self._lock:
+          count, start = self._counters.get(d, (0, time.time()))
+          if time.time() - start >= 3600:
+              return 0
+          return count
+
+  def reset(self) -> None:
+      with self._lock:
+          self._counters.clear()
+
+
 class SendingEngine:
   """
   Async campaign engine.
@@ -1143,6 +1297,12 @@ class SendingEngine:
       self._stats: dict = {"success": 0, "errors": 0, "total": 0}
       self._stats_lock = threading.Lock()
       self._loop: Optional[asyncio.AbstractEventLoop] = None  # FIX v4.5.2: thread-safe cancel
+      # Connection reuse pool: avoids new TLS handshake per email
+      self._conn_cache = _SmtpConnectionCache()
+      # Per-destination-domain rate limiter: prevents Gmail/Yahoo burst blocks
+      self._domain_limiter = _DomainRateLimiter()
+      # DKIM configs: loaded once, used to sign every outgoing message
+      self._dkim_configs = _dkim_load_configs() if _HAS_DKIM_SIGNER else []
 
   @property
   def stats(self) -> dict:
@@ -1233,6 +1393,21 @@ class SendingEngine:
                   success=False,
                   error="Отменено",
               )
+          # ── Domain rate limiter: throttle per destination domain ──────────
+          _dest_domain = recipient.email.split("@")[-1].lower() if "@" in recipient.email else ""
+          _rate_wait = 0
+          while not self._domain_limiter.can_send(_dest_domain):
+              if self.stop_event.is_set():
+                  return SendResult(recipient_email=recipient.email, success=False, error="Отменено")
+              _rate_wait += 1
+              if _rate_wait == 1 and self._log_queue:
+                  _cnt = self._domain_limiter.current_count(_dest_domain)
+                  _lim = _DOMAIN_HOURLY_LIMITS.get(_dest_domain, _DEFAULT_DOMAIN_HOURLY)
+                  self._log_queue.put_nowait({"type": "log", "level": "warn", "message":
+                      f"[{time.strftime('%H:%M:%S')}] Rate limit @{_dest_domain}: "
+                      f"{_cnt}/{_lim}/hour — жду 30s..."})
+              await asyncio.sleep(30)
+
           # ── Retry: до 3 разных аккаунтов ─────────────────────────────────
           _MAX_RETRIES = 3
           _tried: set = set()
@@ -1244,6 +1419,7 @@ class SendingEngine:
               _tried.add(account.email)
               _result = await self._send_one(sem, account, recipient, template)
               if _result.success:
+                  self._domain_limiter.record(_dest_domain)
                   if _attempt > 0 and self._log_queue:
                       self._log_queue.put_nowait({"type": "log", "level": "ok", "message":
                           f"[{time.strftime('%H:%M:%S')}] {recipient.email}: успех с {account.email} (попытка {_attempt + 1})"})
@@ -1493,6 +1669,20 @@ class SendingEngine:
         import urllib.parse as _urlparse
         msg = _build_message(account, recipient, template, uniqueize=self.config.uniqueize)
 
+        # ── DKIM: sign bytes before sending ───────────────────────────────
+        _sender_domain_dkim = account.email.split("@")[-1].lower() if "@" in account.email else ""
+        _dkim_cfg_for_send = None
+        if _HAS_DKIM_SIGNER and self._dkim_configs:
+            _dkim_cfg_for_send = _dkim_get_cfg(_sender_domain_dkim, self._dkim_configs)
+
+        def _smtp_send_signed(conn, _msg) -> None:
+            """Send via SMTP, signing with DKIM if a config is available."""
+            if _dkim_cfg_for_send:
+                _raw = _dkim_sign(_msg.as_bytes(), _dkim_cfg_for_send)
+                conn.sendmail(account.email, [recipient.email], _raw)
+            else:
+                conn.send_message(_msg)
+
         # ── Собираем пул прокси для ротации ───────────────────────────────
         _proxy_first = (account.proxy or "").strip()
         _proxy_pool  = list(getattr(account, "proxy_list", None) or [])
@@ -1567,11 +1757,20 @@ class SendingEngine:
                     smtp_conn.docmd("AUTH", "XOAUTH2 " + _xoauth2)
                 else:
                     smtp_conn.login(account.email, account.password)
-                smtp_conn.send_message(msg)
-                try:
-                    smtp_conn.quit()
-                except Exception:
-                    pass
+                _smtp_send_signed(smtp_conn, msg)
+                # Connection reuse: store instead of quit when pool is active
+                _reuse_stored = False
+                if hasattr(self, "_conn_cache"):
+                    try:
+                        self._conn_cache.checkin(account.email, _proxy_candidate, smtp_conn, 0)
+                        _reuse_stored = True
+                    except Exception:
+                        pass
+                if not _reuse_stored:
+                    try:
+                        smtp_conn.quit()
+                    except Exception:
+                        pass
                 # Обновляем acc.proxy на рабочий прокси для следующей итерации
                 if _proxy_candidate != (account.proxy or "").strip():
                     account.proxy = _proxy_candidate
@@ -1676,7 +1875,7 @@ class SendingEngine:
                                 ).decode())
                             else:
                                 _alt_conn.login(account.email, account.password)
-                            _alt_conn.send_message(msg)
+                            _smtp_send_signed(_alt_conn, msg)
                             try: _alt_conn.quit()
                             except Exception: pass
                             account.port = _ap; account.use_ssl = _as; account.use_tls = _at
@@ -1745,7 +1944,7 @@ class SendingEngine:
                                   ).decode())
                               else:
                                   _s587_conn.login(account.email, account.password)
-                              _s587_conn.send_message(msg)
+                              _smtp_send_signed(_s587_conn, msg)
                               try: _s587_conn.quit()
                               except Exception: pass
                               account.port = 587; account.use_ssl = False; account.use_tls = True

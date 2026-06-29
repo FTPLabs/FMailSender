@@ -587,6 +587,98 @@ def get_status():
     return _build_status()
 
 
+# ── DKIM signing ──────────────────────────────────────────────────────────────
+try:
+    from core.dkim_signer import (
+        load_configs as _dkim_load,
+        save_configs as _dkim_save,
+        validate_config as _dkim_validate,
+        DkimConfig,
+        is_available as _dkim_available,
+    )
+    _HAS_DKIM = True
+except ImportError:
+    _HAS_DKIM = False
+
+
+@app.get("/api/dkim")
+def get_dkim_configs():
+    if not _HAS_DKIM:
+        return {"available": False, "configs": [], "message": "dkimpy not installed (pip install dkimpy)"}
+    configs = _dkim_load()
+    return {
+        "available": _dkim_available(),
+        "configs": [
+            {
+                "selector": c.selector,
+                "domain": c.domain,
+                "enabled": c.enabled,
+                "has_key": bool(c.private_key_pem.strip()),
+            }
+            for c in configs
+        ],
+    }
+
+
+class DkimConfigIn(BaseModel):
+    selector: str
+    domain: str
+    private_key_pem: str
+    enabled: bool = True
+
+
+@app.post("/api/dkim")
+def add_or_update_dkim_config(body: DkimConfigIn):
+    if not _HAS_DKIM:
+        raise HTTPException(400, "dkimpy not installed — run: pip install dkimpy")
+    cfg = DkimConfig(
+        selector=body.selector.strip(),
+        domain=body.domain.strip().lower(),
+        private_key_pem=body.private_key_pem.strip(),
+        enabled=body.enabled,
+    )
+    ok, msg = _dkim_validate(cfg)
+    if not ok:
+        raise HTTPException(422, msg)
+    configs = _dkim_load()
+    # Replace existing config for same domain, or append
+    replaced = False
+    for i, c in enumerate(configs):
+        if c.domain.lower() == cfg.domain.lower():
+            configs[i] = cfg
+            replaced = True
+            break
+    if not replaced:
+        configs.append(cfg)
+    _dkim_save(configs)
+    return {"ok": True, "message": msg, "replaced": replaced}
+
+
+@app.delete("/api/dkim/{domain}")
+def delete_dkim_config(domain: str):
+    if not _HAS_DKIM:
+        raise HTTPException(400, "dkimpy not installed")
+    configs = _dkim_load()
+    before = len(configs)
+    configs = [c for c in configs if c.domain.lower() != domain.lower()]
+    _dkim_save(configs)
+    return {"ok": True, "deleted": before - len(configs)}
+
+
+@app.post("/api/dkim/validate")
+def validate_dkim_config(body: DkimConfigIn):
+    if not _HAS_DKIM:
+        raise HTTPException(400, "dkimpy not installed")
+    cfg = DkimConfig(
+        selector=body.selector.strip(),
+        domain=body.domain.strip().lower(),
+        private_key_pem=body.private_key_pem.strip(),
+        enabled=body.enabled,
+    )
+    ok, msg = _dkim_validate(cfg)
+    return {"ok": ok, "message": msg}
+
+
 @app.get("/api/events")
 async def get_events(request: Request):
     """

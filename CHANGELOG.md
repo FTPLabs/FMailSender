@@ -1,3 +1,42 @@
+## [6.2.0] — 2026-06-29
+
+### 🔴 DKIM signing — полная реализация (#6)
+
+- **core/dkim_signer.py** (новый модуль) — RFC 6376 DKIM подпись через `dkimpy`.
+  Graceful fallback если dkimpy не установлен (письма отправляются без подписи, предупреждение в лог).
+  Функции: `sign_message_bytes`, `load_configs/save_configs`, `validate_config`, `get_config_for_domain`.
+  Хранение: `data/dkim_configs.json` (атомарная запись через tmp + os.replace).
+- **core/sender.py** — DKIM подпись интегрирована в `_send_sync` во всех 3 точках отправки
+  (основная + port fallback 465 + port fallback 587). `_smtp_send_signed()` — локальный хелпер,
+  переключается между `sendmail(signed_bytes)` и `send_message(msg)`.
+- **core/server.py** — REST API:
+  - `GET /api/dkim` — список конфигов
+  - `POST /api/dkim` — добавить/обновить конфиг
+  - `DELETE /api/dkim/{domain}` — удалить
+  - `POST /api/dkim/validate` — проверить ключ без сохранения
+
+### ⚡ SMTP Connection Reuse (#5)
+
+- **core/sender.py** — новый класс `_SmtpConnectionCache`:
+  checkout/checkin паттерн, MAX_REUSE=50 писем на соединение, MAX_IDLE_SECS=90 сек.
+  После успешной отправки соединение сохраняется в пуле вместо `quit()`.
+  Thread-safe через `threading.Lock`. Инициализируется в `SendingEngine.__init__`.
+
+### 🛡️ Rate Limiting per Destination Domain (#3)
+
+- **core/sender.py** — новый класс `_DomainRateLimiter`:
+  консервативные почасовые лимиты для Gmail(150), Yahoo(100), Outlook(120), GMX(60) и др.
+  Интегрирован в `_send_with_acct_delay` с ожиданием 30s при превышении.
+  Лог-сообщение при начале throttling: "Rate limit @gmail.com: 150/150/hour — жду 30s..."
+
+### 🔧 Tracking Pixel (#2)
+
+- **core/uniqueizer.py** — `technique_tracking_pixel` переписан: data:URI УДАЛЁН.
+  Функция принимает `tracking_base_url` параметр. Без URL — NO-OP (ничего не добавляет).
+  Для работы нужен внешний tracking сервер: `https://track.yourdomain.com/open/{uid}.gif`.
+
+---
+
 ## [6.1.0] — 2026-06-29
 
 ### 🔴 Критические исправления (deliverability)

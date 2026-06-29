@@ -725,5 +725,330 @@ class TestSmtpAccountLimits:
         assert acc.sent_today == 1
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# DKIM signer
+# ══════════════════════════════════════════════════════════════════════════════
+class TestDkimSigner:
+    def setup_method(self):
+        from core.dkim_signer import (
+            DkimConfig, sign_message_bytes, validate_config,
+            load_configs, save_configs, get_config_for_domain,
+            is_available,
+        )
+        self.DkimConfig = DkimConfig
+        self.sign = sign_message_bytes
+        self.validate = validate_config
+        self.load = load_configs
+        self.save = save_configs
+        self.get_for_domain = get_config_for_domain
+        self.is_available = is_available
+
+    def _sample_msg(self):
+        return (
+            b"From: sender@example.com\r\n"
+            b"To: recipient@example.com\r\n"
+            b"Subject: Test\r\n"
+            b"Date: Mon, 29 Jun 2026 12:00:00 +0000\r\n"
+            b"Message-ID: <test@example.com>\r\n"
+            b"\r\nTest body\r\n"
+        )
+
+    def test_sign_without_dkimpy_returns_original(self):
+        """Without dkimpy installed, sign_message_bytes must return bytes unchanged."""
+        from core.dkim_signer import _HAS_DKIM
+        if _HAS_DKIM:
+            pytest.skip("dkimpy is installed — this tests the no-dkimpy path")
+        cfg = self.DkimConfig(selector="mail", domain="example.com", private_key_pem="dummy")
+        raw = self._sample_msg()
+        result = self.sign(raw, cfg)
+        assert result == raw
+
+    def test_sign_with_disabled_config_returns_original(self):
+        cfg = self.DkimConfig(selector="mail", domain="example.com",
+                               private_key_pem="key", enabled=False)
+        raw = self._sample_msg()
+        assert self.sign(raw, cfg) == raw
+
+    def test_sign_with_empty_key_returns_original(self):
+        cfg = self.DkimConfig(selector="mail", domain="example.com", private_key_pem="")
+        raw = self._sample_msg()
+        assert self.sign(raw, cfg) == raw
+
+    def test_validate_missing_selector(self):
+        cfg = self.DkimConfig(selector="", domain="example.com", private_key_pem="key")
+        ok, msg = self.validate(cfg)
+        assert not ok
+        assert "selector" in msg.lower()
+
+    def test_validate_bad_domain(self):
+        cfg = self.DkimConfig(selector="mail", domain="nodot", private_key_pem="key")
+        ok, msg = self.validate(cfg)
+        assert not ok
+        assert "domain" in msg.lower()
+
+    def test_validate_empty_key(self):
+        cfg = self.DkimConfig(selector="mail", domain="example.com", private_key_pem="")
+        ok, msg = self.validate(cfg)
+        assert not ok
+
+    def test_validate_non_pem_key(self):
+        cfg = self.DkimConfig(selector="mail", domain="example.com",
+                               private_key_pem="not_a_pem_key_at_all_123")
+        ok, msg = self.validate(cfg)
+        assert not ok
+        assert "pem" in msg.lower()
+
+    def test_get_for_domain_exact_match(self):
+        configs = [
+            self.DkimConfig(selector="mail", domain="example.com", private_key_pem="k"),
+            self.DkimConfig(selector="mail", domain="other.com", private_key_pem="k"),
+        ]
+        result = self.get_for_domain("example.com", configs)
+        assert result is not None
+        assert result.domain == "example.com"
+
+    def test_get_for_domain_email_input(self):
+        configs = [self.DkimConfig(selector="s", domain="example.com", private_key_pem="k")]
+        result = self.get_for_domain("user@example.com", configs)
+        assert result is not None
+
+    def test_get_for_domain_no_match(self):
+        configs = [self.DkimConfig(selector="s", domain="other.com", private_key_pem="k")]
+        assert self.get_for_domain("example.com", configs) is None
+
+    def test_get_for_domain_disabled_skipped(self):
+        configs = [self.DkimConfig(selector="s", domain="example.com",
+                                    private_key_pem="k", enabled=False)]
+        assert self.get_for_domain("example.com", configs) is None
+
+    def test_save_and_load_roundtrip(self, tmp_path):
+        import core.dkim_signer as dkim_mod
+        orig = dkim_mod._CONFIGS_PATH
+        dkim_mod._CONFIGS_PATH = tmp_path / "dkim_configs.json"
+        try:
+            configs = [
+                self.DkimConfig(selector="mail", domain="example.com", private_key_pem="-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----"),
+                self.DkimConfig(selector="mail2", domain="other.com", private_key_pem="pem2", enabled=False),
+            ]
+            self.save(configs)
+            loaded = self.load()
+            assert len(loaded) == 2
+            assert loaded[0].domain == "example.com"
+            assert loaded[0].selector == "mail"
+            assert loaded[1].enabled is False
+        finally:
+            dkim_mod._CONFIGS_PATH = orig
+
+    def test_load_missing_file_returns_empty(self, tmp_path):
+        import core.dkim_signer as dkim_mod
+        orig = dkim_mod._CONFIGS_PATH
+        dkim_mod._CONFIGS_PATH = tmp_path / "nonexistent.json"
+        try:
+            assert self.load() == []
+        finally:
+            dkim_mod._CONFIGS_PATH = orig
+
+    def test_is_available_returns_bool(self):
+        assert isinstance(self.is_available(), bool)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SMTP Connection Cache
+# ══════════════════════════════════════════════════════════════════════════════
+class TestSmtpConnectionCache:
+    def setup_method(self):
+        from core.sender import _SmtpConnectionCache
+        self.Cache = _SmtpConnectionCache
+
+    def _make_mock_conn(self):
+        import unittest.mock as mock
+        conn = mock.MagicMock()
+        conn.quit = mock.MagicMock()
+        conn.close = mock.MagicMock()
+        return conn
+
+    def test_checkout_empty_returns_none(self):
+        cache = self.Cache()
+        assert cache.checkout("user@example.com", "proxy1") is None
+
+    def test_checkin_then_checkout(self):
+        cache = self.Cache()
+        conn = self._make_mock_conn()
+        cache.checkin("user@example.com", "proxy1", conn, 0)
+        result = cache.checkout("user@example.com", "proxy1")
+        assert result is not None
+        out_conn, count = result
+        assert out_conn is conn
+        assert count == 1  # checkin incremented count
+
+    def test_checkout_removes_from_cache(self):
+        cache = self.Cache()
+        conn = self._make_mock_conn()
+        cache.checkin("user@example.com", "proxy1", conn, 0)
+        cache.checkout("user@example.com", "proxy1")
+        # Second checkout should return None (already removed)
+        assert cache.checkout("user@example.com", "proxy1") is None
+
+    def test_max_reuse_limit(self):
+        cache = self.Cache()
+        cache.MAX_REUSE = 5
+        conn = self._make_mock_conn()
+        cache.checkin("user@example.com", "proxy1", conn, 4)  # count will be 5
+        result = cache.checkout("user@example.com", "proxy1")
+        # count == MAX_REUSE → should be discarded
+        assert result is None
+
+    def test_idle_timeout_discards_connection(self):
+        import time as _time
+        cache = self.Cache()
+        cache.MAX_IDLE_SECS = 0  # immediate expiry
+        conn = self._make_mock_conn()
+        cache.checkin("a@b.com", "px", conn, 0)
+        _time.sleep(0.01)  # ensure idle timeout exceeded
+        result = cache.checkout("a@b.com", "px")
+        assert result is None
+
+    def test_invalidate_closes_connection(self):
+        cache = self.Cache()
+        conn = self._make_mock_conn()
+        cache.checkin("user@example.com", "proxy1", conn, 0)
+        cache.invalidate("user@example.com", "proxy1")
+        conn.close.assert_called()
+        assert cache.checkout("user@example.com", "proxy1") is None
+
+    def test_clear_closes_all(self):
+        cache = self.Cache()
+        conns = [self._make_mock_conn() for _ in range(3)]
+        cache.checkin("a@b.com", "p1", conns[0], 0)
+        cache.checkin("b@b.com", "p1", conns[1], 0)
+        cache.checkin("c@b.com", "p1", conns[2], 0)
+        cache.clear()
+        # All should be checked out as None after clear
+        assert cache.checkout("a@b.com", "p1") is None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Domain Rate Limiter
+# ══════════════════════════════════════════════════════════════════════════════
+class TestDomainRateLimiter:
+    def setup_method(self):
+        from core.sender import _DomainRateLimiter, _DOMAIN_HOURLY_LIMITS, _DEFAULT_DOMAIN_HOURLY
+        self.Limiter = _DomainRateLimiter
+        self.limits = _DOMAIN_HOURLY_LIMITS
+        self.default_limit = _DEFAULT_DOMAIN_HOURLY
+
+    def test_can_send_initially_true(self):
+        lim = self.Limiter()
+        assert lim.can_send("gmail.com") is True
+
+    def test_record_increments_counter(self):
+        lim = self.Limiter()
+        lim.record("gmail.com")
+        assert lim.current_count("gmail.com") == 1
+
+    def test_can_send_false_at_limit(self):
+        lim = self.Limiter()
+        limit = self.limits.get("gmail.com", self.default_limit)
+        # Manually fill up counter
+        import core.sender as _s
+        import time as _t
+        with lim._lock:
+            lim._counters["gmail.com"] = (limit, _t.time())
+        assert lim.can_send("gmail.com") is False
+
+    def test_can_send_true_below_limit(self):
+        lim = self.Limiter()
+        limit = self.limits.get("gmail.com", self.default_limit)
+        import time as _t
+        with lim._lock:
+            lim._counters["gmail.com"] = (limit - 1, _t.time())
+        assert lim.can_send("gmail.com") is True
+
+    def test_window_resets_after_hour(self):
+        lim = self.Limiter()
+        import time as _t
+        limit = self.limits.get("gmail.com", self.default_limit)
+        # Set counter from 2 hours ago
+        with lim._lock:
+            lim._counters["gmail.com"] = (limit, _t.time() - 7300)
+        # Should reset and allow
+        assert lim.can_send("gmail.com") is True
+        assert lim.current_count("gmail.com") == 0
+
+    def test_unknown_domain_uses_default_limit(self):
+        lim = self.Limiter()
+        # Unknown domain should use default limit
+        import time as _t
+        with lim._lock:
+            lim._counters["unknowndomain.xyz"] = (self.default_limit, _t.time())
+        assert lim.can_send("unknowndomain.xyz") is False
+
+    def test_reset_clears_all_counters(self):
+        lim = self.Limiter()
+        lim.record("gmail.com")
+        lim.record("yahoo.com")
+        lim.reset()
+        assert lim.current_count("gmail.com") == 0
+        assert lim.current_count("yahoo.com") == 0
+
+    def test_gmail_limit_is_150(self):
+        assert self.limits.get("gmail.com") == 150
+
+    def test_yahoo_limit_is_100(self):
+        assert self.limits.get("yahoo.com") == 100
+
+    def test_gmx_limit_is_60(self):
+        assert self.limits.get("gmx.com") == 60
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Tracking Pixel fix
+# ══════════════════════════════════════════════════════════════════════════════
+class TestTrackingPixel:
+    def setup_method(self):
+        from core.uniqueizer import technique_tracking_pixel
+        self.pixel = technique_tracking_pixel
+
+    HTML = "<html><body><p>Hello</p></body></html>"
+
+    def test_no_url_returns_html_unchanged(self):
+        result = self.pixel(self.HTML)
+        assert result == self.HTML
+
+    def test_empty_url_returns_html_unchanged(self):
+        assert self.pixel(self.HTML, "") == self.HTML
+        assert self.pixel(self.HTML, "   ") == self.HTML
+
+    def test_with_url_adds_img_tag(self):
+        result = self.pixel(self.HTML, "https://track.example.com/open")
+        assert '<img' in result
+        assert "track.example.com" in result
+
+    def test_pixel_before_body_close(self):
+        result = self.pixel(self.HTML, "https://track.example.com/open")
+        assert result.lower().index("<img") < result.lower().index("</body>")
+
+    def test_no_data_uri_in_output(self):
+        result = self.pixel(self.HTML, "https://track.example.com/open")
+        assert "data:image" not in result
+        assert "base64" not in result
+
+    def test_uid_in_url(self):
+        import re
+        result = self.pixel(self.HTML, "https://track.example.com/open")
+        # Should have a UUID in the URL
+        uuids = re.findall(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            result
+        )
+        assert len(uuids) >= 1
+
+    def test_without_body_tag_appends(self):
+        html = "<p>No body tag here</p>"
+        result = self.pixel(html, "https://track.example.com/open")
+        assert "<img" in result
+        assert result.startswith("<p>")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
