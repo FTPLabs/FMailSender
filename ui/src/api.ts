@@ -47,6 +47,8 @@ export function getBaseUrl(): string { return _baseUrl }
 export interface Account {
   email: string
   password: string
+  refresh_token: string
+  access_token: string
   host: string
   port: number
   use_ssl: boolean
@@ -150,4 +152,9 @@ export const api = {
   },
 
   status: () => _http.get<AppStatus>('/api/status').then(r => r.data),
-}
+
+    license: {
+      get: () => _http.get('/api/license').then(r => r.data),
+      activate: (key: string) => _http.post('/api/license/activate', { key }).then(r => r.data),
+    },
+  }
