@@ -63,8 +63,8 @@ export default function Compose() {
         </button>
       </div>
 
-      {/* Top row: Sender + Send settings side by side */}
-      <div className="grid grid-cols-2 gap-5">
+      {/* Top row: Sender + Send settings — 1 col on narrow, 2 cols on wide */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Sender */}
         <div className="card space-y-4">
           <h2 className="text-sm font-semibold text-[#e8e8ff]">Отправитель</h2>
