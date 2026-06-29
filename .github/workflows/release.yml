@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 6.0.2)"
+        description: "Version (e.g. 6.0.3)"
         required: true
-        default: "6.0.2"
+        default: "6.0.3"
       prerelease:
         description: "Pre-release?"
         type: boolean
@@ -21,24 +21,24 @@ env:
 
 jobs:
   build:
-    name: "Build Windows Portable EXE"
+    name: "Build Windows EXE"
     runs-on: windows-latest
     permissions:
       contents: write
     timeout-minutes: 120
 
     steps:
-      # ── Checkout ───────────────────────────────────────────────────────────
+      # ── Checkout ────────────────────────────────────────────────────────────
       - name: "Checkout"
         uses: actions/checkout@v4
 
-      # ── Toolchains ─────────────────────────────────────────────────────────
-      - name: "Setup Node.js"
+      # ── Toolchains ──────────────────────────────────────────────────────────
+      - name: "Setup Node.js ${{ env.NODE_VERSION }}"
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: "Setup Python"
+      - name: "Setup Python ${{ env.PYTHON_VERSION }}"
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -53,41 +53,87 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      # ── Determine version ──────────────────────────────────────────────────
-      - name: "Determine release tag"
+      # ── Determine version ───────────────────────────────────────────────────
+      - name: "Resolve version and open Step Summary"
         id: tag
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-            echo "name=FMailSender v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            VERSION="${{ github.event.inputs.version }}"
           else
             TAG="${{ github.ref_name }}"
-            VER="${TAG#v}"
-            echo "tag=${TAG}"   >> $GITHUB_OUTPUT
-            echo "version=${VER}" >> $GITHUB_OUTPUT
-            echo "name=FMailSender ${TAG}" >> $GITHUB_OUTPUT
+            VERSION="${TAG#v}"
           fi
+          echo "version=${VERSION}"           >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}"              >> $GITHUB_OUTPUT
+          echo "name=FMailSender v${VERSION}" >> $GITHUB_OUTPUT
 
-      # ── Python deps & verification ─────────────────────────────────────────
+          # Open progress table in GitHub Step Summary
+          {
+            echo "## 🚀 FMailSender v${VERSION} — Build Progress"
+            echo ""
+            echo "| # | Step | Result |"
+            echo "|---|------|--------|"
+          } >> $GITHUB_STEP_SUMMARY
+
+      # ── Sync version into build manifests ──────────────────────────────────
+      - name: "Sync version → tauri.conf.json + Cargo.toml"
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.tag.outputs.version }}"
+
+          # tauri.conf.json — update "version" field
+          $conf = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
+          $conf.version = $ver
+          $conf | ConvertTo-Json -Depth 10 | Set-Content "src-tauri/tauri.conf.json" -Encoding UTF8
+          Write-Host "tauri.conf.json → version = $ver"
+
+          # Cargo.toml — replace first version = "..." line in [package]
+          $cargo = Get-Content "src-tauri/Cargo.toml"
+          $patched = $false
+          $cargo = $cargo | ForEach-Object {
+            if (-not $patched -and $_ -match '^version\s*=\s*"') {
+              $patched = $true
+              "version = `"$ver`""
+            } else { $_ }
+          }
+          $cargo | Set-Content "src-tauri/Cargo.toml" -Encoding UTF8
+          Write-Host "Cargo.toml     → version = $ver"
+
+          "| 1 | Version sync → **v$ver** | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+
+      # ── Python deps & verification ──────────────────────────────────────────
       - name: "Install Python deps"
-        run: pip install -r requirements.txt pyinstaller
+        run: pip install -r requirements.txt pyinstaller --quiet
 
       - name: "Verify Python imports"
         shell: pwsh
         run: |
-          python -c "import core._ensure_imports; print('ensure_imports OK')"
-          python -c "from core.server import app; print('server OK')"
-          python -c "from core.sender import SendingEngine, test_smtp_connection; print('sender OK')"
-          python -c "from core.models import SmtpAccount, Recipient, CampaignConfig, CampaignStatus; print('models OK')"
-          python -c "from core.storage import save_accounts, load_accounts; print('storage OK')"
-          python -c "from core._version import APP_VERSION; print('version OK:', APP_VERSION)"
-          python -c "import multipart; print('multipart OK')"
-          python -c "import email.mime.text, email.mime.multipart, email.mime.application; print('email.mime OK')"
+          $checks = @(
+            "import core._ensure_imports",
+            "from core.server import app",
+            "from core.sender import SendingEngine, test_smtp_connection",
+            "from core.models import SmtpAccount, Recipient, CampaignConfig, CampaignStatus",
+            "from core.storage import save_accounts, load_accounts",
+            "from core._version import APP_VERSION",
+            "import multipart",
+            "import email.mime.text, email.mime.multipart, email.mime.application"
+          )
+          $failed = $false
+          foreach ($c in $checks) {
+            try {
+              python -c $c 2>&1 | Out-Null
+              Write-Host "OK  $c"
+            } catch {
+              Write-Error "FAIL: $c"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+          "| 2 | Python import verification | ✅ |" >> $env:GITHUB_STEP_SUMMARY
 
-      # ── Build Python core (PyInstaller) ────────────────────────────────────
-      - name: "Build Python core (PyInstaller)"
+      # ── Build Python core (PyInstaller) ─────────────────────────────────────
+      - name: "PyInstaller — build fmail-core.exe"
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "src-tauri/binaries" | Out-Null
@@ -95,129 +141,159 @@ jobs:
             --distpath "src-tauri/binaries" `
             --workpath "C:/tmp/pyinstaller-build" `
             --noconfirm
+
           $exe = "src-tauri/binaries/fmail-core.exe"
           if (-not (Test-Path $exe)) {
             Write-Error "FAIL: fmail-core.exe not found after PyInstaller"
             exit 1
           }
           $sz = [math]::Round((Get-Item $exe).Length / 1MB, 1)
-          Write-Host "OK: fmail-core.exe = $sz MB"
+          Write-Host "fmail-core.exe = $sz MB"
           if ($sz -lt 5) {
-            Write-Error "FAIL: fmail-core.exe is suspiciously small ($sz MB). Build likely failed."
+            Write-Error "FAIL: fmail-core.exe suspiciously small ($sz MB)"
             exit 1
           }
-          # Tauri sidecar naming convention (needed if tauri build --bundles nsis is used)
-          Copy-Item $exe "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe" -Force
 
-      # ── Build React UI ─────────────────────────────────────────────────────
-      - name: "Install UI deps"
+          # Tauri sidecar naming convention (target-triple suffix)
+          Copy-Item $exe "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe" -Force
+          Write-Host "Sidecar copy done"
+
+          "| 3 | PyInstaller → fmail-core.exe ($sz MB) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+
+      # ── Build React UI ──────────────────────────────────────────────────────
+      - name: "npm install (UI)"
         working-directory: ui
         run: npm install
 
-      - name: "Build React UI"
+      - name: "Vite build (UI)"
         working-directory: ui
         run: npm run build
 
-      - name: "Verify UI dist"
+      - name: "Verify ui/dist/"
         shell: pwsh
         run: |
           if (-not (Test-Path "ui/dist/index.html")) {
-            Write-Error "FAIL: ui/dist/index.html not found after npm run build"
+            Write-Error "FAIL: ui/dist/index.html missing after build"
             exit 1
           }
-          Write-Host "OK: ui/dist/ built successfully"
+          $sz = [math]::Round((Get-ChildItem "ui/dist" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
+          Write-Host "ui/dist/ = $sz MB total"
+          "| 4 | React UI built ($sz MB) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
 
-      # ── Tauri CLI & icons ──────────────────────────────────────────────────
+      # ── Tauri CLI & icons ───────────────────────────────────────────────────
       - name: "Install Tauri CLI"
         run: npm install -g @tauri-apps/cli@^2
 
       - name: "Generate Tauri icons"
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path "src-tauri/icons" | Out-Null
           $logo = "assets/images/fmail_logo.png"
           if (Test-Path $logo) {
             tauri icon $logo
-            Write-Host "OK: icons generated from $logo"
+            Write-Host "Icons generated from $logo"
           } else {
-            Write-Warning "Logo not found at $logo — using default Tauri icons"
+            Write-Warning "Logo not found at $logo — using existing icons in src-tauri/icons/"
           }
-          # Icons dir must exist for tauri build
-          New-Item -ItemType Directory -Force -Path "src-tauri/icons" | Out-Null
 
-      # ── Build Tauri (no-bundle: raw exe with embedded frontend) ────────────
-      - name: "Build Tauri portable binary"
+      # ── Build Tauri NSIS installer (full bundle) ────────────────────────────
+      - name: "tauri build — NSIS installer"
+        id: tauri_build
         shell: pwsh
-        run: tauri build --no-bundle
-        working-directory: .
-
-      - name: "Verify Tauri binary"
-        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
-          $exe = "src-tauri/target/release/fmail-sender.exe"
-          if (-not (Test-Path $exe)) {
-            Write-Error "FAIL: fmail-sender.exe not found at $exe"
+          # tauri.conf.json already sets "targets": ["nsis"] — just build
+          tauri build
+
+          # Find the NSIS installer (Tauri places it under bundle/nsis/)
+          $found = Get-ChildItem -Recurse -Path "src-tauri/target" -Filter "*-setup.exe" -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+          if (-not $found) {
+            Write-Host "Searching all .exe under target/release/bundle..."
+            Get-ChildItem -Recurse "src-tauri/target/release/bundle" -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host $_.FullName }
+            Write-Error "FAIL: NSIS installer not found in src-tauri/target"
             exit 1
           }
-          $sz = [math]::Round((Get-Item $exe).Length / 1MB, 1)
-          Write-Host "OK: fmail-sender.exe = $sz MB"
 
-      # ── Assemble portable directory ────────────────────────────────────────
-      - name: "Assemble portable directory"
+          $sz   = [math]::Round($found.Length / 1MB, 1)
+          $path = $found.FullName
+          Write-Host "NSIS installer: $path ($sz MB)"
+
+          echo "installer_path=$path" >> $env:GITHUB_OUTPUT
+          echo "installer_size=$sz"   >> $env:GITHUB_OUTPUT
+          "| 5 | Tauri NSIS installer ($sz MB) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+
+      # ── Rename installer to versioned filename ──────────────────────────────
+      - name: "Rename installer → versioned filename"
+        id: installer
         shell: pwsh
         run: |
           $ver  = "${{ steps.tag.outputs.version }}"
+          $src  = "${{ steps.tauri_build.outputs.installer_path }}"
+          $name = "FMailSender-v${ver}-setup.exe"
+          Copy-Item $src $name -Force
+          Write-Host "Installer: $name"
+          echo "name=$name" >> $env:GITHUB_OUTPUT
+
+      # ── Assemble portable directory ─────────────────────────────────────────
+      - name: "Assemble portable directory"
+        shell: pwsh
+        run: |
           $pdir = "dist_portable"
           New-Item -ItemType Directory -Force -Path $pdir | Out-Null
-
           Copy-Item "src-tauri/target/release/fmail-sender.exe" "$pdir/FMailSender.exe" -Force
           Copy-Item "src-tauri/binaries/fmail-core.exe"         "$pdir/fmail-core.exe"  -Force
-
-          Write-Host "Portable dir contents:"
+          Write-Host "Portable dir:"
           Get-ChildItem $pdir | ForEach-Object {
-            $sz = [math]::Round($_.Length / 1MB, 1)
-            Write-Host "  $($_.Name) = $sz MB"
+            Write-Host ("  {0,-30} {1,6} MB" -f $_.Name, [math]::Round($_.Length/1MB,1))
           }
 
-      # ── Install NSIS (Chocolatey is pre-installed on all GitHub Windows runners) ──
+      # ── Install NSIS (for portable wrapper) ────────────────────────────────
       - name: "Install NSIS"
         shell: pwsh
         run: |
           choco install nsis --no-progress -y
-          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (-not (Test-Path $makensis)) {
-            Write-Error "FAIL: makensis still not found after choco install"
-            exit 1
-          }
-          Write-Host "OK: makensis found at $makensis"
-          & $makensis /VERSION
+          $mk = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path $mk)) { Write-Error "makensis not found after choco install"; exit 1 }
+          Write-Host "makensis ready"
 
-      # ── Create portable launcher with NSIS ────────────────────────────────
-      # portable.nsi is committed to the repo.
-      # Produces a single .exe: silently extracts to %TEMP%\FMailSender, runs app, cleans up.
-      - name: "Create NSIS portable launcher"
-        id: nsis
+      # ── Build portable launcher (portable.nsi) ──────────────────────────────
+      - name: "Build portable launcher (NSIS)"
+        id: portable
         shell: pwsh
         run: |
-          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          & $makensis portable.nsi
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "FAIL: makensis returned $LASTEXITCODE"
-            exit 1
-          }
-          if (-not (Test-Path "MailSender.exe")) {
-            Write-Error "FAIL: MailSender.exe not created by NSIS"
-            exit 1
-          }
-          $sz = [math]::Round((Get-Item "MailSender.exe").Length / 1MB, 1)
-          Write-Host "OK: MailSender.exe = $sz MB"
-          echo "exe_path=$(Resolve-Path MailSender.exe)" >> $env:GITHUB_OUTPUT
+          $mk  = "C:\Program Files (x86)\NSIS\makensis.exe"
+          $ver = "${{ steps.tag.outputs.version }}"
 
-      # ── Upload artifact ─────────────────────────────────────────────────────
-      - name: "Upload MailSender.exe artifact"
+          & $mk portable.nsi
+          if ($LASTEXITCODE -ne 0) { Write-Error "makensis exit $LASTEXITCODE"; exit 1 }
+          if (-not (Test-Path "MailSender.exe")) { Write-Error "MailSender.exe not created"; exit 1 }
+
+          $name = "FMailSender-v${ver}-portable.exe"
+          Rename-Item "MailSender.exe" $name
+          $sz = [math]::Round((Get-Item $name).Length / 1MB, 1)
+          Write-Host "Portable: $name ($sz MB)"
+
+          echo "name=$name"  >> $env:GITHUB_OUTPUT
+          echo "size=$sz"    >> $env:GITHUB_OUTPUT
+          "| 6 | Portable launcher ($sz MB) | ✅ |" >> $env:GITHUB_STEP_SUMMARY
+
+      # ── Upload artifacts ────────────────────────────────────────────────────
+      - name: "Upload installer artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: MailSender
-          path: ${{ steps.nsis.outputs.exe_path }}
+          name: FMailSender-setup
+          path: ${{ steps.installer.outputs.name }}
+          if-no-files-found: error
+
+      - name: "Upload portable artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMailSender-portable
+          path: ${{ steps.portable.outputs.name }}
           if-no-files-found: error
 
       # ── Create GitHub Release ───────────────────────────────────────────────
@@ -231,17 +307,47 @@ jobs:
           name: ${{ steps.tag.outputs.name }}
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
           generate_release_notes: true
-          files: ${{ steps.nsis.outputs.exe_path }}
+          files: |
+            ${{ steps.installer.outputs.name }}
+            ${{ steps.portable.outputs.name }}
           body: |
             ## ${{ steps.tag.outputs.name }}
 
-            **`MailSender.exe`** — скачайте и запустите. Всё.
-            - Установка не требуется, реестр не изменяется
-            - Python не нужен — всё встроено
-            - Данные хранятся в `%APPDATA%\FMailSender\`
+            ### 📥 Скачать
 
-            ### Требования
-            - Windows 10 x64 (build 1803+) или Windows 11
-            - WebView2 Runtime (предустановлен на Win11; на Win10 [скачать](https://go.microsoft.com/fwlink/p/?LinkId=2124703))
+            | Файл | Размер | Описание |
+            |------|--------|----------|
+            | **`${{ steps.installer.outputs.name }}`** | ${{ steps.tauri_build.outputs.installer_size }} МБ | Установщик (рекомендуется) |
+            | **`${{ steps.portable.outputs.name }}`** | ${{ steps.portable.outputs.size }} МБ | Портативная версия (без установки) |
+
+            ### Установщик (рекомендуется)
+            - Запускает мастер установки
+            - Устанавливает в `%LOCALAPPDATA%\Programs\FMailSender`
+            - Создаёт ярлыки на рабочем столе и в меню Пуск
+
+            ### Портативная версия
+            - Скачайте и запустите — установка не нужна
+            - Реестр не изменяется
+            - Python не нужен — всё встроено внутри
+
+            ### Системные требования
+            - Windows 10 x64 (сборка 1803+) или Windows 11
+            - WebView2 Runtime (предустановлен на Win11; на Win10 — [скачать](https://go.microsoft.com/fwlink/p/?LinkId=2124703))
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Final Step Summary ──────────────────────────────────────────────────
+      - name: "Close Step Summary"
+        if: always()
+        shell: bash
+        run: |
+          VER="${{ steps.tag.outputs.version }}"
+          INSTALLER="${{ steps.installer.outputs.name }}"
+          PORTABLE="${{ steps.portable.outputs.name }}"
+          {
+            echo ""
+            echo "---"
+            echo "**Version:** v${VER}"
+            if [ -n "$INSTALLER" ]; then echo "**Installer:** \`${INSTALLER}\`"; fi
+            if [ -n "$PORTABLE" ]; then echo "**Portable:**  \`${PORTABLE}\`"; fi
+          } >> $GITHUB_STEP_SUMMARY
