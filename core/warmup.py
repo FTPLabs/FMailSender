@@ -15,12 +15,24 @@ from typing import Dict, Optional
 
 
 def get_warmup_limit(day: int) -> int:
+    """Return daily send limit for a warmed-up account.
+
+    Schedule (based on industry best practices):
+      Days 1-29:  exponential ramp from 5 → ~490
+      Days 30-59: slow growth from 500 → 800 (cap at 800)
+      Days 60+:   stable at 800/day (safe max for shared-IP providers)
+
+    Hard cap at 800: Gmail/Yahoo flag accounts sending >500/day from
+    a single new account as suspicious. 800 is safe for 60+ day accounts.
+    """
     if day <= 0:
         return 0
+    if day >= 60:
+        return 800
     if day >= 30:
-        return 500 + (day - 30) * 20
+        return min(800, 500 + (day - 30) * 10)
     limit = int(5 * math.exp(0.15 * (day - 1)))
-    return min(limit, 500)
+    return min(limit, 490)
 
 
 WARMUP_SCHEDULE = {day: get_warmup_limit(day) for day in range(0, 61)}

@@ -285,6 +285,23 @@ class SpamChecker:
         elif img_count == 0 and text_len > 50:
             result.passed.append("Хороший Image-to-Text баланс")
 
+        # Link density check (SpamAssassin: >5 links = suspicious)
+        link_count = len(re.findall(r"<a\s", body_html, re.IGNORECASE))
+        word_count = max(len(body_text.split()), 1)
+        if link_count > 10:
+            result.score += min((link_count - 10) * 3, 20)
+            result.issues.append(f"Слишком много ссылок: {link_count} (норма ≤ 5)")
+        elif link_count > 5:
+            result.score += min((link_count - 5) * 2, 10)
+            result.warnings.append(f"Много ссылок: {link_count}")
+        else:
+            result.passed.append(f"Нормальное количество ссылок: {link_count}")
+
+        # Inline base64 images — спам-сигнал
+        if re.search(r'src\s*=\s*["\']data:image', body_html, re.IGNORECASE):
+            result.score += 10
+            result.warnings.append("Inline base64 изображения (data:URI) — спам-сигнал, используйте внешние URL")
+
         # HTML structure
         if not re.search(r"<html", body_html, re.IGNORECASE):
             result.warnings.append("Отсутствует тег <html>")

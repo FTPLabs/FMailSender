@@ -521,12 +521,20 @@ def _build_message(
       f"{account.display_name} <{account.email}>"
       if account.display_name else account.email
   )
+  from email.utils import formatdate as _formatdate
   outer = MIMEMultipart("mixed")
   outer["Subject"] = _subject
   outer["From"] = from_addr
   outer["To"] = recipient.email
   outer["Message-ID"] = msg_id
-  outer["Date"] = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
+  outer["Date"] = _formatdate(localtime=False)  # RFC 2822 compliant
+  outer["MIME-Version"] = "1.0"
+  # List-Unsubscribe: required by Gmail/Yahoo since Feb 2024 for bulk senders (>5k/day)
+  # RFC 8058 One-Click unsubscribe — mandatory for inbox placement
+  _unsub_email = template.reply_to or account.email
+  outer["List-Unsubscribe"] = f"<mailto:{_unsub_email}?subject=unsubscribe>"
+  outer["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+  outer["Precedence"] = "bulk"
   if template.reply_to:
       outer["Reply-To"] = template.reply_to
   if template.cc:

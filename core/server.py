@@ -313,12 +313,14 @@ async def import_accounts_txt(file: UploadFile = File(...)):
                 if "@" in email and email.lower() not in existing:
                     domain = email.split("@")[-1].lower()
                     cfg    = get_smtp_config_for_domain(domain) or {}
+                    from core.smtp_limits import apply_limits_to_account as _apply_lim
                     acc    = SmtpAccount(
                         email=email, password=pwd,
                         host=cfg.get("host", ""),
                         port=cfg.get("port", 465),
                         use_ssl=cfg.get("use_ssl", True),
                     )
+                    _apply_lim(acc)  # set official daily/hourly limits by domain
                     _accounts.append(acc)
                     existing.add(email.lower())
                     imported += 1

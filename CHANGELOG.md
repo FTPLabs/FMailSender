@@ -1,3 +1,32 @@
+## [6.1.0] — 2026-06-29
+
+### 🔴 Критические исправления (deliverability)
+
+- **core/sender.py** — добавлены заголовки `List-Unsubscribe`, `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058) и `Precedence: bulk` в каждое письмо. **Обязательное требование Gmail + Yahoo с февраля 2024** для bulk-отправителей; без этого письма помечаются спамом автоматически.
+- **core/sender.py** — `Date` заголовок теперь через `email.utils.formatdate(localtime=False)` — строгое RFC 2822 соответствие.
+- **core/html_generator.py** — удалена инструкция `"Insert Zero Width Space (U+200B)"` из `UNIQUEIZE_PROMPT`. ZWS — классический спам-сигнал (SpamAssassin ZERO_WIDTH_SPACE +1.5); прямо противоречила `uniqueizer.py` где эта техника помечена как запрещённая.
+- **core/spam_checker.py** — добавлена проверка **link density** (>5 ссылок = предупреждение, >10 = штраф). SpamAssassin даёт +1.5 за избыток ссылок. Добавлена проверка **inline base64 изображений** (data:URI) — спам-сигнал в Gmail.
+- **core/send_checkpoint.py** — `CHECKPOINT_DIR` теперь **кросс-платформенный** (был захардкоден Windows-путь `AppData/Roaming`; на macOS/Linux создавал путь `~/AppData/Roaming/FMailSender/checkpoints` которого не существует → краш при первом checkpoint).
+
+### 📊 Новое: официальные лимиты SMTP по провайдерам
+
+- **core/smtp_limits.py** (новый файл) — официальные daily/hourly лимиты для **50+ провайдеров** на основе официальной документации каждого. Источники: support.google.com, help.yahoo.com/kb/SLN3403.html, support.microsoft.com, support.gmx.com, yandex.com/support, help.mail.ru, support.apple.com/en-us/102576, zoho.com/mail/help/smtp-access.html и др.
+- **core/server.py** — `POST /api/accounts/import-txt` теперь автоматически применяет `apply_limits_to_account()` при импорте — каждый аккаунт получает правильный daily/hourly лимит по домену (не дефолтный 500/50 для всех).
+
+### 📅 Warmup schedule исправлен
+
+- **core/warmup.py** — убран безграничный рост после дня 30. Прежняя формула `500 + (day-30)*20` давала день 60 = 1100, день 90 = 1700 — GMX/Yahoo блокируют >500/день с новых аккаунтов. Новый cap: день 30-59 = 500→800 (+10/day), день 60+ = стабильные 800.
+
+### 🧪 Тесты
+
+- **tests/test_comprehensive.py** (новый файл) — 70+ тестов: smtp_limits, SMTP config resolution, uniqueizer, spam checker, proxy parser, duplicate detector, warmup, bounce parser, `_build_message` headers, checkpoint, OAuth2, email template personalization, SmtpAccount limits.
+
+### 📚 Документация
+
+- **.agents/skills/smtp-daily-limits/SKILL.md** (новый) — полная таблица лимитов, critical notes по GMX (residential proxies), Gmail App Password, Yahoo App Password, Outlook SMTP AUTH, Microsoft OAuth2.
+
+---
+
 ## [6.0.5] — 2026-06-29
 
   ### 🐛 Исправления

@@ -48,7 +48,7 @@ UNIQUEIZE_PROMPT = """You are an expert at rewriting HTML emails to bypass spam 
 Rewrite this HTML email:
 1. Replace spam-trigger words with natural synonyms (free→complimentary, urgent→important)
 2. Rephrase headlines and CTAs (keep meaning, change wording)
-3. Insert Zero Width Space (U+200B) characters inside suspicious words
+3. Vary sentence structure and word order naturally (NO zero-width characters — they are spam signals)
 4. Vary HTML structure (rename CSS classes, swap some divs to tables)
 5. Add unique preheader text variation
 6. Ensure unsubscribe link is present

@@ -22,7 +22,19 @@ from typing import Optional
 logger = logging.getLogger("checkpoint")
 
 FLUSH_EVERY = 25   # сохранять каждые N успешных отправок
-CHECKPOINT_DIR = Path.home() / "AppData" / "Roaming" / "FMailSender" / "checkpoints"
+
+
+def _get_checkpoint_dir() -> Path:
+    """Platform-independent checkpoint directory (mirrors storage._get_data_dir logic)."""
+    import sys as _sys
+    import os as _os
+    if getattr(_sys, "frozen", False):
+        appdata = _os.environ.get("APPDATA", _os.path.expanduser("~"))
+        return Path(appdata) / "FMailSender" / "checkpoints"
+    return Path(__file__).parent.parent / "data" / "checkpoints"
+
+
+CHECKPOINT_DIR = _get_checkpoint_dir()
 
 
 @dataclass
