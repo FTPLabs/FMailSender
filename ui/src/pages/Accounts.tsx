@@ -1,9 +1,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Plus, Trash2, RefreshCw, Upload, CheckCircle, XCircle, Clock, Globe, Users } from 'lucide-react'
-import { api, type Account } from '../api'
+import { Plus, Trash2, RefreshCw, Upload, CheckCircle, XCircle, Clock, Globe, Users, Loader2 } from 'lucide-react'
+import { api, getBaseUrl, type Account } from '../api'
 
-// Correct SMTP settings per provider
 const KNOWN_HOSTS: Record<string, { host: string; port: number; use_ssl: boolean }> = {
   'gmail.com':    { host: 'smtp.gmail.com',       port: 587, use_ssl: false },
   'outlook.com':  { host: 'smtp.office365.com',   port: 587, use_ssl: false },
@@ -13,6 +12,9 @@ const KNOWN_HOSTS: Record<string, { host: string; port: number; use_ssl: boolean
   'mail.ru':      { host: 'smtp.mail.ru',         port: 465, use_ssl: true  },
   'yandex.ru':    { host: 'smtp.yandex.ru',       port: 465, use_ssl: true  },
   'rambler.ru':   { host: 'smtp.rambler.ru',      port: 465, use_ssl: true  },
+  'gmx.com':      { host: 'smtp.gmx.com',         port: 587, use_ssl: false },
+  'gmx.net':      { host: 'mail.gmx.net',         port: 587, use_ssl: false },
+  'gmx.de':       { host: 'mail.gmx.net',         port: 587, use_ssl: false },
 }
 
 function autofill(email: string) {
@@ -20,7 +22,8 @@ function autofill(email: string) {
   return domain ? (KNOWN_HOSTS[domain] ?? null) : null
 }
 
-function StatusIcon({ ok }: { ok: boolean | null }) {
+function StatusIcon({ ok, testing }: { ok: boolean | null; testing?: boolean }) {
+  if (testing) return <Loader2 size={13} className="text-[#a78bfa] animate-spin" />
   if (ok === true)  return <CheckCircle size={13} className="text-[#10b981]" />
   if (ok === false) return <XCircle size={13} className="text-[#ef4444]" />
   return <Clock size={13} className="text-[#6666aa]" />
@@ -45,15 +48,20 @@ export default function Accounts() {
   const [loading, setLoading]   = useState(true)
   const [testing, setTesting]   = useState<string | null>(null)
   const [testAll, setTestAll]   = useState(false)
+  const [testProgress, setTestProgress] = useState<{ done: number; total: number } | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm]         = useState<Frm>(EMPTY)
   const [editEmail, setEditEmail] = useState<string | null>(null)
   const [error, setError]       = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement>(null)
+  const esRef   = useRef<EventSource | null>(null)
 
   const load = () => api.accounts.list().then(setAccounts).catch(() => {}).finally(() => setLoading(false))
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    return () => { esRef.current?.close() }
+  }, [])
 
   function set(k: keyof Frm, v: any) { setForm(f => ({ ...f, [k]: v })) }
 
@@ -76,14 +84,67 @@ export default function Accounts() {
 
   async function testOne(acc: Account) {
     setTesting(acc.email)
-    try { await api.accounts.test({ ...acc }); load() }
-    finally { setTesting(null) }
+    setAccounts(prev => prev.map(a =>
+      a.email === acc.email ? { ...a, last_test_ok: null, last_test_msg: '' } : a
+    ))
+    try {
+      const result = await api.accounts.test({ ...acc })
+      setAccounts(prev => prev.map(a =>
+        a.email === acc.email
+          ? { ...a, last_test_ok: result.ok, last_test_msg: result.message ?? '' }
+          : a
+      ))
+    } catch (e: any) {
+      setAccounts(prev => prev.map(a =>
+        a.email === acc.email
+          ? { ...a, last_test_ok: false, last_test_msg: e.message ?? 'Ошибка' }
+          : a
+      ))
+    } finally {
+      setTesting(null)
+    }
   }
 
-  async function testAllFn() {
+  function testAllFn() {
+    if (accounts.length === 0 || testAll) return
+
+    esRef.current?.close()
     setTestAll(true)
-    try { await api.accounts.testAll(); load() }
-    finally { setTestAll(false) }
+    setTestProgress({ done: 0, total: accounts.length })
+
+    const es = new EventSource(`${getBaseUrl()}/api/accounts/test-all/stream`)
+    esRef.current = es
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+
+        if (data.complete) {
+          es.close()
+          esRef.current = null
+          load()
+          setTestAll(false)
+          setTestProgress(null)
+          return
+        }
+
+        const { email, ok, message, done, total } = data
+        setTestProgress({ done, total })
+        setAccounts(prev => prev.map(a =>
+          a.email === email
+            ? { ...a, last_test_ok: ok, last_test_msg: message ?? '' }
+            : a
+        ))
+      } catch {}
+    }
+
+    es.onerror = () => {
+      es.close()
+      esRef.current = null
+      load()
+      setTestAll(false)
+      setTestProgress(null)
+    }
   }
 
   async function del(email: string) {
@@ -120,6 +181,9 @@ export default function Accounts() {
   const allChecked = accounts.length > 0 && selected.size === accounts.length
   const enc = String(form.use_ssl ? 'ssl' : 'tls')
 
+  const okCount   = accounts.filter(a => a.last_test_ok === true).length
+  const failCount = accounts.filter(a => a.last_test_ok === false).length
+
   return (
     <div className="page">
       {/* Header */}
@@ -128,8 +192,13 @@ export default function Accounts() {
           <h1 className="page-title">Аккаунты</h1>
           <p className="page-sub">
             Всего: <span className="text-[#e8e8ff]">{accounts.length}</span>
-            {' · '}<span className="text-[#10b981]">{accounts.filter(a => a.last_test_ok === true).length} ОК</span>
-            {' · '}<span className="text-[#ef4444]">{accounts.filter(a => a.last_test_ok === false).length} ошибок</span>
+            {' · '}<span className="text-[#10b981]">{okCount} ОК</span>
+            {' · '}<span className="text-[#ef4444]">{failCount} ошибок</span>
+            {testProgress && (
+              <span className="text-[#a78bfa]">
+                {' · '}Проверяется {testProgress.done}/{testProgress.total}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -138,8 +207,15 @@ export default function Accounts() {
               <Trash2 size={13} /> Удалить {selected.size}
             </button>
           )}
-          <button onClick={testAllFn} disabled={testAll || accounts.length === 0} className="btn btn-secondary btn-sm">
-            <RefreshCw size={13} className={testAll ? 'animate-spin' : ''} /> Проверить все
+          <button
+            onClick={testAll ? () => { esRef.current?.close(); esRef.current = null; setTestAll(false); setTestProgress(null) } : testAllFn}
+            disabled={accounts.length === 0}
+            className={`btn btn-sm ${testAll ? 'btn-danger' : 'btn-secondary'}`}
+          >
+            {testAll
+              ? <><Loader2 size={13} className="animate-spin" /> Стоп ({testProgress?.done ?? 0}/{testProgress?.total ?? accounts.length})</>
+              : <><RefreshCw size={13} /> Проверить все</>
+            }
           </button>
           <button onClick={() => fileRef.current?.click()} className="btn btn-secondary btn-sm">
             <Upload size={13} /> Импорт
@@ -265,67 +341,75 @@ export default function Accounts() {
               </tr>
             </thead>
             <tbody>
-              {accounts.map(acc => (
-                <tr key={acc.email}>
-                  <td className="w-10">
-                    <input type="checkbox" className="accent-[#8b5cf6]"
-                      checked={selected.has(acc.email)}
-                      onChange={e => {
-                        const s = new Set(selected)
-                        e.target.checked ? s.add(acc.email) : s.delete(acc.email)
-                        setSelected(s)
-                      }} />
-                  </td>
-                  <td>
-                    <button onClick={() => editAcc(acc)}
-                      className="font-mono text-xs text-[#06b6d4] hover:text-[#22d3ee] transition-colors">
-                      {acc.email}
-                    </button>
-                    {acc.display_name && (
-                      <div className="text-xs text-[#6666aa] mt-0.5">{acc.display_name}</div>
-                    )}
-                  </td>
-                  <td className="text-xs text-[#6666aa] font-mono">
-                    {acc.host}:{acc.port}
-                  </td>
-                  <td>
-                    {acc.proxy
-                      ? <span className="badge badge-cyan"><Globe size={9} /> Прокси</span>
-                      : <span className="text-xs text-[#6666aa]">—</span>
-                    }
-                  </td>
-                  <td className="text-xs text-[#6666aa] tabular-nums">{acc.daily_limit}</td>
-                  <td>
-                    <div className="flex items-center gap-1.5">
-                      <StatusIcon ok={acc.last_test_ok} />
-                      <span className={`text-xs ${
-                        acc.last_test_ok === true  ? 'text-[#10b981]' :
-                        acc.last_test_ok === false ? 'text-[#ef4444]' : 'text-[#6666aa]'
-                      }`}>
-                        {acc.last_test_ok === true  ? 'ОК' :
-                         acc.last_test_ok === false ? 'Ошибка' : 'Не проверен'}
-                      </span>
-                    </div>
-                    {acc.last_test_ok === false && acc.last_test_msg && (
-                      <div className="text-[10px] text-[#ef4444]/70 mt-0.5 max-w-[160px] truncate"
-                        title={acc.last_test_msg}>{acc.last_test_msg}</div>
-                    )}
-                  </td>
-                  <td className="text-right pr-2">
-                    <div className="flex items-center gap-1 justify-end">
-                      <button onClick={() => testOne(acc)} disabled={testing === acc.email}
-                        title="Проверить SMTP"
-                        className="btn btn-ghost btn-sm p-1.5">
-                        <RefreshCw size={12} className={testing === acc.email ? 'animate-spin' : ''} />
+              {accounts.map(acc => {
+                const isTesting = testing === acc.email
+                return (
+                  <tr key={acc.email}>
+                    <td className="w-10">
+                      <input type="checkbox" className="accent-[#8b5cf6]"
+                        checked={selected.has(acc.email)}
+                        onChange={e => {
+                          const s = new Set(selected)
+                          e.target.checked ? s.add(acc.email) : s.delete(acc.email)
+                          setSelected(s)
+                        }} />
+                    </td>
+                    <td>
+                      <button onClick={() => editAcc(acc)}
+                        className="font-mono text-xs text-[#06b6d4] hover:text-[#22d3ee] transition-colors">
+                        {acc.email}
                       </button>
-                      <button onClick={() => del(acc.email)} title="Удалить"
-                        className="btn btn-ghost btn-sm p-1.5 hover:text-[#ef4444]">
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                      {acc.display_name && (
+                        <div className="text-xs text-[#6666aa] mt-0.5">{acc.display_name}</div>
+                      )}
+                    </td>
+                    <td className="text-xs text-[#6666aa] font-mono">
+                      {acc.host}:{acc.port}
+                    </td>
+                    <td>
+                      {acc.proxy
+                        ? <span className="badge badge-cyan"><Globe size={9} /> Прокси</span>
+                        : <span className="text-xs text-[#6666aa]">—</span>
+                      }
+                    </td>
+                    <td className="text-xs text-[#6666aa] tabular-nums">{acc.daily_limit}</td>
+                    <td>
+                      <div className="flex items-center gap-1.5">
+                        <StatusIcon ok={acc.last_test_ok} testing={isTesting} />
+                        <span className={`text-xs ${
+                          isTesting              ? 'text-[#a78bfa]'  :
+                          acc.last_test_ok === true  ? 'text-[#10b981]' :
+                          acc.last_test_ok === false ? 'text-[#ef4444]' : 'text-[#6666aa]'
+                        }`}>
+                          {isTesting             ? 'Проверка...' :
+                           acc.last_test_ok === true  ? 'ОК' :
+                           acc.last_test_ok === false ? 'Ошибка' : 'Не проверен'}
+                        </span>
+                      </div>
+                      {!isTesting && acc.last_test_ok === false && acc.last_test_msg && (
+                        <div className="text-[10px] text-[#ef4444]/70 mt-0.5 max-w-[160px] truncate"
+                          title={acc.last_test_msg}>{acc.last_test_msg}</div>
+                      )}
+                    </td>
+                    <td className="text-right pr-2">
+                      <div className="flex items-center gap-1 justify-end">
+                        <button
+                          onClick={() => testOne(acc)}
+                          disabled={isTesting || testAll}
+                          title="Проверить SMTP"
+                          className="btn btn-ghost btn-sm p-1.5"
+                        >
+                          <RefreshCw size={12} className={isTesting ? 'animate-spin' : ''} />
+                        </button>
+                        <button onClick={() => del(acc.email)} title="Удалить"
+                          className="btn btn-ghost btn-sm p-1.5 hover:text-[#ef4444]">
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
