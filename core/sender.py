@@ -822,13 +822,13 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
         _proxy_parsed = _up.urlparse(_proxy_url)
 
     # ── OAuth2 детектор ────────────────────────────────────────────────────────
-    _is_oauth_acct = _is_ms_domain(account.email) and bool(
-        getattr(account, "refresh_token", "")
-        or getattr(account, "access_token", "")
-        or getattr(account, "oauth_token", "")
-    )
-
-    def _make_smtp(host: str, port: int, use_ssl: bool, use_tls: bool,
+    # FIX v6.3: проверяем SMTP-хост — JMX/корпоративные через office365 не детектируются по домену
+    _is_ms_host = ("office365" in getattr(account, "host", "").lower()
+                   or "outlook.microsoft" in getattr(account, "host", "").lower())
+    _has_oauth_token = bool(getattr(account, "refresh_token", "")
+                            or getattr(account, "access_token", "")
+                            or getattr(account, "oauth_token", ""))
+    _is_oauth_acct = (_is_ms_domain(account.email) or _is_ms_host) and _has_oauth_token
                    ctx: "_ssl.SSLContext") -> "_smtplib.SMTP":
         """Создаёт SMTP-соединение (прямое или через прокси)."""
         # FIX v6.1: увеличен с 5 до 10 с.
@@ -924,13 +924,22 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                 return False, f"OAuth2 отклонён сервером: {detail[:120]}"
             return False, f"Неверный логин или пароль: {detail[:120]}"
         except _smtplib.SMTPNotSupportedError:
-            # FIX v6.1: возвращаем False (не None) — перебор портов бессмысленен,
-            # проблема в методе аутентификации, а не в порту.
-            return False, (
-                "SMTP AUTH не поддерживается сервером. "
-                "Для Outlook/Hotmail нужен App Password или OAuth2 (refresh_token). "
-                "Для Gmail — пароль приложения из Google Account → Безопасность."
-            )
+            _rt = bool(getattr(account, "refresh_token", "") or getattr(account, "oauth_token", ""))
+            _at = bool(getattr(account, "access_token", ""))
+            _h = getattr(account, "host", "").lower()
+            _ms = "office365" in _h or "outlook.microsoft" in _h or _is_ms_domain(account.email)
+            if _ms and not _rt and not _at:
+                return False, (
+                    "Microsoft: Basic AUTH отключён для этого ящика.\n"
+                    "Решение: добавьте refresh_token в файл (email|пароль|refresh_token)\n"
+                    "и переимпортируйте — приложение переключится на OAuth2.\n"
+                    "Или: Outlook.com → Настройки → Почта → Синхронизация → включить SMTP AUTH."
+                )
+            if _ms and (_rt or _at):
+                return False, ("Microsoft OAuth2: токен истёк или недействителен. Обновите refresh_token.")
+            if "gmail" in _h or "googlemail" in _h:
+                return False, ("Gmail: Basic AUTH отключён. App Password: Google Аккаунт → Безопасность → Пароли приложений.")
+            return False, ("SMTP AUTH не поддерживается. Для Outlook/Hotmail — refresh_token. Для Gmail — App Password.")
         except _smtplib.SMTPException as ex:
             msg = str(ex)
             # FIX v6.1: 5.7.139 / 5.7.138 = Microsoft отключил Basic Auth.
