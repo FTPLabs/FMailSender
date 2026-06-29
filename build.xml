@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  FMailSender v6 — Apache Ant Build Script
+  =========================================
+  Orchestrates the full Windows .exe build pipeline:
+    1. Python deps + PyInstaller → fmail-core.exe (FastAPI sidecar)
+    2. Node.js / Vite → ui/dist/ (React frontend)
+    3. Tauri CLI → FMailSender.exe + portable ZIP
+
+  Prerequisites (must be on PATH):
+    - Python 3.11+      : python
+    - pip               : pip
+    - Node.js 20+       : node, npm
+    - Rust stable       : cargo, rustc (x86_64-pc-windows-msvc target)
+    - Tauri CLI v2      : npm install -g @tauri-apps/cli@^2
+    - PyInstaller 6+    : installed automatically by target "py-deps"
+
+  Usage (from repo root on Windows):
+    ant                   # full build (all targets)
+    ant validate          # pre-build checks only
+    ant py-core           # PyInstaller only
+    ant ui-build          # Vite build only
+    ant tauri-build       # Tauri build only (requires py-core + ui-build first)
+    ant package           # package portable ZIP
+    ant clean             # remove build artifacts
+
+  Output:
+    src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe
+    src-tauri/target/release/fmail-sender.exe
+    FMailSender-portable.zip
+-->
+
+<project name="FMailSender" default="all" basedir=".">
+
+  <!-- ── Properties ──────────────────────────────────────────────── -->
+  <property name="version"          value="6.0.6"/>
+  <property name="app.name"         value="FMailSender"/>
+  <property name="core.spec"        value="fmail-core.spec"/>
+  <property name="binaries.dir"     value="src-tauri/binaries"/>
+  <property name="ui.dir"           value="ui"/>
+  <property name="ui.dist"          value="ui/dist"/>
+  <property name="tauri.dir"        value="src-tauri"/>
+  <property name="release.dir"      value="src-tauri/target/release"/>
+  <property name="portable.zip"     value="${app.name}-v${version}-portable.zip"/>
+  <property name="portable.dir"     value="portable_pkg"/>
+
+  <!-- ── Timestamp ───────────────────────────────────────────────── -->
+  <tstamp>
+    <format property="build.time" pattern="yyyy-MM-dd HH:mm:ss" locale="en,US"/>
+  </tstamp>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: all                                                   -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="all"
+          depends="validate, py-deps, py-core, ui-build, tauri-icons, tauri-build, validate-exe, package"
+          description="Full build pipeline: validate → PyInstaller → Vite → Tauri → ZIP">
+    <echo message="==========================================="/>
+    <echo message=" ${app.name} v${version} — Build complete"/>
+    <echo message=" Output: ${portable.zip}"/>
+    <echo message="==========================================="/>
+  </target>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: validate                                              -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="validate" description="Pre-build checks: toolchain + spec + config">
+    <echo message="[validate] Checking build environment..."/>
+
+    <!-- 1. Python available -->
+    <exec executable="python" failonerror="true" outputproperty="py.ver">
+      <arg value="--version"/>
+    </exec>
+    <echo message="[validate] Python: ${py.ver}"/>
+
+    <!-- 2. Node.js available -->
+    <exec executable="node" failonerror="true" outputproperty="node.ver">
+      <arg value="--version"/>
+    </exec>
+    <echo message="[validate] Node.js: ${node.ver}"/>
+
+    <!-- 3. Rust / cargo available -->
+    <exec executable="cargo" failonerror="true" outputproperty="cargo.ver">
+      <arg value="--version"/>
+    </exec>
+    <echo message="[validate] Cargo: ${cargo.ver}"/>
+
+    <!-- 4. fmail-core.spec exists -->
+    <available file="${core.spec}" property="spec.exists"/>
+    <fail unless="spec.exists" message="FAIL: ${core.spec} not found"/>
+    <echo message="[validate] ${core.spec}: OK"/>
+
+    <!-- 5. vite.config.ts has base: './' -->
+    <loadfile srcfile="${ui.dir}/vite.config.ts" property="vite.cfg"/>
+    <condition property="vite.base.ok">
+      <contains string="${vite.cfg}" substring="base: './'"/>
+    </condition>
+    <fail unless="vite.base.ok"
+          message="FAIL: ui/vite.config.ts missing [base: './'] — WebView2 won't load assets"/>
+    <echo message="[validate] Vite base './': OK"/>
+
+    <!-- 6. tauri.conf.json beforeBuildCommand is empty (UI built separately) -->
+    <loadfile srcfile="${tauri.dir}/tauri.conf.json" property="tauri.cfg"/>
+    <echo message="[validate] tauri.conf.json loaded"/>
+
+    <!-- 7. logo asset for icon generation -->
+    <available file="assets/images/fmail_logo.png" property="logo.exists"/>
+    <fail unless="logo.exists"
+          message="FAIL: assets/images/fmail_logo.png not found — icons cannot be generated"/>
+    <echo message="[validate] Logo asset: OK"/>
+
+    <echo message="[validate] All checks passed."/>
+  </target>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: py-deps                                               -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="py-deps" description="Install Python runtime deps + PyInstaller">
+    <echo message="[py-deps] Installing Python dependencies..."/>
+    <exec executable="pip" failonerror="true">
+      <arg value="install"/>
+      <arg value="-r"/>
+      <arg value="requirements.txt"/>
+      <arg value="pyinstaller"/>
+      <arg value="--quiet"/>
+    </exec>
+    <echo message="[py-deps] Done."/>
+  </target>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: py-import-check                                       -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="py-import-check" depends="py-deps"
+          description="Verify all Python modules import cleanly">
+    <echo message="[py-import-check] Running import checks..."/>
+    <exec executable="python" failonerror="true">
+      <arg value="-c"/>
+      <arg value="import core._ensure_imports; from core.server import app; from core.sender import SendingEngine, test_smtp_connection; from core.models import SmtpAccount, Recipient, CampaignConfig; from core.storage import save_accounts, load_accounts; from core._version import APP_VERSION; import multipart; print('All imports OK')"/>
+    </exec>
+  </target>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: py-core                                               -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="py-core" depends="py-import-check"
+          description="Run PyInstaller to produce fmail-core.exe">
+    <echo message="[py-core] Creating binaries directory..."/>
+    <mkdir dir="${binaries.dir}"/>
+
+    <echo message="[py-core] Running PyInstaller..."/>
+    <exec executable="pyinstaller" failonerror="true" dir="${basedir}">
+      <arg value="${core.spec}"/>
+      <arg value="--distpath"/>
+      <arg value="${binaries.dir}"/>
+      <arg value="--noconfirm"/>
+    </exec>
+
+    <!-- Verify output -->
+    <available file="${binaries.dir}/fmail-core.exe" property="core.exe.exists"/>
+    <fail unless="core.exe.exists"
+          message="FAIL: ${binaries.dir}/fmail-core.exe not produced"/>
+
+    <!-- Copy with Tauri sidecar naming convention -->
+    <copy file="${binaries.dir}/fmail-core.exe"
+          tofile="${binaries.dir}/fmail-core-x86_64-pc-windows-msvc.exe"
+          overwrite="true"/>
+
+    <echo message="[py-core] fmail-core.exe built successfully."/>
+  </target>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: ui-deps                                               -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="ui-deps" description="Install Node.js dependencies for the React UI">
+    <echo message="[ui-deps] npm install..."/>
+    <exec executable="npm" failonerror="true" dir="${ui.dir}">
+      <arg value="install"/>
+    </exec>
+    <echo message="[ui-deps] Done."/>
+  </target>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: ui-build                                              -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="ui-build" depends="ui-deps"
+          description="Build React frontend with Vite (outputs ui/dist/)">
+    <echo message="[ui-build] Building React UI..."/>
+    <exec executable="npm" failonerror="true" dir="${ui.dir}">
+      <arg value="run"/>
+      <arg value="build"/>
+    </exec>
+
+    <!-- Verify output -->
+    <available file="${ui.dist}/index.html" property="ui.dist.ok"/>
+    <fail unless="ui.dist.ok"
+          message="FAIL: ${ui.dist}/index.html not produced — Vite build failed"/>
+    <echo message="[ui-build] ui/dist/ built successfully."/>
+  </target>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: tauri-icons                                           -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="tauri-icons"
+          description="Generate Tauri icon set from assets/images/fmail_logo.png">
+    <echo message="[tauri-icons] Generating icon set..."/>
+    <mkdir dir="${tauri.dir}/icons"/>
+    <exec executable="tauri" failonerror="false" dir="${basedir}">
+      <arg value="icon"/>
+      <arg value="assets/images/fmail_logo.png"/>
+    </exec>
+    <echo message="[tauri-icons] Done."/>
+  </target>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: tauri-build                                           -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="tauri-build"
+          description="Build Tauri shell (fmail-sender.exe) — no NSIS installer">
+    <echo message="[tauri-build] Building Tauri application..."/>
+    <exec executable="tauri" failonerror="true" dir="${basedir}">
+      <arg value="build"/>
+      <arg value="--target"/>
+      <arg value="x86_64-pc-windows-msvc"/>
+      <arg value="--no-bundle"/>
+    </exec>
+    <echo message="[tauri-build] Tauri build complete."/>
+  </target>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: validate-exe                                          -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="validate-exe"
+          description="Mandatory EXE validation — cancels release if it fails">
+    <echo message="[validate-exe] Checking sidecar binary..."/>
+    <available file="${binaries.dir}/fmail-core-x86_64-pc-windows-msvc.exe"
+               property="sidecar.ok"/>
+    <fail unless="sidecar.ok"
+          message="VALIDATION FAILED: sidecar fmail-core-x86_64-pc-windows-msvc.exe missing"/>
+
+    <available file="${release.dir}/fmail-sender.exe" property="app.exe.ok"/>
+    <fail unless="app.exe.ok"
+          message="VALIDATION FAILED: ${release.dir}/fmail-sender.exe not found"/>
+
+    <echo message="[validate-exe] VALIDATION PASSED — both binaries present."/>
+  </target>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: package                                               -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="package" depends="validate-exe"
+          description="Package portable ZIP: FMailSender.exe + fmail-core sidecar">
+    <echo message="[package] Creating portable ZIP..."/>
+    <delete dir="${portable.dir}" quiet="true"/>
+    <mkdir  dir="${portable.dir}"/>
+
+    <copy file="${release.dir}/fmail-sender.exe"
+          tofile="${portable.dir}/FMailSender.exe"/>
+    <copy file="${binaries.dir}/fmail-core-x86_64-pc-windows-msvc.exe"
+          todir="${portable.dir}"/>
+
+    <zip destfile="${portable.zip}" basedir="${portable.dir}"/>
+
+    <echo message="[package] Created: ${portable.zip}"/>
+    <echo message=""/>
+    <echo message="  How to run:"/>
+    <echo message="  1. Extract ${portable.zip} to any folder"/>
+    <echo message="  2. Run FMailSender.exe"/>
+    <echo message="  (Both files must stay in the same folder)"/>
+  </target>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!--  TARGET: clean                                                 -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <target name="clean" description="Remove all build artifacts">
+    <echo message="[clean] Removing build artifacts..."/>
+    <delete dir="${binaries.dir}"  quiet="true"/>
+    <delete dir="${ui.dist}"       quiet="true"/>
+    <delete dir="${portable.dir}"  quiet="true"/>
+    <delete file="${portable.zip}" quiet="true"/>
+    <echo message="[clean] Done. (Rust target/ not removed — run 'cargo clean' separately)"/>
+  </target>
+
+</project>
