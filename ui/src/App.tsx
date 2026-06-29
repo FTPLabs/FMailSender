@@ -1,16 +1,20 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { StatusProvider } from './contexts/StatusContext'
-import Layout     from './components/Layout'
-import Dashboard  from './pages/Dashboard'
-import Accounts   from './pages/Accounts'
-import Proxies    from './pages/Proxies'
-import Recipients from './pages/Recipients'
-import Compose    from './pages/Compose'
-import Sending    from './pages/Sending'
+import StartupOverlay from './components/StartupOverlay'
+import Layout         from './components/Layout'
+import Dashboard      from './pages/Dashboard'
+import Accounts       from './pages/Accounts'
+import Proxies        from './pages/Proxies'
+import Recipients     from './pages/Recipients'
+import Compose        from './pages/Compose'
+import Sending        from './pages/Sending'
 
 export default function App() {
   return (
     <StatusProvider>
+      {/* Startup overlay — shown while Python core is booting (online=false) */}
+      <StartupOverlay />
+
       <Layout>
         <Routes>
           <Route path="/"           element={<Navigate to="/dashboard" replace />} />
