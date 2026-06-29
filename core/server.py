@@ -35,7 +35,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -66,6 +66,13 @@ _campaign_cfg: CampaignConfig = CampaignConfig()
 _campaign_status: CampaignStatus = CampaignStatus()
 _engine: Optional[SendingEngine] = None
 _engine_thread: Optional[threading.Thread] = None
+
+# Run token: incremented on every start/stop so stale thread callbacks are ignored.
+_run_id: int = 0
+
+# Lock guarding all reads/writes to _campaign_status from mixed async+thread contexts.
+# CPython GIL prevents crashes, but this lock ensures coherent multi-field snapshots.
+_status_lock = threading.Lock()
 
 
 # BUG FIX: replaced deprecated @app.on_event("startup") with lifespan (FastAPI 0.93+)
@@ -338,10 +345,12 @@ def update_campaign(body: CampaignIn):
 
 @app.post("/api/campaign/start")
 def start_campaign():
-    global _engine, _engine_thread, _campaign_status
+    global _engine, _engine_thread, _campaign_status, _run_id
 
-    if _campaign_status.state == "running":
-        raise HTTPException(400, "Campaign already running")
+    with _status_lock:
+        if _campaign_status.state == "running":
+            raise HTTPException(400, "Campaign already running")
+
     if not _accounts:
         raise HTTPException(400, "No accounts loaded")
     if not _recipients:
@@ -371,11 +380,14 @@ def start_campaign():
         uniqueize=True,
     )
 
-    _campaign_status = CampaignStatus(
-        state="running",
-        total=len(sender_recipients),
-        started_at=time.time(),
-    )
+    with _status_lock:
+        _run_id += 1
+        current_run = _run_id
+        _campaign_status = CampaignStatus(
+            state="running",
+            total=len(sender_recipients),
+            started_at=time.time(),
+        )
 
     stop_event = threading.Event()
     _engine    = SendingEngine(
@@ -387,23 +399,29 @@ def start_campaign():
     )
 
     def _on_progress(sent: int, total: int, result):
-        _campaign_status.sent  = sent
-        _campaign_status.total = total
-        if result and not getattr(result, "success", True):
-            _campaign_status.failed += 1
-            err = getattr(result, "error", "")
-            if err:
-                _campaign_status.errors.append(
-                    f"{getattr(result, 'recipient_email', '?')}: {err}"
-                )
-        if result:
-            _campaign_status.current_email   = getattr(result, "recipient_email", "")
-            _campaign_status.current_account = getattr(result, "account_used", "")
+        with _status_lock:
+            if _run_id != current_run:   # stale callback from a previous campaign run
+                return
+            _campaign_status.sent  = sent
+            _campaign_status.total = total
+            if result and not getattr(result, "success", True):
+                _campaign_status.failed += 1
+                err = getattr(result, "error", "")
+                if err:
+                    _campaign_status.errors.append(
+                        f"{getattr(result, 'recipient_email', '?')}: {err}"
+                    )
+            if result:
+                _campaign_status.current_email   = getattr(result, "recipient_email", "")
+                _campaign_status.current_account = getattr(result, "account_used", "")
 
     def _on_finished(results):
-        _campaign_status.state  = "done"
-        _campaign_status.sent   = sum(1 for r in results if getattr(r, "success", False))
-        _campaign_status.failed = sum(1 for r in results if not getattr(r, "success", True))
+        with _status_lock:
+            if _run_id != current_run:   # stop() already invalidated this run
+                return
+            _campaign_status.state  = "done"
+            _campaign_status.sent   = sum(1 for r in results if getattr(r, "success", False))
+            _campaign_status.failed = sum(1 for r in results if not getattr(r, "success", True))
 
     _engine.on_progress = _on_progress
     _engine.on_finished = _on_finished
@@ -412,8 +430,10 @@ def start_campaign():
         try:
             _engine.run()
         except Exception as e:
-            _campaign_status.state = "error"
-            _campaign_status.errors.append(str(e))
+            with _status_lock:
+                if _run_id == current_run:
+                    _campaign_status.state = "error"
+                    _campaign_status.errors.append(str(e))
 
     _engine_thread = threading.Thread(target=_run, daemon=True, name="fmail-sender")
     _engine_thread.start()
@@ -423,47 +443,56 @@ def start_campaign():
 
 @app.post("/api/campaign/pause")
 def pause_campaign():
-    if _engine and _campaign_status.state == "running":
-        _engine._paused        = True
-        _campaign_status.state = "paused"
+    with _status_lock:
+        if _engine and _campaign_status.state == "running":
+            _engine._paused        = True
+            _campaign_status.state = "paused"
     return _campaign_status.to_dict()
 
 
 @app.post("/api/campaign/resume")
 def resume_campaign():
-    if _engine and _campaign_status.state == "paused":
-        _engine._paused        = False
-        _campaign_status.state = "running"
+    with _status_lock:
+        if _engine and _campaign_status.state == "paused":
+            _engine._paused        = False
+            _campaign_status.state = "running"
     return _campaign_status.to_dict()
 
 
 @app.post("/api/campaign/stop")
 def stop_campaign():
-    if _engine:
-        _engine.stop_event.set()
-        _engine._paused = False
-    _campaign_status.state = "idle"
+    global _run_id
+    with _status_lock:
+        # Increment run_id first — callbacks from the running thread will see the
+        # mismatch and silently discard their updates (no state flip to "done").
+        _run_id += 1
+        if _engine:
+            _engine.stop_event.set()
+            _engine._paused = False
+        _campaign_status.state = "idle"
     return {"ok": True}
 
 
 # ── Overall status ────────────────────────────────────────────────────────────
 
 def _build_status() -> dict:
-    """Shared status snapshot — called by GET /api/status and SSE /api/events."""
-    ok_cnt   = sum(1 for a in _accounts if a.last_test_ok is True)
-    fail_cnt = sum(1 for a in _accounts if a.last_test_ok is False)
-    return {
-        "campaign":   _campaign_status.to_dict(),
-        "accounts":   {
-            "total":    len(_accounts),
-            "valid":    ok_cnt,
-            "invalid":  fail_cnt,
-            "untested": len(_accounts) - ok_cnt - fail_cnt,
-            "ready":    sum(1 for a in _accounts if a.is_active and a.last_test_ok is True),
-        },
-        "recipients": len(_recipients),
-        "proxies":    len(_proxies),
-    }
+    """Coherent status snapshot under lock — called by GET /api/status and SSE /api/events."""
+    with _status_lock:
+        campaign_dict = _campaign_status.to_dict()
+        ok_cnt   = sum(1 for a in _accounts if a.last_test_ok is True)
+        fail_cnt = sum(1 for a in _accounts if a.last_test_ok is False)
+        return {
+            "campaign":   campaign_dict,
+            "accounts":   {
+                "total":    len(_accounts),
+                "valid":    ok_cnt,
+                "invalid":  fail_cnt,
+                "untested": len(_accounts) - ok_cnt - fail_cnt,
+                "ready":    sum(1 for a in _accounts if a.is_active and a.last_test_ok is True),
+            },
+            "recipients": len(_recipients),
+            "proxies":    len(_proxies),
+        }
 
 
 
@@ -473,7 +502,7 @@ def get_status():
 
 
 @app.get("/api/events")
-async def get_events(request):
+async def get_events(request: Request):
     """
     SSE endpoint — streams AppStatus JSON events.
     Interval: 0.8s when campaign is running, 2s otherwise.
