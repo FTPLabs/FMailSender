@@ -196,7 +196,9 @@ async def test_account_endpoint(body: AccountIn):
 @app.post("/api/accounts/test-all")
 async def test_all_accounts():
     results = []
-    sem = asyncio.Semaphore(10)
+    # FIX v6.1: снижено с 10 до 4 — GMX/Outlook блокируют при >3-4 одновременных соединениях
+    # (ошибка 421 Too many connections). Значение соответствует rate-limit-strategy skill.
+    sem = asyncio.Semaphore(4)
 
     async def _one(i: int, acc: SmtpAccount):
         async with sem:
@@ -234,7 +236,10 @@ async def test_all_stream(request: Request):
             return
 
         q: asyncio.Queue = asyncio.Queue()
-        sem = asyncio.Semaphore(10)
+        # FIX v6.1: снижено с 10 до 4 — соответствует rate-limit-strategy skill.
+        # GMX блокирует при >3 одновременных соединениях (421 Too many connections),
+        # Outlook при >3 выдаёт временную ошибку. 4 = безопасный максимум для любого провайдера.
+        sem = asyncio.Semaphore(4)
 
         async def _one(i: int, acc: SmtpAccount):
             async with sem:

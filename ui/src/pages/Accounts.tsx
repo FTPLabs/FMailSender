@@ -12,7 +12,8 @@ const KNOWN_HOSTS: Record<string, { host: string; port: number; use_ssl: boolean
   'mail.ru':      { host: 'smtp.mail.ru',         port: 465, use_ssl: true  },
   'yandex.ru':    { host: 'smtp.yandex.ru',       port: 465, use_ssl: true  },
   'rambler.ru':   { host: 'smtp.rambler.ru',      port: 465, use_ssl: true  },
-  'gmx.com':      { host: 'smtp.gmx.com',         port: 587, use_ssl: false },
+  // FIX v6.1: smtp.gmx.com → mail.gmx.net (официальный SMTP-хост для gmx.com)
+  'gmx.com':      { host: 'mail.gmx.net',          port: 587, use_ssl: false },
   'gmx.net':      { host: 'mail.gmx.net',         port: 587, use_ssl: false },
   'gmx.de':       { host: 'mail.gmx.net',         port: 587, use_ssl: false },
 }

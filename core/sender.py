@@ -96,7 +96,8 @@ _SMTP_CONFIGS: dict[str, dict] = {
   "bellsouth.net":     {"host": "smtp.att.yahoo.com",    "port": 465, "use_ssl": True,  "use_tls": False},
   "ameritech.net":     {"host": "smtp.att.yahoo.com",    "port": 465, "use_ssl": True,  "use_tls": False},
   "cs.com":            {"host": "smtp.cs.com",           "port": 587, "use_ssl": False, "use_tls": True},
-  "gmx.com":           {"host": "smtp.gmx.com",           "port": 587, "use_ssl": False, "use_tls": True, "fallback_port": 465},
+  # FIX v6.1: smtp.gmx.com → mail.gmx.net (официальный SMTP для всех GMX-доменов, включая .com)
+  "gmx.com":           {"host": "mail.gmx.net",           "port": 587, "use_ssl": False, "use_tls": True, "fallback_port": 465},
   "gmx.net":           {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True, "fallback_port": 465},
   "gmx.de":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True, "fallback_port": 465},
   "gmx.at":            {"host": "mail.gmx.net",          "port": 587, "use_ssl": False, "use_tls": True, "fallback_port": 465},
@@ -809,7 +810,12 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
     def _make_smtp(host: str, port: int, use_ssl: bool, use_tls: bool,
                    ctx: "_ssl.SSLContext") -> "_smtplib.SMTP":
         """Создаёт SMTP-соединение (прямое или через прокси)."""
-        TIMEOUT = 5  # сек на попытку — быстро определяем недоступность
+        # FIX v6.1: увеличен с 5 до 10 с.
+        # 5 с слишком мало для TCP+banner+EHLO+STARTTLS+EHLO на международных серверах
+        # (Outlook, GMX иногда отвечают 6-9 с из-за геолокации/геозащиты).
+        # 10 с достаточно для любого реального сервера; общий таймаут 30 с на аккаунт
+        # в asyncio.wait_for гарантирует, что один аккаунт не заморозит всю очередь.
+        TIMEOUT = 10  # сек на каждую socket-операцию
 
         if _proxy_parsed:
             # ── SOCKS5 или HTTP CONNECT через raw stdlib-сокет ─────────────────
@@ -897,11 +903,38 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                 return False, f"OAuth2 отклонён сервером: {detail[:120]}"
             return False, f"Неверный логин или пароль: {detail[:120]}"
         except _smtplib.SMTPNotSupportedError:
-            return None, "SMTP AUTH не поддерживается. Требуется App Password."
+            # FIX v6.1: возвращаем False (не None) — перебор портов бессмысленен,
+            # проблема в методе аутентификации, а не в порту.
+            return False, (
+                "SMTP AUTH не поддерживается сервером. "
+                "Для Outlook/Hotmail нужен App Password или OAuth2 (refresh_token). "
+                "Для Gmail — пароль приложения из Google Account → Безопасность."
+            )
         except _smtplib.SMTPException as ex:
             msg = str(ex)
-            if "5.7.139" in msg or "basic authentication is disabled" in msg.lower():
-                return None, "Microsoft отключил базовую SMTP-аутентификацию. Нужен App Password."
+            # FIX v6.1: 5.7.139 / 5.7.138 = Microsoft отключил Basic Auth.
+            # Это политика сервера — порт тут не при чём. Возвращаем False,
+            # чтобы остановить бессмысленный перебор 12 портов (экономим ~5 минут на 61 аккаунт).
+            _ms_auth_disabled = (
+                "5.7.139" in msg
+                or "5.7.138" in msg
+                or "basic authentication is disabled" in msg.lower()
+                or "smtpclientauthentication is disabled" in msg.lower()
+                or "client was not authenticated" in msg.lower()
+            )
+            if _ms_auth_disabled:
+                return False, (
+                    "Microsoft: SMTP AUTH отключён для этого ящика.\n"
+                    "Решение:\n"
+                    "  1. Outlook.com → Настройки → Почта → Синхронизация → включить SMTP AUTH\n"
+                    "  2. Или добавьте refresh_token для OAuth2 (без Basic Auth)\n"
+                    "Подробнее: https://aka.ms/smtp_auth_disabled"
+                )
+            # FIX v6.1: GMX/web.de — «временный сбой» может быть rate-limit.
+            # Возвращаем None только для настоящих ошибок соединения.
+            _is_temp = any(x in msg.lower() for x in ("421", "temporarily", "try again"))
+            if _is_temp:
+                return None, f"Временный отказ сервера (rate limit?): {msg[:100]}"
             return None, f"SMTP: {msg[:100]}"
         except OSError as e:
             return None, f"connect/{type(e).__name__}: {e}"
@@ -1045,9 +1078,24 @@ async def test_smtp_connection(account: SmtpAccount) -> tuple[bool, str]:
   Проверяет SMTP-подключение.
   Всегда использует надёжный smtplib через executor — избегаем несовместимости aiosmtplib версий.
   Все ошибки выводятся понятным пользователю языком.
+
+  FIX v6.1: жёсткий таймаут 30 секунд на аккаунт.
+  Без него _test_smtp_sync мог зависать на 7+ минут (14 попыток × 5-30s каждая).
+  asyncio.wait_for отменяет Future со стороны event loop; поток завершится
+  сам по своему socket timeout — утечки нет.
   """
   loop = asyncio.get_running_loop()
-  return await loop.run_in_executor(None, _test_smtp_sync, account)
+  try:
+      return await asyncio.wait_for(
+          loop.run_in_executor(None, _test_smtp_sync, account),
+          timeout=30.0,
+      )
+  except asyncio.TimeoutError:
+      host = getattr(account, "host", "?")
+      return False, (
+          f"Тайм-аут проверки (> 30 с). Сервер {host} не отвечает "
+          f"или заблокирован провайдером/файрволом."
+      )
 
 
 class SendingEngine:
