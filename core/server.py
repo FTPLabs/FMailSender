@@ -473,28 +473,36 @@ def get_status():
 
 
 @app.get("/api/events")
-async def get_events():
+async def get_events(request):
     """
     SSE endpoint — streams AppStatus JSON events.
     Interval: 0.8s when campaign is running, 2s otherwise.
-    Client opens ONE persistent connection for the whole app lifetime.
+    Properly handles client disconnect via request.is_disconnected().
     """
     async def _stream():
         while True:
+            # Stop streaming if the client disconnected
+            if await request.is_disconnected():
+                break
             try:
                 payload = _build_status()
                 yield f"data: {json.dumps(payload)}\n\n"
-            except Exception:
-                yield "data: {}\n\n"
-            state = _campaign_status.state if hasattr(_campaign_status, "state") else "idle"
-            await asyncio.sleep(0.8 if state == "running" else 2.0)
+            except Exception as exc:
+                # On error send a named error event — client can ignore or log it
+                yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+            state = getattr(_campaign_status, "state", "idle")
+            interval = 0.8 if state == "running" else 2.0
+            try:
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                break
 
     return StreamingResponse(
         _stream(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
-            "Connection":    "keep-alive",
+            "Cache-Control":     "no-cache",
+            "Connection":        "keep-alive",
             "X-Accel-Buffering": "no",
         },
     )
