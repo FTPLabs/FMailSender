@@ -155,14 +155,13 @@ a = Analysis(
 )
 
 # PyInstaller >= 6.0: no cipher= argument
-pyz = PYZ(a.pure, a.zipped_data)
+pyz = PYZ(a.pure)  # PyInstaller 6.x: a.zipped_data removed
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
-    a.zipfiles,
-    a.datas,
+    a.datas,  # PyInstaller 6.x: a.zipfiles removed
     [],
     name="fmail-core",
     debug=False,

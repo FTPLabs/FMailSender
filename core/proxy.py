@@ -26,26 +26,24 @@ def parse_proxy(raw: str) -> Optional[str]:
         scheme = "http" if int(port) in _HTTP_PORTS else "socks5"
         return f"{scheme}://{host}:{port}"
     if len(parts) == 4:
-        # Detect: user:pass:host:port or host:port:user:pass
+        # BUG FIX v6.3: previous logic returned None for host:port:user:pass
+        # when password was non-numeric (only numeric ports were checked on both sides).
+        # Fixed: try parts[1] as port first (host:port:user:pass),
+        #        then parts[3] as port (user:pass:host:port).
         try:
-            if "@" in parts[0]:
-                # already has user@host form
-                pass
-            p1, p2 = int(parts[1]), int(parts[3])
+            port_val = int(parts[1])
+            host, port, user, pw = parts
+            scheme = "http" if port_val in _HTTP_PORTS else "socks5"
+            return f"{scheme}://{user}:{pw}@{host}:{port}"
         except ValueError:
             pass
-        else:
-            # host:port:user:pass
-            host, port, user, pw = parts
-            scheme = "http" if int(port) in _HTTP_PORTS else "socks5"
-            return f"{scheme}://{user}:{pw}@{host}:{port}"
         try:
-            int(parts[1])
-        except ValueError:
-            # user:pass:host:port
+            port_val = int(parts[3])
             user, pw, host, port = parts
-            scheme = "http" if int(port) in _HTTP_PORTS else "socks5"
+            scheme = "http" if port_val in _HTTP_PORTS else "socks5"
             return f"{scheme}://{user}:{pw}@{host}:{port}"
+        except ValueError:
+            pass
     if "@" in raw:
         # user:pass@host:port without scheme
         p = urllib.parse.urlparse("socks5://" + raw)

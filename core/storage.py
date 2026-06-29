@@ -94,7 +94,7 @@ def load_accounts() -> list[SmtpAccount]:
             if d.get("access_token"):
                 d["access_token"] = _dec(d["access_token"])
             d["proxy"] = d.get("proxy", "")
-            d["proxy_list"] = []
+            d["proxy_list"] = d.get("proxy_list", [])  # FIX v6.3: load saved proxy_list
             accounts.append(SmtpAccount.from_dict(d))
         return accounts
     except Exception as exc:
