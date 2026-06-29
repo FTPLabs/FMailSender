@@ -168,9 +168,9 @@ export default function Proxies() {
           </p>
         </div>
 
-        {/* Check results — shown as right column when results exist */}
+        {/* Check results — right column (responsive: full-width below lg) */}
         {hasResults && (
-          <div className="card p-0 overflow-hidden flex flex-col" style={{ width: '420px', flexShrink: 0 }}>
+          <div className="card p-0 overflow-hidden flex flex-col w-full lg:w-96 lg:flex-shrink-0">
             <div className="px-4 py-2.5 border-b border-[#3a3a66]/30 bg-[#141424] flex-shrink-0">
               <h2 className="text-xs font-semibold text-[#6666aa] uppercase tracking-wider">
                 Результаты проверки
