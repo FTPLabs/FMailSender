@@ -63,7 +63,7 @@ export default function Sending() {
     err ? '✗ Ошибка' : '⏹ Ожидание'
 
   return (
-    <div className="page max-w-2xl">
+    <div className="page max-w-2xl flex-1 flex flex-col">
       <div>
         <h1 className="page-title">Рассылка</h1>
         <p className="page-sub">Запуск и мониторинг кампании</p>
@@ -99,8 +99,8 @@ export default function Sending() {
         </div>
       )}
 
-      {/* Main control */}
-      <div className="card flex flex-col items-center gap-6 py-10">
+      {/* Main control — flex-1 to fill remaining space */}
+      <div className="card flex-1 flex flex-col items-center justify-center gap-6 py-10">
         <Ring value={cp?.sent ?? 0} max={cp?.total || recs || 1} />
 
         <div className="text-center">
@@ -154,7 +154,6 @@ export default function Sending() {
           )}
           {paused && (
             <>
-              {/* FIX: was incorrectly calling start — must call resume to continue from pause */}
               <button onClick={() => act(api.campaign.resume)} disabled={busy}
                 className="btn btn-primary px-6">
                 <Play size={15} /> Продолжить
