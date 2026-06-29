@@ -2,81 +2,107 @@
  * StatusContext — единый real-time канал статуса для всего приложения.
  *
  * Стратегия:
- *  1. Открывает одно SSE-соединение /api/events.
- *  2. При 3+ ошибках подряд → fallback на polling 2с.
- *  3. Каждые 60с в режиме fallback пробует восстановить SSE (re-probe).
- *  4. Pause при скрытой вкладке (Page Visibility API), resume при возврате.
- *  5. Экспоненциальный backoff реконнекта до 5с.
- *  6. Валидация payload перед setStatus — защита от невалидного JSON.
+ *  1. Быстрый startup polling (500 мс) до первого успешного ответа → online=true.
+ *  2. После online: открывает SSE /api/events.
+ *  3. При 3+ ошибках SSE подряд → fallback polling 2с.
+ *  4. Каждые 60с в режиме fallback пробует восстановить SSE (re-probe).
+ *  5. Pause при скрытой вкладке (Page Visibility API), resume при возврате.
+ *  6. Экспоненциальный backoff реконнекта до 5с.
+ *  7. Валидация payload перед setStatus.
  *
- * Использование:
- *   const { status, refresh } = useStatus()
+ * Экспортирует:
+ *   const { status, online, refresh } = useStatus()
+ *   - online: true после первого успешного ответа от backend
  */
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import { api, type AppStatus } from '../api'
 
-const SSE_URL = 'http://127.0.0.1:7531/api/events'
-const SSE_REPROBE_INTERVAL = 60_000  // пробуем вернуться на SSE каждые 60с
+const SSE_URL             = 'http://127.0.0.1:7531/api/events'
+const STARTUP_POLL_MS     = 500     // агрессивный polling до первого ответа
+const IDLE_POLL_MS        = 2000    // fallback polling после деградации SSE
+const SSE_REPROBE_MS      = 60_000  // re-probe SSE после деградации
 
-/** Минимальная проверка: payload содержит ожидаемые ключи верхнего уровня. */
 function isValidStatus(data: unknown): data is AppStatus {
   if (!data || typeof data !== 'object') return false
   const d = data as Record<string, unknown>
   return (
-    'campaign' in d &&
-    'accounts' in d &&
+    'campaign'   in d &&
+    'accounts'   in d &&
     'recipients' in d &&
-    'proxies' in d &&
+    'proxies'    in d &&
     typeof d.accounts === 'object' && d.accounts !== null
   )
 }
 
 interface StatusCtx {
-  status: AppStatus | null
+  status:  AppStatus | null
+  online:  boolean
   refresh: () => Promise<void>
 }
 
-const Ctx = createContext<StatusCtx>({ status: null, refresh: async () => {} })
+const Ctx = createContext<StatusCtx>({
+  status: null, online: false, refresh: async () => {},
+})
 
 export const useStatus = () => useContext(Ctx)
 
 export function StatusProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AppStatus | null>(null)
+  const [online, setOnline] = useState(false)
 
   const esRef        = useRef<EventSource | null>(null)
   const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null)
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reprobeRef   = useRef<ReturnType<typeof setInterval> | null>(null)
   const failCount    = useRef(0)
-  const useSSE       = useRef(true)
+  const useSSE       = useRef(false)    // start false — SSE opens only after online
+  const isOnline     = useRef(false)    // sync mirror of online state
+
+  const markOnline = useCallback(() => {
+    if (!isOnline.current) {
+      isOnline.current = true
+      setOnline(true)
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
     try {
       const data = await api.status()
-      if (isValidStatus(data)) setStatus(data)
+      if (isValidStatus(data)) {
+        markOnline()
+        setStatus(data)
+      }
     } catch {}
-  }, [])
+  }, [markOnline])
 
   const stopPolling = useCallback(() => {
-    if (pollRef.current)  { clearInterval(pollRef.current);  pollRef.current  = null }
+    if (pollRef.current)   { clearInterval(pollRef.current);   pollRef.current   = null }
     if (reprobeRef.current){ clearInterval(reprobeRef.current); reprobeRef.current = null }
   }, [])
 
-  // Forward declaration — connectSSE is defined below but referenced in startPolling
   const connectSSERef = useRef<() => void>(() => {})
 
-  const startPolling = useCallback(() => {
+  const startPolling = useCallback((intervalMs = IDLE_POLL_MS) => {
     stopPolling()
     refresh()
-    pollRef.current = setInterval(refresh, 2000)
+    pollRef.current = setInterval(refresh, intervalMs)
 
-    // Периодически пробуем вернуться на SSE
-    reprobeRef.current = setInterval(() => {
-      if (document.hidden) return
-      useSSE.current = true
-      failCount.current = 0
-      connectSSERef.current()
-    }, SSE_REPROBE_INTERVAL)
+    if (intervalMs !== STARTUP_POLL_MS) {
+      // Re-probe SSE periodically after fallback
+      reprobeRef.current = setInterval(() => {
+        if (document.hidden) return
+        useSSE.current    = true
+        failCount.current = 0
+        connectSSERef.current()
+      }, SSE_REPROBE_MS)
+    }
   }, [refresh, stopPolling])
 
   const closeSSE = useCallback(() => {
@@ -94,15 +120,17 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
 
     es.onopen = () => {
       failCount.current = 0
-      // SSE восстановлено — останавливаем fallback polling
-      stopPolling()
+      stopPolling()   // SSE восстановлено — останавливаем fallback polling
     }
 
     es.onmessage = (e) => {
       failCount.current = 0
       try {
         const parsed = JSON.parse(e.data)
-        if (isValidStatus(parsed)) setStatus(parsed)
+        if (isValidStatus(parsed)) {
+          markOnline()
+          setStatus(parsed)
+        }
       } catch {}
     }
 
@@ -112,32 +140,44 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       failCount.current++
 
       if (failCount.current >= 3) {
-        // SSE недоступен — деградируем в polling (с re-probe через 60с)
         useSSE.current = false
-        startPolling()
+        startPolling(IDLE_POLL_MS)
         return
       }
 
-      // Реконнект с backoff
       const delay = Math.min(500 * failCount.current, 5000)
       reconnectRef.current = setTimeout(connectSSE, delay)
     }
-  }, [closeSSE, startPolling, stopPolling])
+  }, [closeSSE, markOnline, startPolling, stopPolling])
 
-  // Синхронизируем ref для использования внутри setInterval выше
   useEffect(() => { connectSSERef.current = connectSSE }, [connectSSE])
 
   useEffect(() => {
-    connectSSE()
+    // Phase 1: fast startup polling until first backend response
+    startPolling(STARTUP_POLL_MS)
+
+    // Phase 2: as soon as backend is online, switch to SSE
+    const checkOnline = setInterval(() => {
+      if (!isOnline.current) return
+      clearInterval(checkOnline)
+      stopPolling()
+      useSSE.current = true
+      connectSSE()
+    }, 200)
 
     const onVisibility = () => {
       if (document.hidden) {
         closeSSE()
         stopPolling()
+        clearInterval(checkOnline)
       } else {
-        failCount.current = 0
-        if (useSSE.current) connectSSE()
-        else startPolling()
+        if (!isOnline.current) {
+          startPolling(STARTUP_POLL_MS)
+        } else if (useSSE.current) {
+          connectSSE()
+        } else {
+          startPolling(IDLE_POLL_MS)
+        }
       }
     }
 
@@ -145,9 +185,14 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
     return () => {
       closeSSE()
       stopPolling()
+      clearInterval(checkOnline)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [connectSSE, closeSSE, stopPolling, startPolling])
+  }, [connectSSE, closeSSE, startPolling, stopPolling])
 
-  return <Ctx.Provider value={{ status, refresh }}>{children}</Ctx.Provider>
+  return (
+    <Ctx.Provider value={{ status, online, refresh }}>
+      {children}
+    </Ctx.Provider>
+  )
 }
