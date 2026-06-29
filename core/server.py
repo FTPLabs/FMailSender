@@ -29,6 +29,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -36,6 +37,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.models import SmtpAccount, Recipient, CampaignConfig, CampaignStatus
@@ -444,10 +446,10 @@ def stop_campaign():
     return {"ok": True}
 
 
-# ── Overall status (for polling) ──────────────────────────────────────────────
+# ── Overall status ────────────────────────────────────────────────────────────
 
-@app.get("/api/status")
-def get_status():
+def _build_status() -> dict:
+    """Shared status snapshot — called by GET /api/status and SSE /api/events."""
     ok_cnt   = sum(1 for a in _accounts if a.last_test_ok is True)
     fail_cnt = sum(1 for a in _accounts if a.last_test_ok is False)
     return {
@@ -462,3 +464,37 @@ def get_status():
         "recipients": len(_recipients),
         "proxies":    len(_proxies),
     }
+
+
+
+@app.get("/api/status")
+def get_status():
+    return _build_status()
+
+
+@app.get("/api/events")
+async def get_events():
+    """
+    SSE endpoint — streams AppStatus JSON events.
+    Interval: 0.8s when campaign is running, 2s otherwise.
+    Client opens ONE persistent connection for the whole app lifetime.
+    """
+    async def _stream():
+        while True:
+            try:
+                payload = _build_status()
+                yield f"data: {json.dumps(payload)}\n\n"
+            except Exception:
+                yield "data: {}\n\n"
+            state = _campaign_status.state if hasattr(_campaign_status, "state") else "idle"
+            await asyncio.sleep(0.8 if state == "running" else 2.0)
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection":    "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
