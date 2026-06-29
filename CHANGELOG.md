@@ -1,4 +1,26 @@
-## [6.0.4] — 2026-06-29
+## [6.0.5] — 2026-06-29
+
+  ### 🐛 Исправления
+
+  - **core/models.py** — добавлен `__getattr__` safety-net для `_lock`, `_day_reset`, `_hour_reset`.
+    Гарантирует наличие `_lock` при **любом** способе создания объекта:
+    старый `.pyc` кэш (Python переиспользует bytecode без `__post_init__`),
+    `copy.copy()`, `pickle`, `dataclasses.replace()`. Окончательно закрывает
+    `AttributeError: 'SmtpAccount' object has no attribute '_lock'`.
+  - **core/sender.py** — аналогичный `__getattr__` safety-net добавлен в `sender.SmtpAccount`
+    (defence-in-depth: engine работает с аккаунтами напрямую через duck-typing).
+  - **core/server.py** — `asyncio.get_event_loop()` → `asyncio.get_running_loop()` в
+    `check_proxies_endpoint` (deprecated Python 3.10+, вызывал DeprecationWarning).
+  - **core/_version.py** — 6.0.4 → 6.0.5
+
+  ### 📋 Код-ревью: что проверено
+
+  - Все пути создания `SmtpAccount`: constructor / `from_dict` / `_make_account` / import-txt — OK
+  - Duck-compat `models.SmtpAccount` ↔ `sender.SmtpAccount` — полный
+  - Thread-safety: все инкременты через `try_increment()` — OK
+  - asyncio: все вызовы внутри корутин используют `get_running_loop()` — OK
+
+  ## [6.0.4] — 2026-06-29
 
   ### 🐛 Исправления
 

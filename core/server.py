@@ -266,7 +266,7 @@ def set_proxies(body: dict):
 async def check_proxies_endpoint(body: dict):
     raw      = body.get("proxies", _proxies)
     to_check = [p for r in raw if (p := parse_proxy(r))]
-    loop     = asyncio.get_event_loop()
+    loop     = asyncio.get_running_loop()
     results  = list(await asyncio.gather(*[
         loop.run_in_executor(None, validate_proxy, px) for px in to_check
     ]))

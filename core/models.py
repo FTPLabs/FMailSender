@@ -40,6 +40,22 @@ class SmtpAccount:
         self._day_reset: float = time.time()
         self._hour_reset: float = time.time()
 
+    def __getattr__(self, name: str):
+        """Safety net: пересоздаёт runtime-атрибуты если они отсутствуют.
+
+        Причины отсутствия _lock, _day_reset, _hour_reset:
+        - Старый .pyc кэш без __post_init__ (Python переиспользует bytecode)
+        - copy.copy() / pickle — не вызывают __init__/__post_init__
+        - dataclasses.replace() с отдельными полями (edge-case)
+        Этот метод вызывается только когда обычный __getattribute__ не нашёл атрибут.
+        """
+        if name in ('_lock', '_day_reset', '_hour_reset'):
+            object.__setattr__(self, '_lock', threading.Lock())
+            object.__setattr__(self, '_day_reset', time.time())
+            object.__setattr__(self, '_hour_reset', time.time())
+            return object.__getattribute__(self, name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
     def _tick_resets(self) -> None:
         """Сбрасывает часовой и суточный счётчики при смене периода."""
         now = time.time()
