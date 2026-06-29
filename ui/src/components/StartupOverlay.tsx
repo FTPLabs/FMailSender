@@ -29,6 +29,15 @@ export default function StartupOverlay() {
   const [progress,  setProgress]  = useState(0)
   const [visible,   setVisible]   = useState(true)
   const [fadeOut,   setFadeOut]   = useState(false)
+  const [version,   setVersion]   = useState('')
+
+  useEffect(() => {
+    if (!online) return
+    fetch('http://127.0.0.1:7531/api/health')
+      .then(r => r.json())
+      .then((d: { version?: string }) => { if (d?.version) setVersion(`v${d.version}`) })
+      .catch(() => {})
+  }, [online])
   const startedAt = useRef(Date.now())
   const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -89,7 +98,7 @@ export default function StartupOverlay() {
         </div>
         <div className="text-center">
           <div className="text-xl font-semibold text-[#e8e8ff] tracking-tight">FMail Sender</div>
-          <div className="text-xs text-[#6666aa] mt-1">v6.0 Pro</div>
+          <div className="text-xs text-[#6666aa] mt-1">{version || 'v6.0'}</div>
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-// FMailSender Tauri shell v6.0.2
+// FMailSender Tauri shell v6.0.5
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::net::TcpStream;
@@ -22,6 +22,29 @@ fn wait_for_core(timeout: Duration) -> bool {
         thread::sleep(Duration::from_millis(200));
     }
     false
+}
+
+/// Kill any leftover fmail-core process so the new sidecar can bind port 7531.
+///
+/// Problem this solves: after installing a new version, the old fmail-core.exe
+/// from a previous session may still be running and holding port 7531.
+/// Tauri's wait_for_core() then sees the port open and considers the core
+/// "started" — but the UI is talking to the OLD server with stale state and
+/// old code (including any bugs that were already fixed in the new build).
+/// Killing first guarantees the new binary is the one that answers on 7531.
+fn kill_existing_core() {
+    #[cfg(target_os = "windows")]
+    {
+        for name in &["fmail-core-x86_64-pc-windows-msvc.exe", "fmail-core.exe"] {
+            let _ = Command::new("taskkill")
+                .args(["/F", "/IM", name])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+        // Give the OS a moment to free the socket before spawning the new process
+        thread::sleep(Duration::from_millis(800));
+    }
 }
 
 /// Returns candidate directories to search for the sidecar binary.
@@ -96,6 +119,12 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(move |app| {
+            // Kill any leftover core process from a previous session or version
+            // BEFORE spawning the new sidecar. Fixes the upgrade scenario where
+            // the old fmail-core.exe is still bound to port 7531, causing Tauri
+            // to connect to the old server instead of the freshly-built one.
+            kill_existing_core();
+
             let child = spawn_python_core(app);
             *core_handle.lock().unwrap() = child;
 

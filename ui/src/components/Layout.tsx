@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { LayoutDashboard, Users, Mail, FileText, Send, Shield, Zap } from 'lucide-react'
 import { useStatus } from '../contexts/StatusContext'
@@ -23,6 +24,14 @@ const STATE_DOT: Record<string, string> = {
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
   const { status } = useStatus()
+  const [version, setVersion] = useState('')
+
+  useEffect(() => {
+    fetch('http://127.0.0.1:7531/api/health')
+      .then(r => r.json())
+      .then((d: { version?: string }) => { if (d?.version) setVersion(`v${d.version}`) })
+      .catch(() => {})
+  }, [])
 
   const st = status?.campaign
 
@@ -38,7 +47,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
           <div className="min-w-0">
             <div className="text-sm font-semibold text-[#e8e8ff] leading-tight">FMail Sender</div>
-            <div className="text-[10px] text-[#6666aa]">v6.0 Pro</div>
+            <div className="text-[10px] text-[#6666aa]">{version || 'v6.0'}</div>
           </div>
         </div>
 
