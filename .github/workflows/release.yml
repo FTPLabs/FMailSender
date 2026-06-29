@@ -39,7 +39,7 @@ jobs:
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/FTPLabs/FMailSender" \
             -d '{"private":false}')
-          echo "Visibility: $(echo $RESULT | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get(\"visibility\",d.get(\"message\",\"unknown\")))')"
+          echo "Visibility: $(echo $RESULT | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('visibility',d.get('message','unknown')))")"
 
       # ── Step 1: Checkout ─────────────────────────────────────────────────────
       - name: "Checkout"
@@ -180,7 +180,7 @@ jobs:
         id: tauri_build
         shell: pwsh
         run: |
-          tauri build --target x86_64-pc-windows-msvc --bundles none --verbose 2>&1
+          tauri build --target x86_64-pc-windows-msvc --no-bundle --verbose 2>&1
 
           $exe = Get-ChildItem -Recurse "src-tauri/target" -Filter "*.exe" -ErrorAction SilentlyContinue |
             Where-Object {
@@ -289,4 +289,4 @@ jobs:
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/FTPLabs/FMailSender" \
             -d '{"private":true}')
-          echo "Visibility: $(echo $RESULT | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get(\"visibility\",d.get(\"message\",\"unknown\")))')"
+          echo "Visibility: $(echo $RESULT | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('visibility',d.get('message','unknown')))")"
