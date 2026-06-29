@@ -72,7 +72,7 @@ export default function Dashboard() {
       <div className="card space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-[#e8e8ff]">Текущая рассылка</h2>
-          <span className={`badge ${STATE_BADGE[cp?.state ?? 'idle'] ?? 'badge-idle'}`}>
+          <span className={STATE_BADGE[cp?.state ?? 'idle'] ?? 'badge-idle'}>
             {STATE_LABEL[cp?.state ?? 'idle'] ?? cp?.state}
           </span>
         </div>
