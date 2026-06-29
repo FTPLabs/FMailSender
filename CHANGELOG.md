@@ -1,4 +1,27 @@
-## [6.2.0] — 2026-06-29
+## [6.3.0] — 2026-06-29
+
+  ### Исправления (Bug Fixes)
+
+  #### 🔴 Критический: SMTP AUTH не поддерживается сервером (JMX, Outlook, Office365)
+  - **Причина**: импорт файла `email|password|refresh_token` парсил только 2 поля — refresh_token всегда терялся → OAuth2 никогда не активировался → Basic AUTH → `SMTPNotSupportedError`
+  - **Исправление 1** (`core/server.py`): `AccountIn` теперь содержит поля `refresh_token: str = ""` и `access_token: str = ""`; `_make_account()` корректно передаёт их в `SmtpAccount`
+  - **Исправление 2** (`core/server.py`): эндпоинт `/api/accounts/import-txt` читает 3-е поле строки как `refresh_token`
+  - **Исправление 3** (`core/sender.py`): `_is_oauth_acct` теперь проверяет также SMTP-хост (`office365.com`) — аккаунты на кастомных доменах (JMX, корпоративные) через Office365 ранее не определялись
+  - **Исправление 4** (`core/sender.py`): `SMTPNotSupportedError` теперь показывает конкретную инструкцию по решению в зависимости от типа аккаунта (MS без токена / MS с истёкшим токеном / Gmail)
+  - **Исправление 5** (`ui/src/pages/Accounts.tsx`): добавлено поле `Refresh Token` в форму аккаунта
+  - **Исправление 6** (`ui/src/api.ts`): интерфейс `Account` содержит поля `refresh_token` и `access_token`
+
+  ### Новые возможности
+
+  #### 🔐 Система лицензирования восстановлена
+  - **`core/license.py`** (новый): валидация ключей против `fmail.shop`, кэш на диске (24ч), оффлайн-режим 7 дней
+  - **`core/server.py`**: эндпоинты `GET /api/license` и `POST /api/license/activate`
+  - **`ui/src/api.ts`**: API-хуки `api.license.get()` и `api.license.activate(key)`
+  - **`ui/src/components/StartupOverlay.tsx`**: экран активации лицензии показывается при старте если ключ не введён или недействителен
+
+  ---
+
+  ## [6.2.0] — 2026-06-29
 
 ### 🔴 DKIM signing — полная реализация (#6)
 
