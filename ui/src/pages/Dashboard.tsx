@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
 import { Users, Mail, Shield, Send, CheckCircle, XCircle, Clock } from 'lucide-react'
-import { api, type AppStatus } from '../api'
+import { useStatus } from '../contexts/StatusContext'
 
 function StatCard({ label, value, sub, icon: Icon, color }: {
   label: string; value: string | number; sub?: string
@@ -45,13 +44,7 @@ const STATE_LABEL: Record<string, string> = {
 }
 
 export default function Dashboard() {
-  const [status, setStatus] = useState<AppStatus | null>(null)
-
-  useEffect(() => {
-    api.status().then(setStatus).catch(() => {})
-    const id = setInterval(() => api.status().then(setStatus).catch(() => {}), 2000)
-    return () => clearInterval(id)
-  }, [])
+  const { status } = useStatus()
 
   const s  = status
   const cp = s?.campaign
@@ -79,7 +72,7 @@ export default function Dashboard() {
       <div className="card space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-[#e8e8ff]">Текущая рассылка</h2>
-          <span className={STATE_BADGE[cp?.state ?? 'idle'] ?? 'badge-idle'}>
+          <span className={`badge ${STATE_BADGE[cp?.state ?? 'idle'] ?? 'badge-idle'}`}>
             {STATE_LABEL[cp?.state ?? 'idle'] ?? cp?.state}
           </span>
         </div>
