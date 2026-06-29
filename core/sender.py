@@ -1124,7 +1124,7 @@ class SendingEngine:
           self._stats = {"success": 0, "errors": 0, "total": len(recipients)}
       self.stop_event.clear()
       self._paused = False
-      self._loop = asyncio.get_event_loop()  # FIX v4.5.2
+      self._loop = asyncio.get_running_loop()  # FIX v6.0.4: get_event_loop() deprecated in coroutines (Python 3.10+)
       self._campaign_task = asyncio.current_task()
       if self._log_queue:
           self._log_queue.put_nowait({"type": "log", "level": "info", "message":

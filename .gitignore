@@ -1,0 +1,49 @@
+# Python
+  __pycache__/
+  *.py[cod]
+  *.pyo
+  *.pyd
+  *.so
+  *.egg
+  *.egg-info/
+  dist/
+  build/
+  .eggs/
+
+  # PyInstaller
+  *.spec.bak
+  src-tauri/binaries/*.exe
+
+  # Vite / React
+  ui/node_modules/
+  ui/dist/
+
+  # Rust / Tauri
+  src-tauri/target/
+
+  # Data (НИКОГДА не коммитить — содержат зашифрованные учётные данные)
+  data/accounts.json
+  data/global_proxies.json
+  data/recipients.json
+  data/campaign.json
+  data/.fernet_key
+
+  # Server secrets
+  server/.env
+  server/licenses.db
+  server/fsm_storage.json
+  server/fsm_storage.tmp
+
+  # Logs
+  *.log
+  logs/
+
+  # IDE
+  .idea/
+  .vscode/settings.json
+  *.swp
+  *.swo
+  .DS_Store
+  Thumbs.db
+  desktop.ini
+  

@@ -1,3 +1,15 @@
+## [6.0.4] — 2026-06-29
+
+  ### 🐛 Исправления
+
+  - **core/sender.py** — `asyncio.get_event_loop()` заменён на `asyncio.get_running_loop()` в `run_campaign()`. `get_event_loop()` deprecated в Python 3.10+ при наличии работающего loop; вызов внутри корутины мог приводить к DeprecationWarning и ошибке в Python 3.12+. Исправляет SND-001.
+  - **.gitignore** — добавлен (ранее отсутствовал): `data/`, `server/.env`, `server/licenses.db`, `__pycache__/`, `*.pyc`, `ui/node_modules/`, `src-tauri/target/`
+  - **Скиллы агентов** — обновлены 4 скилла, содержавших устаревшие ссылки на PyQt6/Qt (v5): `proxy-smtp-check`, `smtp-engine-guard`, `full-system-audit`, `cancel-guard` — все переписаны под актуальную архитектуру v6 (Tauri + FastAPI + React)
+  - **.agents/memory/MEMORY.md** — создан (ранее отсутствовал): индекс долгосрочной памяти агента
+
+  ### 📦 Без изменений API — обратно совместимо
+
+  
 ## [6.0.3] — 2026-06-29
 
   ### 🐛 Исправления

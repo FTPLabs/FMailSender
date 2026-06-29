@@ -1,74 +1,67 @@
 ---
-name: cancel-guard
-description: "Правильная отмена asyncio задачи из Qt/другого потока. Используй loop.call_soon_threadsafe(task.cancel) вместо прямого task.cancel()."
----
+  name: cancel-guard
+  description: "Правильная отмена asyncio задачи из другого потока (v6). Используй loop.call_soon_threadsafe(task.cancel) вместо прямого task.cancel()."
+  ---
 
-# Cancel Guard — Корректная отмена asyncio из другого потока
+  # Cancel Guard — Корректная отмена asyncio из другого потока (v6)
 
-## Проблема
+  ## Проблема
 
-`task.cancel()` вызванный из Qt main thread (или любого другого потока, не являющегося
-потоком asyncio event loop) — НЕ thread-safe. Это гонка данных:
-- `CancelledError` может не быть доставлен
-- Рассылка продолжается как ни в чём ни бывало
-- Кнопка «Стоп» / «Отменить» внешне работает (UI замирает), но фактически нет
+  `task.cancel()` вызванный из daemon-потока (не потока asyncio event loop) — НЕ thread-safe.
+  Это гонка данных:
+  - `CancelledError` может не быть доставлен
+  - Рассылка продолжается несмотря на стоп
+  - Кнопка «Стоп» внешне работает, но фактически нет
 
-## Правильное исправление
+  ## Контекст v6 (Tauri + FastAPI)
 
-```python
-class MyEngine:
-    def __init__(self, ...):
-        self._loop: Optional[asyncio.AbstractEventLoop] = None  # Шаг 1
-        self._campaign_task: Optional[asyncio.Task] = None
+  В v6 архитектуре:
+  - `SendingEngine.run()` — sync метод, запускается в `threading.Thread` из `server.py`
+  - Внутри `run()` создаётся новый asyncio event loop (`asyncio.new_event_loop()`)
+  - `run_campaign()` — async корутина внутри этого loop
 
-    def stop(self) -> None:
-        self.stop_event.set()
-        _loop = getattr(self, "_loop", None)
-        task = getattr(self, "_campaign_task", None)
-        if task and not task.done():
-            if _loop and not _loop.is_closed():
-                _loop.call_soon_threadsafe(task.cancel)  # ✅ thread-safe
-            else:
-                task.cancel()  # fallback
+  Кнопка «Стоп» в React → HTTP POST /api/campaign/stop → server.py → `engine.stop()` — из другого thread!
 
-    async def run_campaign(self, ...):
-        self._loop = asyncio.get_event_loop()  # Шаг 2: сохраняем loop
-        self._campaign_task = asyncio.current_task()
-        ...
-        try:
-            ...
-        except asyncio.CancelledError:
-            pass
-        finally:
-            self._campaign_task = None
-            self._loop = None  # Шаг 3: очищаем
-```
+  ## Правильный паттерн (уже реализован в core/sender.py)
 
-В GUI (Qt thread):
-```python
-def run():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    self._engine._loop = loop  # ← сохраняем ДО run_until_complete
-    try:
-        loop.run_until_complete(self._engine.run_campaign(...))
-    finally:
-        loop.close()
-threading.Thread(target=run, daemon=True).start()
-```
+  ```python
+  class SendingEngine:
+      def __init__(self, ...):
+          self._loop: Optional[asyncio.AbstractEventLoop] = None
+          self._campaign_task: Optional[asyncio.Task] = None
 
-## Почему именно так
+      def stop(self) -> None:
+          self.stop_event.set()
+          self._paused = False
+          _loop = getattr(self, "_loop", None)
+          task = getattr(self, "_campaign_task", None)
+          if task and not task.done():
+              if _loop and not _loop.is_closed():
+                  _loop.call_soon_threadsafe(task.cancel)  # ✅ thread-safe
+              else:
+                  task.cancel()  # fallback
 
-- asyncio event loop полностью однопоточный — все операции с задачами (cancel,
-  создание, await) должны происходить в его потоке.
-- `loop.call_soon_threadsafe(fn)` — официальный и единственный правильный способ
-  поставить вызов в очередь asyncio loop из другого потока (Python docs: `asyncio.loop.call_soon_threadsafe`).
-- Прямой `task.cancel()` из Qt потока — неопределённое поведение (UB), работает
-  в части Python runtime реализаций, но ненадёжно.
+      async def run_campaign(self, recipients, template):
+          self._loop = asyncio.get_running_loop()  # ✅ сохраняем loop
+          self._campaign_task = asyncio.current_task()
+          try:
+              ...
+          except asyncio.CancelledError:
+              pass
+          finally:
+              self._campaign_task = None
+              self._loop = None  # очищаем
+  ```
 
-## Проверить что исправление работает
+  ## Почему именно так
 
-1. Запустить рассылку на 100+ адресов.
-2. Нажать «Стоп» через 3–5 секунд.
-3. Рассылка должна прекратиться в течение 1–2 секунд (после завершения текущего батча).
-4. В логе должно появиться «Готово: N успешно, M ошибок» с актуальными числами.
+  - asyncio event loop полностью однопоточный — все операции с задачами должны вызываться из его потока
+  - `call_soon_threadsafe` безопасно планирует вызов `task.cancel()` в нужном потоке
+  - В v6 нет Qt — `stop()` вызывается из HTTP-handler thread FastAPI
+
+  ## Антипаттерн
+  ```python
+  # ❌ НЕ делай: прямой task.cancel() из другого thread
+  engine._campaign_task.cancel()  # RACE CONDITION — может не сработать
+  ```
+  
