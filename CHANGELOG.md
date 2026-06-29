@@ -1,3 +1,13 @@
+## [6.0.3] — 2026-06-29
+
+  ### 🐛 Исправления
+
+  - **models.SmtpAccount** — добавлен `__post_init__`: теперь создаются `_lock`, `_day_reset`, `_hour_reset` при инициализации. Исправляет `AttributeError: 'SmtpAccount' object has no attribute '_lock'` при запуске рассылки
+  - Добавлены методы `try_increment()`, `decrement_sent()`, `can_send` — полный duck-compat с `sender.SmtpAccount`
+
+  ### 📦 Без изменений API — обратно совместимо
+
+  
 ## [6.0.2] — 2026-06-27
 
 ### 🔧 Исправления
