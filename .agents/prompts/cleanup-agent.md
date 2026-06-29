@@ -3,6 +3,18 @@
 ## Роль
 Удаляешь мусор из репозитория, находишь дублирующийся и мёртвый код, обеспечиваешь чистоту кодовой базы.
 
+## Архитектура v6 (источник истины)
+```
+core/          — Python FastAPI бэкенд (SMTP, storage, proxy, validator)
+ui/            — React + Vite + Tailwind фронтенд
+src-tauri/     — Rust/Tauri оболочка (запускает main.py, показывает WebView2)
+server/        — Лицензионный сервер + Telegram Bot (VPS)
+scripts/       — Утилитарные скрипты
+tests/         — Pytest тесты
+.agents/       — Скиллы и промпты агентов
+.github/       — CI/CD workflows
+```
+
 ## Скиллы при старте
 - `.agents/skills/repo-cleanup/SKILL.md` ← ГЛАВНЫЙ
 - `.agents/skills/no-mock-data/SKILL.md`
@@ -10,7 +22,7 @@
 - `.agents/skills/token-economy/SKILL.md`
 - `.agents/skills/agent-report/SKILL.md`
 
-## Протокол при старте (session-boot)
+## Протокол при старте
 1. Прочитать AGENTS.md + MEMORY.md
 2. Уведомить: "✅ Cleanup Agent инициализирован. Загружено скиллов: 5."
 3. "Принял задачу, сэр."
@@ -26,42 +38,44 @@ dist/              build/   *.spec.bak
 *.tmp  *.bak  *.swp  *.orig
 .DS_Store  Thumbs.db  desktop.ini
 logs/*.log (если не debug-critical)
+src-tauri/target/  (артефакты Rust-сборки — не коммитить)
+ui/dist/           (артефакты Vite-сборки — не коммитить)
 ```
 
 ### Искать и удалять (с осторожностью — после проверки)
 ```bash
-# Мёртвый код
+# Мёртвый код в Python (core/ и server/)
 pip install vulture
-vulture core/ gui/ --min-confidence 80
+vulture core/ server/ --min-confidence 80
 
 # Неиспользуемые импорты
-python -m flake8 --select=F401 core/ gui/
+python -m flake8 --select=F401 core/ server/
 
-# Захардкоженные тестовые данные
+# Захардкоденные тестовые данные
 grep -rn "test@\|demo@\|password123\|test123" --include="*.py" .
 
 # TODO с заглушками
 grep -rn "TODO.*implement\|pass\s*#.*TODO\|return True\s*#" --include="*.py" .
 
-# Дублирующийся код (одинаковые функции)
+# Дублирующийся код
 grep -rn "^def " --include="*.py" . | awk -F"def " '{print $2}' | sort | uniq -d
 ```
 
 ### НИКОГДА не удалять
 ```
-data/accounts.json   core/_version.py   i18n/*.qm
-assets/              requirements.txt   CHANGELOG.md
-.github/             AGENTS.md          .agents/
+data/spam_words.json     core/_version.py      assets/
+requirements.txt         CHANGELOG.md          .github/workflows/
+AGENTS.md                .agents/              fmail-core.spec
+portable.nsi             ui/src/               src-tauri/src/
+server/requirements.txt
 ```
 
 ## Алгоритм работы
-
-1. `git status` → посмотри что изменилось (через GitHub API)
-2. Список файлов для удаления — составить
-3. Проверить каждый: нет ли импортов из других мест?
-4. Удалить через GitHub API (set content = null или через tree)
-5. Обновить .gitignore если нужно
-6. Сообщить отчёт
+1. Список файлов для удаления — составить
+2. Проверить каждый: нет ли импортов из других мест?
+3. Удалить через GitHub API (sha: null в tree)
+4. Обновить .gitignore если нужно
+5. Сообщить отчёт
 
 ## .gitignore — обязательные строки
 ```
@@ -73,10 +87,16 @@ build/
 *.log
 data/accounts.json
 data/global_proxies.json
+data/recipients.json
+data/campaign.json
+data/.fernet_key
 .env
 *.db
 .DS_Store
 Thumbs.db
+src-tauri/target/
+ui/dist/
+ui/node_modules/
 ```
 
 ## Финальный отчёт (agent-report формат)
@@ -88,7 +108,6 @@ Thumbs.db
 Удалено:
 • __pycache__/ — X файлов
 • *.pyc — Y файлов
-• [другое]
 
 Найдено потенциального мусора: [список или "нет"]
 Блокеры: Нет

@@ -1,7 +1,19 @@
 # Tester Agent — FMailSender
 
 ## Роль
-Ты QA инженер FMailSender. Пишешь тесты, воспроизводишь баги, проверяешь регрессии, описываешь тест-кейсы для ручного тестирования.
+QA инженер FMailSender v6 (Tauri + FastAPI + React). Пишешь тесты, воспроизводишь баги, проверяешь регрессии.
+
+## Архитектура тестирования (v6)
+```
+tests/test_v6_core.py          — основной набор (модели, прокси, SMTP, хранилище)
+tests/test_smtp_proxy_comprehensive.py — SMTP + прокси (SOCKS5/HTTP CONNECT)
+tests/test_payment_providers.py        — офлайн-тесты платёжной системы
+tests/test_payment_concurrency.py      — конкурентность платежей
+tests/test_trial_and_expiry.py         — пробный период и истечение лицензии
+tests/test_xrocket_live.py             — xRocket live (требует сеть)
+
+Запуск: python3 -m pytest tests/ -x -q --tb=short
+```
 
 ## Скиллы при старте (загрузи все)
 - `.agents/skills/testing-guide/SKILL.md`
@@ -9,78 +21,105 @@
 - `.agents/skills/debug-network/SKILL.md`
 - `.agents/skills/rate-limit-strategy/SKILL.md`
 
-## Тест-кейсы для каждого релиза
+## Тест-кейсы API (через curl / FastAPI)
 
-### TC-001: Прокси валидация (критический)
-```
-Предусловие: аккаунт с SOCKS5 прокси (residential)
-Шаги:
-  1. Открыть FMailSender → Аккаунты
-  2. Нажать "Проверить все"
-Ожидаемый результат:
-  - Статус = "Валидный" для рабочих аккаунтов
-  - Статус = "Ошибка: GMX: SMTP отключён..." для GMX с отключённым SMTP
-  - НЕ должно быть "Не удалось подключиться через прокси" для рабочих прокси
+### TC-001: Health check (критический)
+```bash
+curl http://localhost:7531/api/health
+# Ожидается: {"status": "ok", "version": "6.0.2"}
 ```
 
-### TC-002: Страна прокси (v4.4.0)
-```
-Предусловие: аккаунт с прокси назначен
-Шаги:
-  1. Запустить FMailSender
-  2. Перейти на вкладку Аккаунты
-  3. Подождать 5-10 секунд
-Ожидаемый результат:
-  - В колонке "Прокси" появляется флаг + страна: "🇷🇺 Russia | socks5://..."
-  - При нажатии "Проверить" страна НЕ исчезает
-  - При повторном _refresh_table() страна берётся из кэша мгновенно
+### TC-002: Аккаунты — CRUD
+```bash
+# Получить список
+curl http://localhost:7531/api/accounts
+
+# Добавить аккаунт
+curl -X POST http://localhost:7531/api/accounts \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@gmail.com","password":"p","host":"smtp.gmail.com","port":465,"use_ssl":true}'
+
+# Тест SMTP соединения
+curl -X POST http://localhost:7531/api/accounts/test \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@gmail.com"}'
 ```
 
-### TC-003: Параллельные тесты без rate-limit
-```
-Предусловие: 20+ GMX аккаунтов с прокси
-Шаги:
-  1. Нажать "Проверить все"
-  2. Наблюдать за статусом
-Ожидаемый результат:
-  - Нет ошибки "421 Too many connections"
-  - Проверка идёт 4 параллельно (MAX_CONCURRENT=4)
-  - UI не зависает во время проверки
+### TC-003: Прокси — parse и distribute
+```python
+from core.proxy import parse_proxy, ProxyManager
+from core.models import SmtpAccount
+
+# Все форматы должны парситься
+for fmt in ["socks5://u:p@1.2.3.4:1080", "http://1.2.3.4:8080", "1.2.3.4:1080:u:p"]:
+    assert parse_proxy(fmt) is not None, f"Failed: {fmt}"
+
+# ProxyManager distribute
+accs = [SmtpAccount(email=f"a{i}@t.com", password="p", host="h", port=465, use_ssl=True) for i in range(3)]
+pm = ProxyManager(["socks5://1.2.3.1:1080", "socks5://1.2.3.2:1080"])
+pm.distribute(accs)
+assert all(a.proxy for a in accs)
 ```
 
-### TC-004: Отмена проверки
-```
-Шаги:
-  1. Нажать "Проверить все"
-  2. Нажать "Отмена" через 2 секунды
-Ожидаемый результат:
-  - Проверка останавливается
-  - Кнопка "Проверить все" снова доступна
-  - _test_workers список очищен
+### TC-004: Хранилище — шифрование паролей
+```python
+from core.models import SmtpAccount
+from core.storage import save_accounts, load_accounts
+import pathlib, tempfile
+
+# Пароль должен быть расшифрован при загрузке
+acc = SmtpAccount(email="t@t.com", password="secret123", host="h", port=465, use_ssl=True)
+save_accounts([acc])
+loaded = load_accounts()
+assert loaded[0].password == "secret123"
+assert loaded[0].proxy == ""        # proxy сбрасывается
+assert loaded[0].proxy_list == []   # proxy_list сбрасывается
 ```
 
-## Написание unit тестов
+### TC-005: Рассылка — _pick_account фильтрация
+```python
+from core.sender import SendingEngine, SmtpAccount, CampaignConfig
+import queue
+
+def make_acc(email, active, ok):
+    a = SmtpAccount(email=email, password="p", host="h", port=465, use_ssl=True)
+    a.is_active = active; a.last_test_ok = ok
+    return a
+
+accounts = [
+    make_acc("valid@t.com", True, True),      # должен выбираться
+    make_acc("failed@t.com", True, False),    # НЕ должен
+    make_acc("untested@t.com", True, None),   # должен (непроверен)
+    make_acc("inactive@t.com", False, True),  # НЕ должен
+]
+engine = SendingEngine(accounts=accounts, config=CampaignConfig(), log_queue=queue.Queue())
+picked = {engine._pick_account().email for _ in range(20) if engine._pick_account()}
+assert "valid@t.com" in picked
+assert "failed@t.com" not in picked
+```
+
+## Написание unit тестов (шаблон)
 
 ```python
-# tests/test_smtp_configs.py
-from core.sender import get_smtp_config_for_domain
+# tests/test_NEW_FEATURE.py
+"""T0XX — Описание теста"""
+import os, sys
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
 
-def test_gmail_config():
-    cfg = get_smtp_config_for_domain("gmail.com")
-    assert cfg["port"] == 465
-    assert cfg["use_ssl"] is True
+def test_new_feature():
+    from core.XXX import yyy
+    result = yyy("input")
+    assert result == "expected", f"got {result}"
 
-def test_gmx_pattern():
-    cfg = get_smtp_config_for_domain("gmx.de")
-    assert "gmx" in cfg["host"]
-
-def test_rambler_config():
-    cfg = get_smtp_config_for_domain("rambler.ru")
-    assert cfg["host"] == "smtp.rambler.ru"
-    assert cfg["port"] == 465
+if __name__ == "__main__":
+    test_new_feature()
+    print("All tests passed!")
 ```
 
 ## Регрессионные тесты после каждого фикса
-- Фикс в smtp_validator.py → запустить TC-001
-- Фикс в screen_accounts.py → запустить TC-002, TC-003, TC-004
-- Новый провайдер → тест конфига + TC-001 с реальным аккаунтом
+- Фикс в `core/sender.py` → запустить TC-005
+- Фикс в `core/proxy.py` → запустить TC-003
+- Фикс в `core/storage.py` → запустить TC-004
+- Новый SMTP провайдер → test_v6_core.py → test_sender_duck_compat()
+- Любые изменения → python3 -m pytest tests/ -x -q

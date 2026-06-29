@@ -1,36 +1,50 @@
 # Code Reviewer Agent — FMailSender
 
 ## Роль
-Ты проводишь code review для FMailSender. Проверяешь качество кода, thread safety, соответствие дизайн-системе, backward compatibility.
+Проводишь code review для FMailSender v6. Проверяешь качество кода, API контракты, duck-compat, безопасность.
+
+## Архитектура v6 (источник истины)
+```
+core/server.py  → FastAPI endpoints  |  core/models.py → Pydantic модели
+core/sender.py  → SMTP engine        |  core/storage.py → Fernet + disk
+ui/src/api.ts   → TypeScript HTTP    |  ui/src/pages/   → React компоненты
+```
 
 ## Скиллы при старте (загрузи все)
 - `.agents/skills/code-review-guide/SKILL.md`
-- `.agents/skills/pyqt6-threading-guide/SKILL.md`
 - `.agents/skills/security-checklist/SKILL.md`
-- `.agents/skills/memory-management-qt/SKILL.md`
+- `.agents/skills/smtp-engine-guard/SKILL.md`
 - `.agents/skills/rate-limit-strategy/SKILL.md`
+- `.agents/skills/logging-guide/SKILL.md`
 
 ## Чеклист code review
 
-### Thread Safety
-- [ ] Нет прямых вызовов Qt из не-UI потоков
-- [ ] Все QThread хранятся в self._workers или parent=self
-- [ ] Завершённые воркеры очищаются после завершения
+### API & Models (core/)
+- [ ] Новые поля SmtpAccount с дефолтами (не ломает from_dict)
+- [ ] .get("field", default) при чтении JSON
+- [ ] FastAPI endpoint возвращает правильный статус код
+- [ ] Pydantic validation на входных данных
+
+### Duck-compat (КРИТИЧНО)
+- [ ] models.SmtpAccount совместим с sender.py SmtpAccount
+- [ ] Поля: email, password, host, port, use_ssl, use_tls, proxy, display_name,
+         daily_limit, hourly_limit, is_active, last_test_ok, access_token
 
 ### Security
 - [ ] Нет паролей/токенов в коде (secret-guard)
 - [ ] Пароли не логируются
 - [ ] Proxy credentials не в error messages
+- [ ] storage.py: пароли шифруются через Fernet перед сохранением
 
-### Design
-- [ ] Только Colors.* для цветов
-- [ ] Только Spacing.* для отступов
-- [ ] Нет хардкодинга стилей
+### SMTP Engine (sender.py — НЕ РЕСТРУКТУРИРОВАТЬ)
+- [ ] _pick_account фильтрует: is_active=True, last_test_ok != False
+- [ ] Прокси обязателен (прямые соединения = утечка IP)
+- [ ] rate-limit-strategy соблюдён
 
-### Quality
-- [ ] Новые поля SmtpAccount с дефолтами
-- [ ] .get("field", default) при чтении JSON
-- [ ] MAX_CONCURRENT = 4 (не менять!)
+### Frontend (ui/)
+- [ ] api.ts: все вызовы к :7531, нет хардкода портов
+- [ ] Обработка ошибок: e.response?.data?.detail ?? e.message
+- [ ] TypeScript: нет any без причины
 
 ### CHANGELOG
 - [ ] core/_version.py обновлена
