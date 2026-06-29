@@ -829,6 +829,8 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                             or getattr(account, "access_token", "")
                             or getattr(account, "oauth_token", ""))
     _is_oauth_acct = (_is_ms_domain(account.email) or _is_ms_host) and _has_oauth_token
+
+    def _make_smtp(host: str, port: int, use_ssl: bool, use_tls: bool,
                    ctx: "_ssl.SSLContext") -> "_smtplib.SMTP":
         """Создаёт SMTP-соединение (прямое или через прокси)."""
         # FIX v6.1: увеличен с 5 до 10 с.
