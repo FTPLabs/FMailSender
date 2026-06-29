@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Play, Pause, Square, RefreshCw, AlertTriangle, CheckCircle, XCircle } from 'lucide-react'
-import { api, type AppStatus } from '../api'
+import { api } from '../api'
+import { useStatus } from '../contexts/StatusContext'
 
 function Ring({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.min(value / max, 1) : 0
@@ -25,14 +26,8 @@ function Ring({ value, max }: { value: number; max: number }) {
 }
 
 export default function Sending() {
-  const [status, setStatus] = useState<AppStatus | null>(null)
-  const [busy, setBusy]     = useState(false)
-
-  useEffect(() => {
-    api.status().then(setStatus).catch(() => {})
-    const id = setInterval(() => api.status().then(setStatus).catch(() => {}), 1000)
-    return () => clearInterval(id)
-  }, [])
+  const { status, refresh } = useStatus()
+  const [busy, setBusy] = useState(false)
 
   const cp     = status?.campaign
   const state  = cp?.state ?? 'idle'
@@ -45,12 +40,15 @@ export default function Sending() {
 
   async function act(fn: () => Promise<unknown>) {
     setBusy(true)
-    try { await fn(); const s = await api.status(); setStatus(s) }
-    catch (e: unknown) {
+    try {
+      await fn()
+      await refresh()
+    } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } }; message?: string })
       alert(msg?.response?.data?.detail ?? (e as Error).message)
+    } finally {
+      setBusy(false)
     }
-    finally { setBusy(false) }
   }
 
   const elapsed = cp?.started_at
@@ -99,7 +97,7 @@ export default function Sending() {
         </div>
       )}
 
-      {/* Main control — flex-1 to fill remaining space */}
+      {/* Main control — fills remaining height */}
       <div className="card flex-1 flex flex-col items-center justify-center gap-6 py-10">
         <Ring value={cp?.sent ?? 0} max={cp?.total || recs || 1} />
 
