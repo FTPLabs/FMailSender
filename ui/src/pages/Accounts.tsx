@@ -35,6 +35,7 @@ interface Frm {
   use_ssl: boolean; use_tls: boolean; display_name: string
   daily_limit: number; hourly_limit: number
   proxy: string; imap_host: string; imap_port: number
+  refresh_token: string
 }
 
 const EMPTY: Frm = {
@@ -42,6 +43,7 @@ const EMPTY: Frm = {
   use_ssl: false, use_tls: true, display_name: '',
   daily_limit: 500, hourly_limit: 50,
   proxy: '', imap_host: '', imap_port: 993,
+  refresh_token: '',
 }
 
 export default function Accounts() {
@@ -76,7 +78,7 @@ export default function Accounts() {
   async function save() {
     setError(null)
     try {
-      const payload = { ...form, is_active: true, proxy_list: [] }
+      const payload = { ...form, is_active: true, proxy_list: [], access_token: '' }
       if (editEmail) await api.accounts.update(editEmail, payload)
       else           await api.accounts.add(payload)
       setShowForm(false); setForm(EMPTY); setEditEmail(null); load()
@@ -255,6 +257,13 @@ export default function Accounts() {
                   <label className="label">Пароль / App Password</label>
                   <input className="input" type="password" placeholder="••••••••" value={form.password}
                     onChange={e => set('password', e.target.value)} />
+                </div>
+                <div>
+                  <label className="label">Refresh Token <span className="text-xs text-gray-400">(OAuth2 — Outlook/Hotmail/JMX через Office365)</span></label>
+                  <input className="input" type="text"
+                    placeholder="Оставьте пустым если аккаунт не Microsoft/JMX"
+                    value={form.refresh_token}
+                    onChange={e => set('refresh_token', e.target.value)} />
                 </div>
                 <div>
                   <label className="label">SMTP хост</label>
