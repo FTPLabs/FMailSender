@@ -8,6 +8,7 @@ import Proxies        from './pages/Proxies'
 import Recipients     from './pages/Recipients'
 import Compose        from './pages/Compose'
 import Sending        from './pages/Sending'
+import Inbox          from './pages/Inbox'
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/recipients" element={<Recipients />} />
           <Route path="/compose"    element={<Compose />} />
           <Route path="/sending"    element={<Sending />} />
+          <Route path="/inbox"      element={<Inbox />} />
           <Route path="*"           element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Layout>
