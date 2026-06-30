@@ -1,3 +1,9 @@
+## [6.7.0] — 2026-06-30
+
+### Fixed
+- **CRITICAL — GMX SMTP validation**: `SMTPNotSupportedError` now probes a direct connection (without proxy) before classifying the error. Previously, all accounts using proxies showed "SMTP AUTH не поддерживается" even when SMTP was enabled — because the proxy was silently breaking STARTTLS negotiation, causing AUTH to disappear from the EHLO response. Now the app distinguishes: (A) proxy blocks STARTTLS → "смените прокси", (B) GMX SMTP genuinely disabled → enable in GMX settings.
+- **Standalone EXE**: replaced 7-Zip SFX (extracted to random `%TEMP%\7z*` on every run, deleted after close) with NSIS persistent launcher. On first run: silently installs to `%LOCALAPPDATA%\FMailSender\`, creates Desktop shortcut. On subsequent runs: launches immediately from installed location. No wizard, no UAC prompt, no temp files.
+
 ## [6.6.0] — 2026-06-30
 
     ### Code Review & Sync
