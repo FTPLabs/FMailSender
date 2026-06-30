@@ -188,56 +188,53 @@ jobs:
             Select-Object -First 1
 
           if (-not $nsis) {
-            $nsis = Get-ChildItem -Recurse "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis" `
-              -Filter "*.exe" -ErrorAction SilentlyContinue |
-              Sort-Object Length -Descending |
-              Select-Object -First 1
-          }
-
-          if (-not $nsis) { Write-Error "NSIS installer not found"; exit 1 }
-
-          $sz = [math]::Round($nsis.Length / 1MB, 1)
-          Write-Host "NSIS installer: $($nsis.FullName) ($sz MB)"
-          "installer_path=$($nsis.FullName)" >> $env:GITHUB_OUTPUT
-          "installer_size=$sz"                >> $env:GITHUB_OUTPUT
-
-          $appExe = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release" `
-            -Filter "*.exe" -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -notlike "fmail-core*" -and $_.Length -gt 1MB } |
-            Sort-Object Length -Descending |
-            Select-Object -First 1
-          if ($appExe) {
-            "app_exe_path=$($appExe.FullName)" >> $env:GITHUB_OUTPUT
-          }
-
       - name: "Package as portable SFX"
         id: portable
         shell: pwsh
         run: |
           $ver    = "${{ steps.tag.outputs.version }}"
           $target = "x86_64-pc-windows-msvc"
-          $mainExe = "src-tauri/target/$target/release/FMailSender.exe"
+
+          # Find main exe dynamically — Cargo bin is "fmail-sender" but productName is "FMailSender"
+          $appExePath = "${{ steps.tauri_build.outputs.app_exe_path }}"
+          if (-not $appExePath -or -not (Test-Path $appExePath)) {
+            Write-Host "app_exe_path output not set, searching release directory..."
+            $found = Get-ChildItem "src-tauri/target/$target/release" -Filter "*.exe" -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -notlike "fmail-core*" -and $_.Length -gt 1MB } |
+              Sort-Object Length -Descending |
+              Select-Object -First 1
+            if (-not $found) { Write-Error "Main app exe not found in release dir"; exit 1 }
+            $appExePath = $found.FullName
+          }
+          Write-Host "App exe: $appExePath"
+
           $coreExe = "src-tauri/binaries/fmail-core-$target.exe"
-          if (-not (Test-Path $mainExe)) { Write-Error "FMailSender.exe missing"; exit 1 }
-          if (-not (Test-Path $coreExe)) { Write-Error "fmail-core missing"; exit 1 }
-          $mainSz = [math]::Round((Get-Item $mainExe).Length / 1MB, 1)
+          if (-not (Test-Path $coreExe)) { Write-Error "fmail-core sidecar missing"; exit 1 }
+
+          $mainSz = [math]::Round((Get-Item $appExePath).Length / 1MB, 1)
           $coreSz = [math]::Round((Get-Item $coreExe).Length / 1MB, 1)
           Write-Host "App: $mainSz MB | Core: $coreSz MB"
-          if ($mainSz -lt 1) { Write-Error "App too small"; exit 1 }
+          if ($mainSz -lt 1) { Write-Error "App exe too small"; exit 1 }
           if ($coreSz -lt 5) { Write-Error "Core too small"; exit 1 }
+
           New-Item -ItemType Directory -Force -Path "staging" | Out-Null
-          Copy-Item $mainExe "staging/FMailSender.exe"
-          Copy-Item $coreExe "staging/fmail-core-$target.exe"
+          # Stage as FMailSender.exe so SFX RunProgram and Tauri self-path resolve correctly
+          Copy-Item $appExePath   "staging/FMailSender.exe"
+          Copy-Item $coreExe      "staging/fmail-core-$target.exe"
+
           $7z = "C:\Program Files\7-Zip\7z.exe"
           & $7z a -t7z -mx=5 "app-files.7z" "staging/*" 2>&1 | Write-Host
-          $cfg  = ";!@Install@!UTF-8!`nTitle=`"FMailSender`"`nRunProgram=`"FMailSender.exe`"`n;!@InstallEnd@!"
+
+          $cfg = ";!@Install@!UTF-8!`nTitle=`"FMailSender`"`nRunProgram=`"FMailSender.exe`"`n;!@InstallEnd@!"
           [System.IO.File]::WriteAllText("sfx.cfg", $cfg, [System.Text.Encoding]::UTF8)
+
           $sfx     = "C:\Program Files\7-Zip\7z.sfx"
           $outName = "FMailSender-v$ver.exe"
           cmd /c "copy /b `"$sfx`" + `"sfx.cfg`" + `"app-files.7z`" `"$outName`" /y"
           if (-not (Test-Path $outName)) { Write-Error "SFX creation failed"; exit 1 }
+
           $sz = [math]::Round((Get-Item $outName).Length / 1MB, 1)
-          if ($sz -lt 10) { Write-Error "SFX too small ($sz MB)"; exit 1 }
+          if ($sz -lt 10) { Write-Error "SFX too small ($sz MB) — likely incomplete"; exit 1 }
           Write-Host "Portable EXE: $outName ($sz MB)"
           "name=$outName" >> $env:GITHUB_OUTPUT
           "size=$sz"      >> $env:GITHUB_OUTPUT
