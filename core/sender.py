@@ -941,6 +941,24 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                 return False, ("Microsoft OAuth2: токен истёк или недействителен. Обновите refresh_token.")
             if "gmail" in _h or "googlemail" in _h:
                 return False, ("Gmail: Basic AUTH отключён. App Password: Google Аккаунт → Безопасность → Пароли приложений.")
+            # FIX v6.4: GMX / web.de — отдельная ветка, не Outlook и не Gmail
+            _d_lower = account.email.split("@")[-1].lower() if "@" in account.email else ""
+            _is_gmx = (
+                any(x in _h for x in ("mail.gmx", "smtp.gmx"))
+                or _d_lower in (
+                    "gmx.com", "gmx.net", "gmx.de", "gmx.at", "gmx.ch",
+                    "gmx.co.uk", "gmx.fr", "gmx.es", "gmx.us",
+                )
+            )
+            _is_webde = "smtp.web.de" in _h or _d_lower == "web.de"
+            if _is_gmx or _is_webde:
+                _prov = "GMX" if _is_gmx else "web.de"
+                return False, (
+                    f"{_prov}: SMTP AUTH не поддерживается — SMTP-доступ ОТКЛЮЧЁН в настройках ящика.\n"
+                    "Решение: войдите на gmx.com → Email (⚙ Settings) → POP3 & IMAP →\n"
+                    "  включите «Send emails via Thunderbird, Outlook or another email client».\n"
+                    "Это НЕ ошибка пароля — пароль верный, SMTP отключён по умолчанию в GMX."
+                )
             return False, ("SMTP AUTH не поддерживается. Для Outlook/Hotmail — refresh_token. Для Gmail — App Password.")
         except _smtplib.SMTPException as ex:
             msg = str(ex)

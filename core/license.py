@@ -38,13 +38,74 @@ LICENSE_FILE = DATA_DIR / "license.json"
 
 
 def _get_hardware_id() -> str:
-    """Stable hardware ID: SHA256 of MAC address + OS info."""
+    """
+    Stable hardware ID (HWID) — survives reboots and minor config changes.
+    Источники (по убыванию стабильности):
+      1. Windows MachineGuid (HKLM\\SOFTWARE\\Microsoft\\Cryptography) — сохраняется
+         между перезагрузками, меняется только при переустановке Windows.
+      2. UUID материнской платы (WMIC csproduct) — меняется только при замене платы.
+      3. CPU ProcessorId (WMIC cpu) — меняется только при замене процессора.
+      4. Fallback: MAC + OS-info (для не-Windows / если WMIC недоступен).
+    Итоговый HWID меняется только при физической замене компонентов.
+    """
+    import subprocess as _sp
+    _CF = 0x08000000  # CREATE_NO_WINDOW — скрыть консоль wmic на Windows
+    components: list = []
+
+    # 1. Windows MachineGuid
     try:
-        node = uuid.getnode()
-        raw = f"{node}:{platform.machine()}:{platform.node() or 'x'}"
-        return hashlib.sha256(raw.encode()).hexdigest()[:32]
+        import winreg as _wr
+        _key = _wr.OpenKey(_wr.HKEY_LOCAL_MACHINE,
+                           r"SOFTWARE\Microsoft\Cryptography")
+        _guid, _ = _wr.QueryValueEx(_key, "MachineGuid")
+        _wr.CloseKey(_key)
+        if _guid:
+            components.append(f"mg:{_guid}")
     except Exception:
-        return hashlib.sha256(b"fallback").hexdigest()[:32]
+        pass
+
+    # 2. Motherboard UUID
+    try:
+        _r = _sp.run(
+            ["wmic", "csproduct", "get", "UUID", "/value"],
+            capture_output=True, text=True, timeout=5, creationflags=_CF,
+        )
+        for _line in _r.stdout.splitlines():
+            if "UUID=" in _line:
+                _val = _line.split("=", 1)[-1].strip()
+                if _val and "FFFFFFFF" not in _val.upper() and len(_val) > 8:
+                    components.append(f"mb:{_val}")
+                break
+    except Exception:
+        pass
+
+    # 3. CPU ProcessorId
+    try:
+        _r = _sp.run(
+            ["wmic", "cpu", "get", "ProcessorId", "/value"],
+            capture_output=True, text=True, timeout=5, creationflags=_CF,
+        )
+        for _line in _r.stdout.splitlines():
+            if "ProcessorId=" in _line:
+                _val = _line.split("=", 1)[-1].strip()
+                if _val:
+                    components.append(f"cpu:{_val}")
+                break
+    except Exception:
+        pass
+
+    # 4. Fallback (non-Windows / WMIC unavailable)
+    if not components:
+        try:
+            _node = uuid.getnode()
+            components.append(
+                f"mac:{_node}:{platform.machine()}:{platform.node() or 'x'}"
+            )
+        except Exception:
+            components.append("fallback")
+
+    _raw = "|".join(components)
+    return hashlib.sha256(_raw.encode()).hexdigest()[:32]
 
 
 def _load_cached() -> Optional[dict]:

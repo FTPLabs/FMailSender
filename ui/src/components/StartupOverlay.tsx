@@ -106,16 +106,21 @@ export default function StartupOverlay() {
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [visible, online])
 
-  // When backend comes online: fill to 100% then fade out
+  // When backend comes online AND license is confirmed valid — fill to 100% then fade out.
+  // FIX v6.4: do NOT start fade while licenseOk===null (fetch in-flight) or false (show
+  // activation UI). Previously the 350ms timer fired before /api/license responded, so the
+  // license screen flashed for <350ms and disappeared — user never got to enter the key.
   useEffect(() => {
     if (!online || !visible) return
+    if (licenseOk === null) return   // /api/license response not yet received
+    if (licenseOk === false) return  // show license activation UI, never fade out
     setProgress(100)
     const t = setTimeout(() => {
       setFadeOut(true)
       setTimeout(() => setVisible(false), 500)
     }, 350)
     return () => clearTimeout(t)
-  }, [online, visible])
+  }, [online, visible, licenseOk])
 
   if (!visible) return null
 
