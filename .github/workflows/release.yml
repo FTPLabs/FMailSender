@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 6.3.0)"
+        description: "Version (e.g. 6.4.0)"
         required: true
-        default: "6.3.0"
+        default: "6.4.0"
 
 env:
   PYTHON_VERSION: "3.11"
@@ -233,73 +233,17 @@ jobs:
           }
           Write-Host "VALIDATION PASSED: PE ok, $([math]::Round($sz/1MB,1)) MB"
 
-      - name: "Install NSIS (makensis for portable build)"
-        shell: pwsh
-        run: |
-          choco install nsis --no-progress -y | Out-Null
-          $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (Test-Path $nsis) { Write-Host "NSIS installed: $nsis" }
-          else { Write-Error "makensis not found after install"; exit 1 }
-
-      - name: "Build portable single EXE"
+      - name: "Rename to release EXE"
         id: portable
         shell: pwsh
         run: |
-          $ver = "${{ steps.tag.outputs.version }}"
-
-          # Prepare dist_portable for makensis (matches portable.nsi File directives)
-          New-Item -ItemType Directory -Force -Path "dist_portable" | Out-Null
-
-          # 1. Copy Tauri app exe (the real app, not the NSIS installer)
-          $appExe = "${{ steps.tauri_build.outputs.app_exe_path }}"
-          if ($appExe -and (Test-Path $appExe)) {
-            Copy-Item $appExe "dist_portable\FMailSender.exe" -Force
-            Write-Host "App exe: $appExe"
-          } else {
-            # Fallback: find the main exe in the Tauri release dir
-            $found = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release" `
-              -Filter "*.exe" -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -notlike "fmail-core*" -and $_.Length -gt 500KB } |
-              Sort-Object Length -Descending |
-              Select-Object -First 1
-            if ($found) {
-              Copy-Item $found.FullName "dist_portable\FMailSender.exe" -Force
-              Write-Host "Fallback app exe: $($found.FullName)"
-            } else {
-              Write-Error "FMailSender.exe not found in Tauri release dir"; exit 1
-            }
-          }
-
-          # 2. Copy Python core sidecar
-          Copy-Item "src-tauri\binaries\fmail-core-x86_64-pc-windows-msvc.exe" `
-                    "dist_portable\fmail-core.exe" -Force
-          Write-Host "Core sidecar copied"
-
-          # 3. Verify both files are present and non-trivial
-          $appSz  = [math]::Round((Get-Item "dist_portable\FMailSender.exe").Length  / 1MB, 1)
-          $coreSz = [math]::Round((Get-Item "dist_portable\fmail-core.exe").Length   / 1MB, 1)
-          Write-Host "dist_portable: FMailSender.exe=${appSz}MB  fmail-core.exe=${coreSz}MB"
-          if ($appSz -lt 1)  { Write-Error "FMailSender.exe suspiciously small";  exit 1 }
-          if ($coreSz -lt 5) { Write-Error "fmail-core.exe suspiciously small";   exit 1 }
-
-          # 4. Run makensis — produces FMailSender.exe (portable.nsi OutFile)
-          & "C:\Program Files (x86)\NSIS\makensis.exe" portable.nsi
-          if ($LASTEXITCODE -ne 0) { Write-Error "makensis failed (exit $LASTEXITCODE)"; exit 1 }
-
-          # portable.nsi outputs "FMailSender.exe" (updated OutFile)
-          $name = "FMailSender-v${ver}.exe"
-          if     (Test-Path "FMailSender.exe") { Rename-Item "FMailSender.exe" $name -Force }
-          elseif (Test-Path "MailSender.exe")  { Rename-Item "MailSender.exe"  $name -Force }
-          if (-not (Test-Path $name)) { Write-Error "Portable EXE missing after makensis"; exit 1 }
-
-          $sz  = [math]::Round((Get-Item $name).Length / 1MB, 1)
-          $mz  = [System.IO.File]::ReadAllBytes($name)[0..1]
-          if ($mz[0] -ne 0x4D -or $mz[1] -ne 0x5A) {
-            Write-Error "Portable EXE has no MZ header — invalid PE"; exit 1
-          }
-          Write-Host "Portable single EXE: $name ($sz MB) — MZ OK"
-          "name=$name" >> $env:GITHUB_OUTPUT
+          $ver  = "${{ steps.tag.outputs.version }}"
+          $dest = "FMailSender-v${ver}.exe"
+          Copy-Item "${{ steps.tauri_build.outputs.installer_path }}" $dest -Force
+          $sz = [math]::Round((Get-Item $dest).Length / 1MB, 1)
+          "name=$dest" >> $env:GITHUB_OUTPUT
           "size=$sz"   >> $env:GITHUB_OUTPUT
+          Write-Host "Release EXE: $dest ($sz MB)"
 
       - name: "GitHub Release"
         uses: softprops/action-gh-release@v2
@@ -313,20 +257,16 @@ jobs:
           body: |
             ## ${{ steps.tag.outputs.name }}
 
-            ### ⬇️ Скачать
+            | File | Size | Description |
+            |------|------|-------------|
+            | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} MB | **Single EXE installer - download and run** |
 
-            | Файл | Размер | Описание |
-            |------|--------|----------|
-            | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} MB | **Единый portable EXE — скачать и запустить, установка не нужна** |
+            ### How to install
+            1. Download `${{ steps.portable.outputs.name }}`
+            2. Run it and follow the installer steps
+            3. Launch **FMailSender** from the desktop shortcut
 
-            ### Запуск
-            1. Скачайте `${{ steps.portable.outputs.name }}`
-            2. Запустите — **установка не требуется**
-            3. Приложение автоматически запустится (распаковка в TEMP происходит мгновенно, незаметно)
-            4. При закрытии — файлы из TEMP удаляются автоматически
-
-            **Требования:** Windows 10 x64 (build 1803+) или Windows 11 + WebView2 Runtime
-            > WebView2 входит в состав Windows 11 и обновлений Windows 10 начиная с 2021 года.
+            **Requirements:** Windows 10 x64 (build 1803+) or Windows 11 + WebView2 Runtime
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
