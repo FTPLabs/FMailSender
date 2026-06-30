@@ -272,7 +272,7 @@ jobs:
           "name=$outName" >> $env:GITHUB_OUTPUT
           "size=$sz"      >> $env:GITHUB_OUTPUT
 
-            - name: "GitHub Release"
+      - name: "GitHub Release"
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
