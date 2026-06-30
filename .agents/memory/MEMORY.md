@@ -24,6 +24,6 @@
 - main.py: FMAIL_HOST env var (дефолт 127.0.0.1); безопасно — не-loopback адреса отклоняются
 
 ## Надёжный kill процесса (v6.0.6)
-- kill_existing_core() в main.rs: сначала Get-NetTCPConnection по порту 7531, затем taskkill по имени
+- kill_existing_core() в main.rs: сначала Get-NetTCPConnection по порту 7531, затем taskkill по имени; 300мс sleep после kill
 - 1000мс sleep после kill даёт Windows освободить TCP socket и file handles
 - Решает upgrade-сценарий: старый fmail-core.exe держит порт, Tauri видел OLD сервер
