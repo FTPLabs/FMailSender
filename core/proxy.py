@@ -46,9 +46,12 @@ def parse_proxy(raw: str) -> Optional[str]:
             pass
     if "@" in raw:
         # user:pass@host:port without scheme
-        p = urllib.parse.urlparse("socks5://" + raw)
-        port = p.port or 1080
-        scheme = "http" if port in _HTTP_PORTS else "socks5"
+        # BUG FIX v6.3.1: default scheme is "http" (not "socks5").
+        # Commercial reseller/datacenter proxies with credentials always use
+        # HTTP CONNECT; only explicit socks5:// prefix should trigger SOCKS5.
+        p = urllib.parse.urlparse("http://" + raw)
+        port = p.port or 3128
+        scheme = "http"
         return f"{scheme}://{p.username or ''}:{p.password or ''}@{p.hostname}:{port}"
     return None
 
