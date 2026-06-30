@@ -817,7 +817,11 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
     _proxy_auto = False  # True = схема не была задана явно → авто-определение
     if _proxy_url:
         if "://" not in _proxy_url:
-            _proxy_url = "socks5://" + _proxy_url  # для urlparse; авто-детект ниже
+            # FIX v6.8: mobile/residential proxies с credentials (@) всегда HTTP CONNECT
+            # socks5:// только для bare host:port без credentials
+            _default_scheme = "http" if "@" in _proxy_url else "socks5"
+            _proxy_url = _default_scheme + "://" + _proxy_url
+            _proxy_auto = _default_scheme == "socks5"  # авто-детект только для socks
             _proxy_auto = True
         _proxy_parsed = _up.urlparse(_proxy_url)
 
