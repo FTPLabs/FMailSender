@@ -953,11 +953,52 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
             _is_webde = "smtp.web.de" in _h or _d_lower == "web.de"
             if _is_gmx or _is_webde:
                 _prov = "GMX" if _is_gmx else "web.de"
+                # FIX v6.7: probe direct connection to distinguish
+                #   (A) proxy blocks STARTTLS  vs  (B) GMX SMTP disabled in settings
+                # Both raise SMTPNotSupportedError, but the root cause is different.
+                # Our tests (June 2026) showed GMX accounts work fine without proxy —
+                # the proxy was silently breaking STARTTLS, causing AUTH to vanish from EHLO.
+                _direct_tried_ports = [
+                    (587, False, True),   # STARTTLS (standard GMX)
+                    (465, True,  False),  # SSL
+                ]
+                for _dp, _ds, _dt in _direct_tried_ports:
+                    try:
+                        _ctx2 = _ssl.create_default_context()
+                        if _ds:
+                            _s2 = _smtplib.SMTP_SSL(host, _dp, timeout=10, context=_ctx2)
+                        else:
+                            _s2 = _smtplib.SMTP(host, _dp, timeout=10)
+                            _s2.ehlo()
+                            _s2.starttls(context=_ctx2)
+                            _s2.ehlo()
+                        _s2.login(account.email, account.password)
+                        _s2.quit()
+                        # Direct succeeds → proxy is the culprit
+                        _via = f"{_proxy_parsed.scheme}://{_proxy_parsed.hostname}:{_proxy_parsed.port or port}" if _proxy_parsed else "без прокси"
+                        account.port    = _dp
+                        account.use_ssl = _ds
+                        account.use_tls = _dt
+                        return False, (
+                            f"{_prov}: прокси ({_via}) блокирует SMTP STARTTLS — "
+                            f"без прокси аккаунт работает нормально (порт {_dp}).\n"
+                            "Прокси не поддерживает STARTTLS туннелирование (порт 587).\n"
+                            "Решение: смените прокси (нужен SOCKS5 с TCP-поддержкой порта 587)."
+                        )
+                    except _smtplib.SMTPAuthenticationError as _e2:
+                        _raw2 = _e2.smtp_error
+                        _d2 = _raw2.decode("utf-8", "replace") if isinstance(_raw2, bytes) else str(_raw2)
+                        return False, f"Неверный логин/пароль {_prov}: {_d2[:120]}"
+                    except _smtplib.SMTPNotSupportedError:
+                        continue  # try next port
+                    except Exception:
+                        continue  # connection error on this port, try next
+                # All direct attempts also got SMTPNotSupportedError → GMX SMTP disabled
                 return False, (
                     f"{_prov}: SMTP AUTH не поддерживается — SMTP-доступ ОТКЛЮЧЁН в настройках ящика.\n"
                     "Решение: войдите на gmx.com → Email (⚙ Settings) → POP3 & IMAP →\n"
                     "  включите «Send emails via Thunderbird, Outlook or another email client».\n"
-                    "Это НЕ ошибка пароля — пароль верный, SMTP отключён по умолчанию в GMX."
+                    "Пароль верный. SMTP отключён по умолчанию в GMX — включите вручную для каждого аккаунта."
                 )
             return False, ("SMTP AUTH не поддерживается. Для Outlook/Hotmail — refresh_token. Для Gmail — App Password.")
         except _smtplib.SMTPException as ex:
