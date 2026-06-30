@@ -1,10 +1,14 @@
 """
-  FMailSender — License validation module v1.1.0
+  FMailSender — License validation module v1.2.0
   Validates license against fmail.shop license server.
   Caches valid license locally for offline startup.
 
   License key format: FMSND-XXXXXX-XXXXXX-XXXXXX-XXXXXX
   (Legacy format FM-XXXXXXXX-XXXXXXXX-XXXXXXXX also accepted)
+
+  Remote API:
+    POST https://fmail.shop/v1/verify   — validate existing key + hwid
+    POST https://fmail.shop/v1/activate — bind key to hwid
   """
   from __future__ import annotations
 
@@ -21,7 +25,13 @@
 
   logger = logging.getLogger("fmailsender.license")
 
-  LICENSE_SERVER_URL = "https://fmail.shop/api/license"
+  LICENSE_SERVER_BASE = "https://fmail.shop"
+  LICENSE_VALIDATE_URL = LICENSE_SERVER_BASE + "/v1/verify"
+  LICENSE_ACTIVATE_URL = LICENSE_SERVER_BASE + "/v1/activate"
+
+  # Backward-compat alias used by code that still reads LICENSE_SERVER_URL
+  LICENSE_SERVER_URL = LICENSE_SERVER_BASE
+
   CACHE_TTL_SECS = 24 * 3600   # Re-validate every 24 hours
   OFFLINE_GRACE_DAYS = 7        # Allow offline use for up to 7 days
 
@@ -135,15 +145,18 @@
 
 
   def _validate_online(key: str, hwid: str, timeout: float = 10.0) -> dict:
+      """Call /v1/verify on fmail.shop to validate a key."""
       try:
           import requests
           resp = requests.post(
-              LICENSE_SERVER_URL + "/validate",
+              LICENSE_VALIDATE_URL,
               json={"key": key, "hwid": hwid},
               timeout=timeout,
           )
           if resp.status_code == 200:
-              return resp.json()
+              data = resp.json()
+              # Normalise: server returns {"valid":bool, "plan":..., "expires_at":...}
+              return data
           return {"valid": False, "error": f"HTTP {resp.status_code}"}
       except ImportError:
           return {"valid": False, "error": "requests not installed", "offline": True}
@@ -214,7 +227,7 @@
 
 
   def activate_license_key(key: str) -> dict:
-      """Activate a license key on this machine."""
+      """Activate a license key on this machine via /v1/activate."""
       if not key or not _is_valid_key_format(key):
           raise ValueError(
               "Неверный формат ключа. Ожидается: FMSND-XXXXXX-XXXXXX-XXXXXX-XXXXXX"
@@ -226,15 +239,19 @@
       try:
           import requests
           resp = requests.post(
-              LICENSE_SERVER_URL + "/activate",
+              LICENSE_ACTIVATE_URL,
               json={"key": key, "hwid": hwid},
               timeout=15.0,
           )
           result = resp.json()
-          if not result.get("valid") and resp.status_code != 200:
-              raise RuntimeError(result.get("error") or result.get("message") or "Ключ недействителен")
+          # Server returns HTTP 200 with {"valid":true,...} on success
+          # or HTTP 4xx with {"detail":"..."} on failure
+          if resp.status_code != 200:
+              detail = result.get("detail") or result.get("error") or result.get("message") or "Ключ недействителен"
+              raise RuntimeError(detail)
+          if not result.get("valid", True) is False:
+              pass  # accepted — valid field may not be present in activate response
       except ImportError:
-          # requests unavailable — accept key offline
           result = {"valid": True, "plan": "offline", "message": "Ключ сохранён (оффлайн)"}
       except RuntimeError:
           raise
@@ -244,7 +261,7 @@
       cache_data = {
           "key": key,
           "valid": True,
-          "plan": result.get("plan", "unknown"),
+          "plan": result.get("plan", result.get("license_plan", "unknown")),
           "expires_at": result.get("expires_at"),
           "hwid": hwid,
           "message": result.get("message", "Активировано"),
