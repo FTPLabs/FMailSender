@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Users, Mail, FileText, Send, Shield, Zap } from 'lucide-react'
+import { LayoutDashboard, Users, Mail, FileText, Send, Shield, Zap, Inbox as InboxIcon } from 'lucide-react'
 import { useStatus } from '../contexts/StatusContext'
+import { getBaseUrl } from '../api'
 
 const NAV = [
   { to: '/dashboard',  icon: LayoutDashboard, label: 'Дашборд' },
@@ -10,6 +11,7 @@ const NAV = [
   { to: '/recipients', icon: Mail,            label: 'Получатели' },
   { to: '/compose',    icon: FileText,        label: 'Письмо' },
   { to: '/sending',    icon: Send,            label: 'Рассылка' },
+  { to: '/inbox',      icon: InboxIcon,       label: 'Входящие' },
 ]
 
 const STATE_LABEL: Record<string, string> = {
@@ -27,7 +29,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [version, setVersion] = useState('')
 
   useEffect(() => {
-    fetch('http://127.0.0.1:7531/api/health')
+    fetch(`${getBaseUrl()}/api/health`)
       .then(r => r.json())
       .then((d: { version?: string }) => { if (d?.version) setVersion(`v${d.version}`) })
       .catch(() => {})
@@ -107,3 +109,4 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     </div>
   )
 }
+
