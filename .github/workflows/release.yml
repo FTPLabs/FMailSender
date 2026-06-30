@@ -204,46 +204,37 @@ jobs:
             "app_exe_path=$($appExe.FullName)" >> $env:GITHUB_OUTPUT
           }
 
-      - name: "MANDATORY - Validate installer"
-        shell: pwsh
-        run: |
-          $installer = "${{ steps.tauri_build.outputs.installer_path }}"
-          if (-not (Test-Path $installer)) {
-            Write-Error "VALIDATION FAILED: installer not found at $installer"
-            exit 1
-          }
-          $sz = (Get-Item $installer).Length
-          if ($sz -lt 5MB) {
-            Write-Error "VALIDATION FAILED: installer too small ($([math]::Round($sz/1MB,2)) MB)"
-            exit 1
-          }
-          $bytes = [System.IO.File]::ReadAllBytes($installer)
-          if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
-            Write-Error "VALIDATION FAILED: not a valid Windows PE (no MZ header)"
-            exit 1
-          }
-          $sidecar = "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
-          if (-not (Test-Path $sidecar)) {
-            Write-Error "VALIDATION FAILED: sidecar missing"
-            exit 1
-          }
-          if ((Get-Item $sidecar).Length -lt 5MB) {
-            Write-Error "VALIDATION FAILED: sidecar too small"
-            exit 1
-          }
-          Write-Host "VALIDATION PASSED: PE ok, $([math]::Round($sz/1MB,1)) MB"
-
-      - name: "Rename to release EXE"
+      - name: "Package as portable SFX"
         id: portable
         shell: pwsh
         run: |
-          $ver  = "${{ steps.tag.outputs.version }}"
-          $dest = "FMailSender-v${ver}.exe"
-          Copy-Item "${{ steps.tauri_build.outputs.installer_path }}" $dest -Force
-          $sz = [math]::Round((Get-Item $dest).Length / 1MB, 1)
-          "name=$dest" >> $env:GITHUB_OUTPUT
-          "size=$sz"   >> $env:GITHUB_OUTPUT
-          Write-Host "Release EXE: $dest ($sz MB)"
+          $ver    = "${{ steps.tag.outputs.version }}"
+          $target = "x86_64-pc-windows-msvc"
+          $mainExe = "src-tauri/target/$target/release/FMailSender.exe"
+          $coreExe = "src-tauri/binaries/fmail-core-$target.exe"
+          if (-not (Test-Path $mainExe)) { Write-Error "FMailSender.exe missing"; exit 1 }
+          if (-not (Test-Path $coreExe)) { Write-Error "fmail-core missing"; exit 1 }
+          $mainSz = [math]::Round((Get-Item $mainExe).Length / 1MB, 1)
+          $coreSz = [math]::Round((Get-Item $coreExe).Length / 1MB, 1)
+          Write-Host "App: $mainSz MB | Core: $coreSz MB"
+          if ($mainSz -lt 1) { Write-Error "App too small"; exit 1 }
+          if ($coreSz -lt 5) { Write-Error "Core too small"; exit 1 }
+          New-Item -ItemType Directory -Force -Path "staging" | Out-Null
+          Copy-Item $mainExe "staging/FMailSender.exe"
+          Copy-Item $coreExe "staging/fmail-core-$target.exe"
+          $7z = "C:\Program Files\7-Zip\7z.exe"
+          & $7z a -t7z -mx=5 "app-files.7z" "staging/*" 2>&1 | Write-Host
+          $cfg  = ";!@Install@!UTF-8!`nTitle=`"FMailSender`"`nRunProgram=`"FMailSender.exe`"`n;!@InstallEnd@!"
+          [System.IO.File]::WriteAllText("sfx.cfg", $cfg, [System.Text.Encoding]::UTF8)
+          $sfx     = "C:\Program Files\7-Zip\7z.sfx"
+          $outName = "FMailSender-v$ver.exe"
+          cmd /c "copy /b `"$sfx`" + `"sfx.cfg`" + `"app-files.7z`" `"$outName`" /y"
+          if (-not (Test-Path $outName)) { Write-Error "SFX creation failed"; exit 1 }
+          $sz = [math]::Round((Get-Item $outName).Length / 1MB, 1)
+          if ($sz -lt 10) { Write-Error "SFX too small ($sz MB)"; exit 1 }
+          Write-Host "Portable EXE: $outName ($sz MB)"
+          "name=$outName" >> $env:GITHUB_OUTPUT
+          "size=$sz"      >> $env:GITHUB_OUTPUT
 
       - name: "GitHub Release"
         uses: softprops/action-gh-release@v2
