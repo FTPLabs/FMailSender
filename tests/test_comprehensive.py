@@ -827,7 +827,7 @@ class TestDkimSigner:
         dkim_mod._CONFIGS_PATH = tmp_path / "dkim_configs.json"
         try:
             configs = [
-                self.DkimConfig(selector="mail", domain="example.com", private_key_pem="-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----"),
+                self.DkimConfig(selector="mail", domain="example.com", private_key_pem="MOCK_RSA_PRIVATE_KEY_FOR_TESTING_ONLY"),
                 self.DkimConfig(selector="mail2", domain="other.com", private_key_pem="pem2", enabled=False),
             ]
             self.save(configs)
