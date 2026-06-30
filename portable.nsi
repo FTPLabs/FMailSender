@@ -1,27 +1,41 @@
-; FMailSender Portable Launcher
-; Usage: makensis portable.nsi
-; Output: FMailSender.exe — единый portable EXE, установка не нужна.
-;
-; Поведение:
-;   1. Мгновенно распаковывает FMailSender.exe + fmail-core.exe в %TEMP%\FMailSender
-;   2. Запускает FMailSender.exe и ждёт закрытия
-;   3. После закрытия — автоматически удаляет временные файлы из TEMP
-;
-; Файлы для dist_portable\ готовит CI (release.yml шаг "Build portable single EXE").
+; FMailSender Portable Launcher v3 — Persistent Install
+  ; Behaviour:
+  ;   1. Extracts FMailSender.exe + fmail-core.exe to %LOCALAPPDATA%\FMailSender\
+  ;      (persistent — files stay between runs, updated on each new version run)
+  ;   2. Creates a Desktop shortcut pointing to the installed EXE
+  ;   3. Launches FMailSender.exe immediately (Exec = non-blocking, launcher exits)
+  ;
+  ; No installer wizard. No UAC prompt. No TEMP cleanup.
+  ; User experience: download → double-click → app opens. Done.
+  ;
+  ; CI build (from repo root, files staged in dist_portable\):
+  ;   makensis /V2 /DOUTFILE=FMailSender-v6.7.0.exe /DTARGET=x86_64-pc-windows-msvc portable.nsi
 
-Unicode true
-SetCompressor /SOLID lzma
-OutFile "FMailSender.exe"
-InstallDir "$TEMP\FMailSender"
-RequestExecutionLevel user
-SilentInstall silent
+  Unicode true
+  SetCompressor /SOLID lzma
+  Name "FMailSender"
+  InstallDir "$LOCALAPPDATA\FMailSender"
+  RequestExecutionLevel user
+  SilentInstall silent
 
-Section
-  SetOutPath "$INSTDIR"
-  File "dist_portable\FMailSender.exe"
-  File "dist_portable\fmail-core.exe"
-  ExecWait '"$INSTDIR\FMailSender.exe"'
-  Delete "$INSTDIR\FMailSender.exe"
-  Delete "$INSTDIR\fmail-core.exe"
-  RMDir "$INSTDIR"
-SectionEnd
+  !ifndef OUTFILE
+    !define OUTFILE "FMailSender.exe"
+  !endif
+  !ifndef TARGET
+    !define TARGET "x86_64-pc-windows-msvc"
+  !endif
+
+  OutFile "${OUTFILE}"
+
+  Section
+    SetOutPath "$INSTDIR"
+    File "dist_portable\FMailSender.exe"
+    File "dist_portable\fmail-core-${TARGET}.exe"
+
+    ; Desktop shortcut — user can double-click this for future launches
+    CreateShortcut "$DESKTOP\FMailSender.lnk" "$INSTDIR\FMailSender.exe" "" "$INSTDIR\FMailSender.exe" 0
+
+    ; Launch immediately — Exec is non-blocking, launcher exits after starting app
+    Exec '"$INSTDIR\FMailSender.exe"'
+  SectionEnd
+  
