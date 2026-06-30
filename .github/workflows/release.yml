@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 6.3.0)"
+        description: "Version (e.g. 6.4.0)"
         required: true
-        default: "6.3.0"
+        default: "6.4.0"
 
 env:
   PYTHON_VERSION: "3.11"
@@ -233,38 +233,17 @@ jobs:
           }
           Write-Host "VALIDATION PASSED: PE ok, $([math]::Round($sz/1MB,1)) MB"
 
-      - name: "Package portable ZIP"
+      - name: "Rename to release EXE"
         id: portable
         shell: pwsh
         run: |
           $ver  = "${{ steps.tag.outputs.version }}"
-          $name = "FMailSender-v${ver}-portable.zip"
-
-          New-Item -ItemType Directory -Force -Path "portable_pkg" | Out-Null
-
-          $appExe = "${{ steps.tauri_build.outputs.app_exe_path }}"
-          if ($appExe -and (Test-Path $appExe)) {
-            Copy-Item $appExe "portable_pkg\FMailSender.exe"
-          }
-          Copy-Item "src-tauri\binaries\fmail-core-x86_64-pc-windows-msvc.exe" "portable_pkg\" -ErrorAction SilentlyContinue
-
-          Compress-Archive -Path "portable_pkg\*" -DestinationPath $name -Force
-          $sz = [math]::Round((Get-Item $name).Length / 1MB, 1)
-          Write-Host "Portable ZIP: $name ($sz MB)"
-          "name=$name" >> $env:GITHUB_OUTPUT
-          "size=$sz"   >> $env:GITHUB_OUTPUT
-
-      - name: "Rename NSIS installer"
-        id: rename
-        shell: pwsh
-        run: |
-          $ver  = "${{ steps.tag.outputs.version }}"
-          $dest = "FMailSender-v${ver}-setup.exe"
+          $dest = "FMailSender-v${ver}.exe"
           Copy-Item "${{ steps.tauri_build.outputs.installer_path }}" $dest -Force
           $sz = [math]::Round((Get-Item $dest).Length / 1MB, 1)
           "name=$dest" >> $env:GITHUB_OUTPUT
           "size=$sz"   >> $env:GITHUB_OUTPUT
-          Write-Host "Installer renamed to $dest ($sz MB)"
+          Write-Host "Release EXE: $dest ($sz MB)"
 
       - name: "GitHub Release"
         uses: softprops/action-gh-release@v2
@@ -274,20 +253,18 @@ jobs:
           prerelease: false
           generate_release_notes: false
           files: |
-            ${{ steps.rename.outputs.name }}
             ${{ steps.portable.outputs.name }}
           body: |
             ## ${{ steps.tag.outputs.name }}
 
             | File | Size | Description |
             |------|------|-------------|
-            | `${{ steps.rename.outputs.name }}` | ${{ steps.rename.outputs.size }} MB | **Recommended — single installer exe** |
-            | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} MB | Portable ZIP (extract + run) |
+            | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} MB | **Single EXE installer - download and run** |
 
-            ### How to install (recommended)
-            1. Download `${{ steps.rename.outputs.name }}`
-            2. Run the installer
-            3. Launch **FMailSender** from desktop/start menu
+            ### How to install
+            1. Download `${{ steps.portable.outputs.name }}`
+            2. Run it and follow the installer steps
+            3. Launch **FMailSender** from the desktop shortcut
 
             **Requirements:** Windows 10 x64 (build 1803+) or Windows 11 + WebView2 Runtime
         env:

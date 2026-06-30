@@ -1,4 +1,18 @@
-## [6.3.1] — 2026-06-30
+## [6.4.0] — 2026-06-30
+
+  ### Bug Fixes
+
+  - **core/sender.py** — GMX/web.de: правильное сообщение «включите SMTP в настройках GMX» вместо инструкции для Outlook/Gmail  
+  - **core/license.py** — Стабильный HWID: Windows MachineGuid → WMIC motherboard UUID → WMIC CPU ID → MAC fallback (меняется только при замене железа)  
+  - **ui/src/components/StartupOverlay.tsx** — Race condition: окно активации лицензии больше не мигает и не исчезает до ответа /api/license
+
+  ### Changes
+
+  - GitHub Release теперь содержит единственный файл: `FMailSender-v6.4.0.exe` (без ZIP, без -setup суффикса)
+
+  ---
+
+  ## [6.3.1] — 2026-06-30
 
 ### Исправления (Bug Fixes)
 
