@@ -177,6 +177,7 @@ export default function Accounts() {
       use_ssl: acc.use_ssl, use_tls: acc.use_tls, display_name: acc.display_name,
       daily_limit: acc.daily_limit, hourly_limit: acc.hourly_limit,
       proxy: acc.proxy, imap_host: acc.imap_host, imap_port: acc.imap_port,
+      refresh_token: acc.refresh_token ?? '',
     })
     setEditEmail(acc.email); setShowForm(true)
   }

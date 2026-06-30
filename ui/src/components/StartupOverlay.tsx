@@ -35,11 +35,11 @@ export default function StartupOverlay() {
   const [visible,  setVisible]  = useState(true)
   const [fadeOut,  setFadeOut]  = useState(false)
   const [version,  setVersion]  = useState('')
-    const [licenseOk,   setLicenseOk]   = useState<boolean | null>(null)
-    const [licenseMsg,  setLicenseMsg]  = useState('')
-    const [licenseKey,  setLicenseKey]  = useState('')
-    const [activating,  setActivating]  = useState(false)
-    const [activateErr, setActivateErr] = useState('')
+  const [licenseOk,   setLicenseOk]   = useState<boolean | null>(null)
+  const [licenseMsg,  setLicenseMsg]  = useState('')
+  const [licenseKey,  setLicenseKey]  = useState('')
+  const [activating,  setActivating]  = useState(false)
+  const [activateErr, setActivateErr] = useState('')
 
   // Fetch backend version and check for stale WebView2 cache.
   useEffect(() => {
@@ -50,20 +50,19 @@ export default function StartupOverlay() {
         if (!d?.version) return
         setVersion(`v${d.version}`)
 
+        // License check — FIX v6.3
+        fetch(`${getBaseUrl()}/api/license`)
+          .then(r => r.json())
+          .then((lic: { valid?: boolean; message?: string }) => {
+            setLicenseOk(lic.valid !== false)
+            setLicenseMsg(lic.message ?? '')
+          })
+          .catch(() => setLicenseOk(true))
+
         // Stale-cache guard: if the backend reports a different version than
         // what this JS bundle was built with, the old index.html was loaded
         // from WebView2's disk cache instead of the new bundle on disk.
-        // A forced reload fetches a fresh index.html and picks up new JS chunks.
-        // License check — FIX v6.3
-          fetch(`${getBaseUrl()}/api/license`)
-            .then(r => r.json())
-            .then((lic: { valid?: boolean; message?: string }) => {
-              setLicenseOk(lic.valid !== false)
-              setLicenseMsg(lic.message ?? '')
-            })
-            .catch(() => setLicenseOk(true))
-
-          if (d.version !== FRONTEND_VERSION) {
+        if (d.version !== FRONTEND_VERSION) {
           console.warn(
             `[FMailSender] Version mismatch: backend=${d.version} frontend=${FRONTEND_VERSION}. Reloading…`
           )
@@ -77,58 +76,23 @@ export default function StartupOverlay() {
   const startedAt = useRef(Date.now())
   const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  async function activateLicense() {
+    if (!licenseKey.trim()) return
+    setActivating(true); setActivateErr('')
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/license/activate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: licenseKey.trim() }),
+      })
+      const data = await res.json()
+      if (data.success) setLicenseOk(true)
+      else setActivateErr(data.message || data.error || 'Ключ недействителен')
+    } catch (e: unknown) { setActivateErr((e as Error).message || 'Ошибка сети') }
+    finally { setActivating(false) }
+  }
+
   // Tick every 100ms
   useEffect(() => {
-  
-    async function activateLicense() {
-      if (!licenseKey.trim()) return
-      setActivating(true); setActivateErr('')
-      try {
-        const res = await fetch(`${getBaseUrl()}/api/license/activate`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: licenseKey.trim() }),
-        })
-        const data = await res.json()
-        if (data.success) setLicenseOk(true)
-        else setActivateErr(data.message || data.error || 'Ключ недействителен')
-      } catch (e: unknown) { setActivateErr((e as Error).message || 'Ошибка сети') }
-      finally { setActivating(false) }
-    }
-
-    if (online && licenseOk === false) {
-      return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center"
-             style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)' }}>
-          <div className="w-full max-w-md mx-4 rounded-2xl bg-gray-900/90 border border-gray-700 p-8 shadow-2xl">
-            <div className="flex items-center gap-3 mb-6">
-              <Zap className="text-blue-400" size={32} />
-              <div>
-                <h1 className="text-xl font-bold text-white">FMailSender</h1>
-                <p className="text-sm text-gray-400">Активация лицензии</p>
-              </div>
-            </div>
-            <p className="text-gray-300 text-sm mb-6">{licenseMsg || 'Введите лицензионный ключ для продолжения.'}</p>
-            <input
-              className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-3 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none mb-3 font-mono text-sm"
-              placeholder="FM-XXXXXXXX-XXXXXXXX-XXXXXXXX"
-              value={licenseKey}
-              onChange={e => setLicenseKey(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && activateLicense()}
-            />
-            {activateErr && <p className="text-red-400 text-sm mb-3">{activateErr}</p>}
-            <button
-              onClick={activateLicense}
-              disabled={activating || !licenseKey.trim()}
-              className="w-full rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-4 py-3 text-white font-semibold transition-colors"
-            >
-              {activating ? 'Проверка...' : 'Активировать'}
-            </button>
-            <p className="text-gray-500 text-xs mt-4 text-center">Ключ привязывается к этому устройству · Поддержка: fmail.shop</p>
-          </div>
-        </div>
-      )
-    }
-
     if (!visible) return
     timerRef.current = setInterval(() => {
       const sec = (Date.now() - startedAt.current) / 1000
@@ -154,6 +118,41 @@ export default function StartupOverlay() {
   }, [online, visible])
 
   if (!visible) return null
+
+  // License activation overlay — shown when backend is up but license is invalid
+  if (online && licenseOk === false) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center"
+           style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)' }}>
+        <div className="w-full max-w-md mx-4 rounded-2xl bg-gray-900/90 border border-gray-700 p-8 shadow-2xl">
+          <div className="flex items-center gap-3 mb-6">
+            <Zap className="text-blue-400" size={32} />
+            <div>
+              <h1 className="text-xl font-bold text-white">FMailSender</h1>
+              <p className="text-sm text-gray-400">Активация лицензии</p>
+            </div>
+          </div>
+          <p className="text-gray-300 text-sm mb-6">{licenseMsg || 'Введите лицензионный ключ для продолжения.'}</p>
+          <input
+            className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-3 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none mb-3 font-mono text-sm"
+            placeholder="FM-XXXXXXXX-XXXXXXXX-XXXXXXXX"
+            value={licenseKey}
+            onChange={e => setLicenseKey(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && activateLicense()}
+          />
+          {activateErr && <p className="text-red-400 text-sm mb-3">{activateErr}</p>}
+          <button
+            onClick={activateLicense}
+            disabled={activating || !licenseKey.trim()}
+            className="w-full rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-4 py-3 text-white font-semibold transition-colors"
+          >
+            {activating ? 'Проверка...' : 'Активировать'}
+          </button>
+          <p className="text-gray-500 text-xs mt-4 text-center">Ключ привязывается к этому устройству · Поддержка: fmail.shop</p>
+        </div>
+      </div>
+    )
+  }
 
   const msg  = [...MESSAGES].reverse().find(m => elapsed >= m.at)?.text ?? MESSAGES[0].text
   const dots = '.'.repeat(Math.floor(elapsed * 2) % 4)
