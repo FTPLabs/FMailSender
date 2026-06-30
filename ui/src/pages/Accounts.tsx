@@ -4,7 +4,7 @@ import { Plus, Trash2, RefreshCw, Upload, CheckCircle, XCircle, Clock, Globe, Us
 import { api, getBaseUrl, type Account } from '../api'
 
 const KNOWN_HOSTS: Record<string, { host: string; port: number; use_ssl: boolean }> = {
-  'gmail.com':    { host: 'smtp.gmail.com',       port: 587, use_ssl: false },
+  'gmail.com':    { host: 'smtp.gmail.com',       port: 465, use_ssl: true  },
   'outlook.com':  { host: 'smtp.office365.com',   port: 587, use_ssl: false },
   'hotmail.com':  { host: 'smtp.office365.com',   port: 587, use_ssl: false },
   'live.com':     { host: 'smtp.office365.com',   port: 587, use_ssl: false },
@@ -20,7 +20,10 @@ const KNOWN_HOSTS: Record<string, { host: string; port: number; use_ssl: boolean
 
 function autofill(email: string) {
   const domain = email.split('@')[1]?.toLowerCase()
-  return domain ? (KNOWN_HOSTS[domain] ?? null) : null
+  const cfg = domain ? (KNOWN_HOSTS[domain] ?? null) : null
+  if (!cfg) return null
+  // FIX v6.8: set use_tls as inverse of use_ssl so both flags are always consistent
+  return { ...cfg, use_tls: !cfg.use_ssl }
 }
 
 function StatusIcon({ ok, testing }: { ok: boolean | null; testing?: boolean }) {
@@ -275,7 +278,10 @@ export default function Accounts() {
                   <div>
                     <label className="label">Порт</label>
                     <input className="input" type="number" value={form.port}
-                      onChange={e => set('port', +e.target.value)} />
+                      onChange={e => {
+                        const p = +e.target.value
+                        setForm(f => ({ ...f, port: p, use_ssl: p === 465, use_tls: p !== 465 }))
+                      }} />
                   </div>
                   <div>
                     <label className="label">Шифрование</label>
