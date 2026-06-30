@@ -822,7 +822,6 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
             _default_scheme = "http" if "@" in _proxy_url else "socks5"
             _proxy_url = _default_scheme + "://" + _proxy_url
             _proxy_auto = _default_scheme == "socks5"  # авто-детект только для socks
-            _proxy_auto = True
         _proxy_parsed = _up.urlparse(_proxy_url)
 
     # ── OAuth2 детектор ────────────────────────────────────────────────────────
