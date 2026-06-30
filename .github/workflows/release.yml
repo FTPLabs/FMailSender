@@ -26,16 +26,6 @@ jobs:
 
     steps:
 
-      - name: "Repo PUBLIC - build window open"
-        shell: bash
-        run: |
-          RESULT=$(curl -s -X PATCH \
-            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/FTPLabs/FMailSender" \
-            -d '{"private":false}')
-          echo "Visibility: $(echo $RESULT | grep -o '"visibility":"[^"]*"' || echo "$RESULT" | head -c 200)"
-
       - name: "Checkout"
         uses: actions/checkout@v4
 
@@ -260,14 +250,3 @@ jobs:
             **Requirements:** Windows 10 x64 (build 1803+) or Windows 11 + WebView2 Runtime
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: "Repo PRIVATE - build window closed"
-        if: always()
-        shell: bash
-        run: |
-          RESULT=$(curl -s -X PATCH \
-            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/FTPLabs/FMailSender" \
-            -d '{"private":true}')
-          echo "Visibility: $(echo $RESULT | grep -o '"visibility":"[^"]*"' || echo "$RESULT" | head -c 200)"
