@@ -9,7 +9,7 @@ on:
       version:
         description: "Version (e.g. 6.4.0)"
         required: true
-        default: "6.4.0"
+        default: "6.6.0"
 
 env:
   PYTHON_VERSION: "3.11"
