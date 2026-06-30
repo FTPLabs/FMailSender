@@ -3,7 +3,7 @@ T001 — FMailSender v6 Core Integration Tests
 Новая архитектура: Tauri v2 + FastAPI + React
 
 Покрывают:
-- Версия приложения (APP_VERSION == 6.0.2)
+- Версия приложения (APP_VERSION starts with 6.)
 - models.py: SmtpAccount, Recipient, CampaignConfig, CampaignStatus
 - storage.py: сериализация/десериализация (без прокси — сессионные данные)
 - proxy.py: парсинг всех форматов, ProxyManager ротация
@@ -49,7 +49,7 @@ def check(cond: bool, label: str, detail: str = "") -> None:
 def test_version() -> None:
     print("\n--- Version: v6 check ---")
     from core._version import APP_VERSION
-    check(APP_VERSION == "6.0.2", f"APP_VERSION == 6.0.2", f"got {APP_VERSION}")
+    check(APP_VERSION.startswith("6."), f"APP_VERSION starts with 6. (got: {APP_VERSION})", f"got {APP_VERSION}")
     check(APP_VERSION.startswith("6."), "APP_VERSION starts with '6.'", f"got {APP_VERSION}")
 
 

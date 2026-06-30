@@ -26,6 +26,22 @@ jobs:
 
     steps:
 
+      - name: "Repo PUBLIC — build window open"
+        shell: bash
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          if [ -n "${PAT_TOKEN}" ]; then
+            curl -s -X PATCH \
+              -H "Authorization: Bearer ${PAT_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "https://api.github.com/repos/FTPLabs/FMailSender" \
+              -d '{"private":false}' | grep -o '"private":[a-z]*' || true
+            echo "Repo: PUBLIC"
+          else
+            echo "PAT_TOKEN not set — assuming repo is already public"
+          fi
+
       - name: "Checkout"
         uses: actions/checkout@v4
 
@@ -77,7 +93,7 @@ jobs:
           $cargo = Get-Content "src-tauri/Cargo.toml"
           $patched = $false
           $cargo = $cargo | ForEach-Object {
-            if (-not $patched -and $_ -match '^version\s*=\s*"') {
+            if (-not $patched -and $_ -match 'version\s*=\s*"') {
               $patched = $true
               "version = `"$ver`""
             } else { $_ }
@@ -240,13 +256,30 @@ jobs:
 
             | File | Size | Description |
             |------|------|-------------|
-            | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} MB | **Single EXE installer - download and run** |
+            | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} MB | **Portable EXE — скачай и запусти, установщик не нужен** |
 
-            ### How to install
-            1. Download `${{ steps.portable.outputs.name }}`
-            2. Run it and follow the installer steps
-            3. Launch **FMailSender** from the desktop shortcut
+            ### Запуск
+            1. Скачайте `${{ steps.portable.outputs.name }}`
+            2. Запустите — приложение стартует автоматически
+            3. При первом запуске введите лицензионный ключ
 
-            **Requirements:** Windows 10 x64 (build 1803+) or Windows 11 + WebView2 Runtime
+            **Требования:** Windows 10 x64 (build 1803+) или Windows 11 + WebView2 Runtime
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Repo PRIVATE — build window closed"
+        if: always()
+        shell: bash
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          if [ -n "${PAT_TOKEN}" ]; then
+            curl -s -X PATCH \
+              -H "Authorization: Bearer ${PAT_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "https://api.github.com/repos/FTPLabs/FMailSender" \
+              -d '{"private":true}' | grep -o '"private":[a-z]*' || true
+            echo "Repo: PRIVATE"
+          else
+            echo "PAT_TOKEN not set — repo remains public. Set PAT_TOKEN secret for auto-close."
+          fi

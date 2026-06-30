@@ -72,7 +72,7 @@ def trigger_workflow(tag: str) -> bool:
     resp = requests.post(
         f"https://api.github.com/repos/{REPO}/actions/workflows/{WORKFLOW}/dispatches",
         headers=_headers(),
-        json={"ref": "main", "inputs": {"tag_name": tag}},
+        json={"ref": "main", "inputs": {"version": tag.lstrip("v")}},
         timeout=30,
     )
     if resp.status_code == 204:
