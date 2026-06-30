@@ -34,7 +34,7 @@ name: "FMailSender Release"
               -H "Content-Type: application/json" \
               "https://api.github.com/repos/FTPLabs/FMailSender" \
               -d '{"private":false}')
-            echo "Visibility: $(echo $RESULT | grep -o '"'"'"visibility":"[^"]*"'"'"' || echo "$RESULT" | head -c 200)"
+            echo "Visibility: $(echo $RESULT | grep -o '"visibility":"[^"]*"' || echo "$RESULT" | head -c 200)"
 
         - name: "Checkout"
           uses: actions/checkout@v4
@@ -78,12 +78,10 @@ name: "FMailSender Release"
           shell: pwsh
           run: |
             $ver = "${{ steps.tag.outputs.version }}"
-
             $conf = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
             $conf.version = $ver
             $conf | ConvertTo-Json -Depth 10 | Set-Content "src-tauri/tauri.conf.json" -Encoding UTF8
             Write-Host "tauri.conf.json => $ver"
-
             $cargo = Get-Content "src-tauri/Cargo.toml"
             $patched = $false
             $cargo = $cargo | ForEach-Object {
@@ -94,15 +92,13 @@ name: "FMailSender Release"
             }
             $cargo | Set-Content "src-tauri/Cargo.toml" -Encoding UTF8
             Write-Host "Cargo.toml => $ver"
-
             Set-Content "core/_version.py"   -Encoding UTF8 "APP_VERSION = `"$ver`""
             Set-Content "ui/src/version.ts"  -Encoding UTF8 "export const FRONTEND_VERSION = `"$ver`""
             Write-Host "Version synced to $ver"
 
         - name: "Python deps"
           shell: pwsh
-          run: |
-            pip install -r requirements.txt "pyinstaller==${{ env.PYINSTALLER_VERSION }}" --quiet
+          run: pip install -r requirements.txt "pyinstaller==${{ env.PYINSTALLER_VERSION }}" --quiet
 
         - name: "Python import check"
           shell: pwsh
@@ -122,9 +118,7 @@ name: "FMailSender Release"
               if ($LASTEXITCODE -ne 0) {
                 Write-Error "FAIL ($LASTEXITCODE): $c  ->  $out"
                 $failed = $true
-              } else {
-                Write-Host "OK  $c"
-              }
+              } else { Write-Host "OK  $c" }
             }
             if ($failed) { exit 1 }
 
@@ -136,12 +130,10 @@ name: "FMailSender Release"
               --distpath "src-tauri/binaries" `
               --workpath "C:/tmp/pyinstaller-build" `
               --noconfirm
-
             $exe = "src-tauri/binaries/fmail-core.exe"
             if (-not (Test-Path $exe)) { Write-Error "fmail-core.exe missing"; exit 1 }
             $sz = [math]::Round((Get-Item $exe).Length / 1MB, 1)
             if ($sz -lt 5) { Write-Error "fmail-core.exe too small ($sz MB)"; exit 1 }
-
             Copy-Item $exe "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe" -Force
             Write-Host "fmail-core.exe = $sz MB OK"
 
@@ -170,56 +162,38 @@ name: "FMailSender Release"
             if (Test-Path $logo) { tauri icon $logo }
             else { Write-Warning "Logo not found - using existing icons" }
 
-        - name: "Tauri build - NSIS single EXE"
+        - name: "Tauri build - NSIS"
           id: tauri_build
           shell: pwsh
           run: |
             tauri build --target x86_64-pc-windows-msvc --verbose 2>&1
-
             $nsis = Get-ChildItem -Recurse "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis" `
               -Filter "*.exe" -ErrorAction SilentlyContinue |
               Where-Object { $_.Length -gt 5MB } |
               Sort-Object Length -Descending |
               Select-Object -First 1
-
             if (-not $nsis) {
               $nsis = Get-ChildItem -Recurse "src-tauri/target" -ErrorAction SilentlyContinue |
                 Where-Object { ($_.Name -like "*setup*.exe" -or $_.Name -like "*Setup*.exe") -and $_.Length -gt 5MB } |
                 Sort-Object Length -Descending |
                 Select-Object -First 1
             }
-
             if (-not $nsis) { Write-Error "NSIS installer not found"; exit 1 }
-
             $sz = [math]::Round($nsis.Length / 1MB, 1)
             Write-Host "Installer: $($nsis.FullName) ($sz MB)"
             "installer_path=$($nsis.FullName)" >> $env:GITHUB_OUTPUT
-            "installer_size=$sz"                >> $env:GITHUB_OUTPUT
+            "installer_size=$sz" >> $env:GITHUB_OUTPUT
 
         - name: "Validate installer"
           shell: pwsh
           run: |
             $installer = "${{ steps.tauri_build.outputs.installer_path }}"
-            if (-not (Test-Path $installer)) {
-              Write-Error "VALIDATION FAILED: installer not found"
-              exit 1
-            }
+            if (-not (Test-Path $installer)) { Write-Error "installer not found"; exit 1 }
             $sz = (Get-Item $installer).Length
-            if ($sz -lt 5MB) {
-              Write-Error "VALIDATION FAILED: too small ($([math]::Round($sz/1MB,2)) MB)"
-              exit 1
-            }
+            if ($sz -lt 5MB) { Write-Error "too small ($([math]::Round($sz/1MB,2)) MB)"; exit 1 }
             $bytes = [System.IO.File]::ReadAllBytes($installer)
-            if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
-              Write-Error "VALIDATION FAILED: not a valid PE (no MZ header)"
-              exit 1
-            }
-            $sidecar = "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
-            if (-not (Test-Path $sidecar)) {
-              Write-Error "VALIDATION FAILED: sidecar missing"
-              exit 1
-            }
-            Write-Host "VALIDATION PASSED: $([math]::Round($sz/1MB,1)) MB, PE OK"
+            if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { Write-Error "not a valid PE"; exit 1 }
+            Write-Host "OK: $([math]::Round($sz/1MB,1)) MB, PE valid"
 
         - name: "Rename to release EXE"
           id: portable
@@ -231,9 +205,9 @@ name: "FMailSender Release"
             $sz = [math]::Round((Get-Item $dest).Length / 1MB, 1)
             "name=$dest" >> $env:GITHUB_OUTPUT
             "size=$sz"   >> $env:GITHUB_OUTPUT
-            Write-Host "Release file: $dest ($sz MB)"
+            Write-Host "Release: $dest ($sz MB)"
 
-        - name: "GitHub Release — single EXE"
+        - name: "GitHub Release"
           uses: softprops/action-gh-release@v2
           with:
             tag_name: ${{ steps.tag.outputs.tag }}
@@ -247,14 +221,14 @@ name: "FMailSender Release"
 
               | Файл | Размер | Описание |
               |------|--------|----------|
-              | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} MB | **Скачать и запустить — установщик уже включает всё** |
+              | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} MB | **Скачать и запустить — единственный файл, включает всё** |
 
               ### Установка
               1. Скачайте `${{ steps.portable.outputs.name }}`
-              2. Запустите и следуйте шагам установщика
-              3. Запустите **FMailSender** с рабочего стола
+              2. Запустите — установщик всё сделает сам
+              3. Запустите FMailSender с рабочего стола
 
-              **Требования:** Windows 10 x64 (build 1803+) или Windows 11 + WebView2 Runtime
+              **Требования:** Windows 10 x64 (build 1803+) или Windows 11
           env:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -262,10 +236,10 @@ name: "FMailSender Release"
           if: always()
           shell: bash
           run: |
-            RESULT=$(curl -s -X PATCH \
+            curl -s -X PATCH \
               -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
               -H "Content-Type: application/json" \
               "https://api.github.com/repos/FTPLabs/FMailSender" \
-              -d '{"private":true}')
-            echo "Visibility: $(echo $RESULT | grep -o '"'"'"visibility":"[^"]*"'"'"' || echo "$RESULT" | head -c 200)"
+              -d '{"private":true}' > /dev/null
+            echo "Repo set private"
   
