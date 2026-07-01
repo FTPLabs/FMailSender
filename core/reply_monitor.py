@@ -167,7 +167,7 @@ class ReplyMonitor:
             return  # No tracked messages → nothing to match
 
         cls = imaplib.IMAP4_SSL if self._ssl else imaplib.IMAP4
-        with cls(self._host, self._port) as imap:
+        with cls(self._host, self._port, timeout=30) as imap:  # FIX HANG-1
             imap.login(self._email, self._password)
             imap.select("INBOX")
             _, uid_data = imap.uid("search", None, "UNSEEN")
@@ -211,7 +211,7 @@ class ReplyMonitor:
         self, uid: str, msg: email.message.Message, sent_ids: Set[str]
     ) -> ReplyMessage:
         from_raw = _decode_header(msg.get("From", ""))
-        match = re.match(r'"?([^"<]+)"?s*<?([^>]*)>?', from_raw)
+        match = re.match(r'"?([^"<]+)"?\s*<?([^>]*)>?', from_raw)  # FIX REGEX-1: s* -> \s*
         from_name = match.group(1).strip() if match else from_raw
         from_addr = match.group(2).strip() if match else from_raw
         subject = _decode_header(msg.get("Subject", ""))
