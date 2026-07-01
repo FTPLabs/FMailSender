@@ -5,6 +5,7 @@ Data lives in %APPDATA%/FMailSender/ (Windows) or ~/FMailSender/ (other).
 Works correctly both in dev mode and inside PyInstaller --onefile bundles.
 """
 from __future__ import annotations
+import dataclasses
 import json
 import logging
 import os
@@ -79,6 +80,8 @@ def save_accounts(accounts: list[SmtpAccount]) -> None:
         d["password"] = _enc(d["password"])
         if d.get("access_token"):
             d["access_token"] = _enc(d["access_token"])
+        if d.get("refresh_token"):  # FIX SEC-1: refresh_token was stored in plaintext
+            d["refresh_token"] = _enc(d["refresh_token"])
         data.append(d)
     ACCOUNTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -93,6 +96,8 @@ def load_accounts() -> list[SmtpAccount]:
             d["password"] = _dec(d.get("password", ""))
             if d.get("access_token"):
                 d["access_token"] = _dec(d["access_token"])
+            if d.get("refresh_token"):  # FIX SEC-1: decrypt refresh_token
+                d["refresh_token"] = _dec(d["refresh_token"])
             d["proxy"] = d.get("proxy", "")
             d["proxy_list"] = d.get("proxy_list", [])  # FIX v6.3: load saved proxy_list
             accounts.append(SmtpAccount.from_dict(d))
@@ -159,7 +164,11 @@ def load_campaign() -> CampaignConfig:
         return CampaignConfig()
     try:
         d = json.loads(CAMPAIGN_FILE.read_text(encoding="utf-8"))
-        return CampaignConfig(**d)
+        # FIX COMPAT-1: filter to known fields only — prevents TypeError on
+        # version mismatch when campaign.json has extra/removed fields.
+        known = {f.name for f in dataclasses.fields(CampaignConfig)}
+        d_filtered = {k: v for k, v in d.items() if k in known}
+        return CampaignConfig(**d_filtered)
     except Exception as exc:
         logger.error("Failed to load campaign config from %s: %s", CAMPAIGN_FILE, exc)
         return CampaignConfig()
