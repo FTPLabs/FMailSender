@@ -18,6 +18,8 @@ from typing import List, Optional, Set
 
 logger = logging.getLogger("bounce")
 
+_IMAP_TIMEOUT = 30  # seconds — used for initial connection and reconnect to prevent hangs
+
 
 class BounceType(Enum):
     HARD = "hard"
@@ -267,7 +269,6 @@ class BounceMonitor:
         seen_uids: set = set()
         conn = None
         try:
-            _IMAP_TIMEOUT = 30  # FIX СРЕД-3: таймаут IMAP (без него поток зависает навсегда)
             if self.use_ssl:
                 conn = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=_IMAP_TIMEOUT)
             else:
@@ -302,9 +303,9 @@ class BounceMonitor:
                         pass
                     try:
                         if self.use_ssl:
-                            conn = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+                            conn = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=_IMAP_TIMEOUT)  # FIX HANG-2
                         else:
-                            conn = imaplib.IMAP4(self.imap_host, self.imap_port)
+                            conn = imaplib.IMAP4(self.imap_host, self.imap_port, timeout=_IMAP_TIMEOUT)  # FIX HANG-2
                         conn.login(self.email_addr, self.password)
                         conn.select("INBOX", readonly=False)
                         _, msg_data = conn.uid("fetch", uid, "(RFC822)")
