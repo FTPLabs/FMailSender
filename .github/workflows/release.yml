@@ -238,6 +238,8 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path "dist_portable" | Out-Null
 
+          # fmail-core is embedded inside FMailSender.exe via include_bytes!() —
+          # no separate sidecar is needed in the portable package.
           $appExePath = "${{ steps.tauri_build.outputs.app_exe_path }}"
           if (-not $appExePath -or -not (Test-Path $appExePath)) {
             $found = Get-ChildItem "src-tauri/target/$target/release" -Filter "*.exe" -ErrorAction SilentlyContinue |
@@ -246,28 +248,22 @@ jobs:
             if (-not $found) { Write-Error "App exe not found"; exit 1 }
             $appExePath = $found.FullName
           }
-          Write-Host "App exe: $appExePath"
-
-          $coreExe = "src-tauri/binaries/fmail-core-$target.exe"
-          if (-not (Test-Path $coreExe)) { Write-Error "fmail-core sidecar missing"; exit 1 }
 
           $mainSz = [math]::Round((Get-Item $appExePath).Length / 1MB, 1)
-          $coreSz = [math]::Round((Get-Item $coreExe).Length / 1MB, 1)
-          Write-Host "App: $mainSz MB | Core: $coreSz MB"
-          if ($mainSz -lt 1) { Write-Error "App exe too small"; exit 1 }
-          if ($coreSz -lt 5) { Write-Error "Core too small"; exit 1 }
+          Write-Host "App exe: $appExePath ($mainSz MB)"
+          # With embedded core the binary should be >20 MB
+          if ($mainSz -lt 15) { Write-Error "App exe too small ($mainSz MB) — core may not be embedded"; exit 1 }
 
           Copy-Item $appExePath "dist_portable\FMailSender.exe"
-          Copy-Item $coreExe   "dist_portable\fmail-core-$target.exe"
 
           $nsisExe = "C:\Program Files (x86)\NSIS\makensis.exe"
           if (-not (Test-Path $nsisExe)) { Write-Error "makensis not found"; exit 1 }
 
-          & $nsisExe /V2 "/DOUTFILE=$outName" "/DTARGET=$target" portable.nsi
+          & $nsisExe /V2 "/DOUTFILE=$outName" portable.nsi
           if (-not (Test-Path $outName)) { Write-Error "NSIS build failed"; exit 1 }
 
           $sz = [math]::Round((Get-Item $outName).Length / 1MB, 1)
-          if ($sz -lt 10) { Write-Error "Output too small ($sz MB)"; exit 1 }
+          if ($sz -lt 15) { Write-Error "Output too small ($sz MB)"; exit 1 }
           Write-Host "Portable NSIS launcher: $outName ($sz MB)"
           "name=$outName" >> $env:GITHUB_OUTPUT
           "size=$sz"      >> $env:GITHUB_OUTPUT
