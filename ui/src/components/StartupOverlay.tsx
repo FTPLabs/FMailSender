@@ -90,6 +90,31 @@
         .catch(() => setLicenseOk(true))
     }, [online])
 
+    // Periodic license re-validation every 60 minutes.
+    // If the license is revoked mid-session, re-show the activation screen.
+    useEffect(() => {
+      if (!online || licenseOk === null) return
+      const interval = setInterval(async () => {
+        try {
+          const lic: { valid?: boolean; message?: string } =
+            await fetch(`${getBaseUrl()}/api/license`).then(r => r.json())
+          if (lic.valid === false) {
+            setLicenseOk(false)
+            setLicenseMsg(lic.message ?? 'Лицензия отозвана')
+          }
+        } catch { /* network error — server offline grace handles this */ }
+      }, 60 * 60 * 1000)
+      return () => clearInterval(interval)
+    }, [online, licenseOk])
+
+    // Re-show overlay when license becomes invalid mid-session (revoked remotely)
+    useEffect(() => {
+      if (licenseOk === false) {
+        setVisible(true)
+        setFadeOut(false)
+      }
+    }, [licenseOk])
+
     // Timer — only depends on visible so it never restarts when online changes
     useEffect(() => {
       if (!visible) return
