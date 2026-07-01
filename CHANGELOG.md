@@ -1,3 +1,20 @@
+## [6.7.1] — 2026-07-01
+
+### Fixed (Code Review — 5 bugs)
+
+- **SEC-1 — `refresh_token` хранился в открытом виде** (`core/storage.py`): шифрование через Fernet добавлено для `refresh_token` в `save_accounts()` / `load_accounts()` — наравне с `access_token`.
+
+- **COMPAT-1 — `load_campaign()` падал с TypeError при смене версии** (`core/storage.py`): ключи JSON фильтруются через `dataclasses.fields(CampaignConfig)` перед созданием объекта.
+
+- **HANG-1 — IMAP reconnect в BounceMonitor зависал** (`core/bounce.py`): `_IMAP_TIMEOUT = 30` вынесен на уровень модуля; reconnect теперь передаёт `timeout=_IMAP_TIMEOUT`.
+
+- **HANG-2 — IMAP в ReplyMonitor без таймаута** (`core/reply_monitor.py`): добавлен `timeout=30` к IMAP-соединению в `_check_inbox()`.
+
+- **REGEX-1 — Опечатка `s*` вместо `\\s*` в `_parse_reply`** (`core/reply_monitor.py`): парсинг From-заголовка «Name \<addr\>» был полностью сломан — исправлено.
+
+---
+
+
 ## [6.7.0] — 2026-06-30
 
 ### Fixed
