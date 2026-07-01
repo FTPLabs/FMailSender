@@ -249,8 +249,10 @@ def activate_license_key(key: str) -> dict:
         if resp.status_code != 200:
             detail = result.get("detail") or result.get("error") or result.get("message") or "Ключ недействителен"
             raise RuntimeError(detail)
-        if not result.get("valid", True) is False:
-            pass  # accepted — valid field may not be present in activate response
+        # Reject activation if server explicitly returns valid=false (HTTP 200)
+        if result.get("valid") is False:
+            detail = result.get("detail") or result.get("error") or result.get("message") or "Ключ недействителен или уже использован"
+            raise RuntimeError(detail)
     except ImportError:
         result = {"valid": True, "plan": "offline", "message": "Ключ сохранён (оффлайн)"}
     except RuntimeError:
@@ -260,7 +262,7 @@ def activate_license_key(key: str) -> dict:
 
     cache_data = {
         "key": key,
-        "valid": True,
+        "valid": True,  # True is safe here: server returned HTTP 200 and did not return valid=False
         "plan": result.get("plan", result.get("license_plan", "unknown")),
         "expires_at": result.get("expires_at"),
         "hwid": hwid,

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Users, Mail, FileText, Send, Shield, Zap, Inbox as InboxIcon } from 'lucide-react'
+import { LayoutDashboard, Users, Mail, FileText, Send, Shield, Inbox as InboxIcon } from 'lucide-react'
 import { useStatus } from '../contexts/StatusContext'
 import { getBaseUrl } from '../api'
 
@@ -43,10 +43,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <aside className="w-52 flex-shrink-0 flex flex-col bg-[#0d1117] border-r border-[#3a3a66]/40">
         {/* Logo */}
         <div className="px-4 py-5 flex items-center gap-3 border-b border-[#3a3a66]/30">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#8b5cf6] to-[#06b6d4]
-                          flex items-center justify-center flex-shrink-0">
-            <Zap size={13} className="text-white" />
-          </div>
+          <img
+            src="./fmail_logo.png"
+            alt="FMail"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              objectFit: 'cover',
+              flexShrink: 0,
+              border: '1px solid rgba(139,92,246,0.4)',
+            }}
+          />
           <div className="min-w-0">
             <div className="text-sm font-semibold text-[#e8e8ff] leading-tight">FMail Sender</div>
             <div className="text-[10px] text-[#6666aa]">{version || 'v6.0'}</div>
@@ -109,4 +117,3 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     </div>
   )
 }
-

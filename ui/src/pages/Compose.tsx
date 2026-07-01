@@ -75,7 +75,7 @@ export default function Compose() {
                 onChange={e => set('from_name', e.target.value)} />
             </div>
             <div>
-              <label className="label">Reply-To (необязательно)</label>
+              <label className="label">Reply-To</label>
               <input className="input" placeholder="reply@example.com" value={cfg.reply_to ?? ''}
                 onChange={e => set('reply_to', e.target.value)} />
             </div>
@@ -87,29 +87,32 @@ export default function Compose() {
           </div>
         </div>
 
-        {/* Send settings */}
+        {/* Send settings — items-end aligns all inputs to same baseline regardless of label height */}
         <div className="card space-y-4">
           <h2 className="text-sm font-semibold text-[#e8e8ff]">Настройки отправки</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-3 items-end">
             <div>
-              <label className="label">Задержка мин. (сек)</label>
+              <label className="label">Задержка мин.</label>
+              <div className="text-[10px] text-[#6666aa] mb-1">(сек)</div>
               <input className="input" type="number" min="0.1" step="0.1" value={cfg.delay_min ?? 1}
                 onChange={e => set('delay_min', +e.target.value)} />
             </div>
             <div>
-              <label className="label">Задержка макс. (сек)</label>
+              <label className="label">Задержка макс.</label>
+              <div className="text-[10px] text-[#6666aa] mb-1">(сек)</div>
               <input className="input" type="number" min="0.1" step="0.1" value={cfg.delay_max ?? 3}
                 onChange={e => set('delay_max', +e.target.value)} />
             </div>
             <div>
-              <label className="label">Дневной лимит / аккаунт</label>
+              <label className="label">Лимит / день</label>
+              <div className="text-[10px] text-[#6666aa] mb-1">(на аккаунт)</div>
               <input className="input" type="number" min="1" value={cfg.daily_limit_per_account ?? 500}
                 onChange={e => set('daily_limit_per_account', +e.target.value)} />
             </div>
           </div>
           <p className="text-xs text-[#6666aa]">
-            Между каждым письмом будет ожидание от <span className="text-[#e8e8ff]">{cfg.delay_min}с</span>{' '}
-            до <span className="text-[#e8e8ff]">{cfg.delay_max}с</span>. Не ставьте меньше 1с — многие серверы блокируют.
+            Задержка между письмами: от <span className="text-[#e8e8ff]">{cfg.delay_min}с</span>{' '}
+            до <span className="text-[#e8e8ff]">{cfg.delay_max}с</span>. Рекомендуется не менее 1с.
           </p>
         </div>
       </div>
