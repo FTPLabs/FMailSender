@@ -84,7 +84,7 @@ export default function StartupOverlay() {
           setLicenseMsg('Не удалось получить статус лицензии')
           return
         }
-        setLicenseOk(lic.valid !== false)
+        setLicenseOk(lic.valid === true)
         setLicenseMsg(lic.message ?? '')
       })
       // BUG FIX: network / parse error must NOT silently open the app.

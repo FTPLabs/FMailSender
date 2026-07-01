@@ -165,7 +165,7 @@ async def _lifespan(application: FastAPI):
     # Revoked licenses are blocked immediately; offline grace period still applies.
     try:
         from core.license import validate_on_startup
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         lic = await loop.run_in_executor(None, validate_on_startup)
         _set_license_ok(bool(lic.get("valid", False)))
     except ImportError:

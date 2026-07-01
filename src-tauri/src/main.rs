@@ -1,4 +1,4 @@
-// FMailSender Tauri shell v6.1.0
+// FMailSender Tauri shell v6.7.6
 // Security: fmail-core is embedded inside this binary via include_bytes!().
 // It is extracted to %TEMP%\fmailsender-{session}\ at startup and deleted on exit.
 // There is no separate fmail-core.exe file next to the app.
@@ -12,6 +12,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
+
+// WIN32 CREATE_NO_WINDOW flag — prevents cmd/console windows flashing on spawn
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const CORE_PORT:            u16 = 7531;
 const CORE_HOST:            &str = "127.0.0.1";
@@ -57,6 +63,7 @@ fn kill_core_by_name() {
             .args(["/F", "/IM", name])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
             .status();
     }
 }
@@ -65,7 +72,8 @@ fn kill_core_by_name() {
 fn kill_existing_core() {
     #[cfg(target_os = "windows")]
     {
-        // Stage 1 — kill by port
+        // Stage 1 — kill by port (powershell already uses -WindowStyle Hidden,
+        // but CREATE_NO_WINDOW is the Win32-level guarantee against any flash).
         let _ = Command::new("powershell")
             .args([
                 "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
@@ -79,7 +87,9 @@ fn kill_existing_core() {
                     port = CORE_PORT
                 ),
             ])
-            .stdout(Stdio::null()).stderr(Stdio::null()).status();
+            .stdout(Stdio::null()).stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
 
         // Stage 2 — kill by name
         kill_core_by_name();
@@ -134,12 +144,16 @@ fn extract_core() -> Option<PathBuf> {
 }
 
 fn spawn_core_from(path: &PathBuf) -> Option<Child> {
-    Command::new(path)
-        .env("FMAIL_PORT", CORE_PORT.to_string())
+    let mut cmd = Command::new(path);
+    cmd.env("FMAIL_PORT", CORE_PORT.to_string())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()
+        .stderr(Stdio::null());
+    // Prevent any cmd-console window flash during spawn on Windows.
+    // fmail-core.exe is PyInstaller-built with console=False, but the Win32
+    // creation flag is an additional guarantee.
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.spawn().ok()
 }
 
 // ── cleanup ────────────────────────────────────────────────────────────────
