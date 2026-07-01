@@ -74,6 +74,20 @@ _run_id: int = 0
 # CPython GIL prevents crashes, but this lock ensures coherent multi-field snapshots.
 _status_lock = threading.Lock()
 
+# ── License runtime state ─────────────────────────────────────────────────────
+# Set at startup via _lifespan; updated on every GET /api/license call.
+_license_ok: bool = False
+_license_lock = threading.Lock()
+
+def _set_license_ok(ok: bool) -> None:
+    global _license_ok
+    with _license_lock:
+        _license_ok = ok
+
+def _get_license_ok() -> bool:
+    with _license_lock:
+        return _license_ok
+
 
 # BUG FIX: replaced deprecated @app.on_event("startup") with lifespan (FastAPI 0.93+)
 @asynccontextmanager
@@ -83,6 +97,19 @@ async def _lifespan(application: FastAPI):
     _proxies      = load_proxies()
     _recipients   = load_recipients()
     _campaign_cfg = load_campaign()
+
+    # License check on every startup — always validates online.
+    # Revoked licenses are blocked immediately; offline grace period still applies.
+    try:
+        from core.license import validate_on_startup
+        loop = asyncio.get_event_loop()
+        lic = await loop.run_in_executor(None, validate_on_startup)
+        _set_license_ok(bool(lic.get("valid", False)))
+    except ImportError:
+        _set_license_ok(True)   # no license module → dev/debug mode, allow
+    except Exception:
+        _set_license_ok(False)
+
     yield
 
 
@@ -90,6 +117,26 @@ app = FastAPI(title="FMailSender Core", version=APP_VERSION, lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
+
+# ── License guard middleware ──────────────────────────────────────────────────
+# Paths that remain accessible even when license is invalid (activation flow).
+_LICENSE_EXEMPT = {
+    "/api/health",
+    "/api/license",
+    "/api/license/activate",
+    "/api/events",
+}
+
+@app.middleware("http")
+async def _license_guard(request: Request, call_next):
+    """Block all non-exempt routes when the license is invalid or revoked."""
+    if request.url.path not in _LICENSE_EXEMPT and not _get_license_ok():
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            {"detail": "Лицензия недействительна. Активируйте или продлите лицензию."},
+            status_code=403,
+        )
+    return await call_next(request)
 
 
 # ── Pydantic request schemas ──────────────────────────────────────────────────
@@ -723,14 +770,19 @@ async def get_events(request: Request):
 # ── License ────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/license")
-def get_license():
-    """Returns current license status."""
+async def get_license():
+    """Returns current license status. Always validates online on every call."""
     try:
-        from core.license import get_license_status
-        return get_license_status()
+        from core.license import validate_on_startup
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, validate_on_startup)
+        _set_license_ok(bool(result.get("valid", False)))
+        return result
     except ImportError:
+        _set_license_ok(True)
         return {"valid": True, "plan": "unlimited", "note": "license module not available"}
     except Exception as exc:
+        _set_license_ok(False)
         return {"valid": False, "error": str(exc)}
 
 
@@ -745,6 +797,8 @@ async def activate_license(req: Request):
         from core.license import activate_license_key
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, activate_license_key, key)
+        if result.get("success"):
+            _set_license_ok(True)
         return result
     except ImportError:
         return {"success": True, "message": "Ключ сохранён (оффлайн-режим)"}
