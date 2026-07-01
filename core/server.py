@@ -1,5 +1,5 @@
 """
-FMailSender — FastAPI Server v6.0
+FMailSender — FastAPI Server v6.1
 All HTTP endpoints on localhost:7531.
 
 Key design:
@@ -75,18 +75,81 @@ _run_id: int = 0
 _status_lock = threading.Lock()
 
 # ── License runtime state ─────────────────────────────────────────────────────
-# Set at startup via _lifespan; updated on every GET /api/license call.
+# Set at startup via _lifespan; updated on every GET /api/license call and
+# by the periodic background checker (every LICENSE_RECHECK_INTERVAL_SECS).
 _license_ok: bool = False
 _license_lock = threading.Lock()
+
+# Signal used to stop the periodic checker cleanly on shutdown.
+_license_check_stop = threading.Event()
+
+LICENSE_RECHECK_INTERVAL_SECS = 3600  # 1 hour
+
 
 def _set_license_ok(ok: bool) -> None:
     global _license_ok
     with _license_lock:
         _license_ok = ok
 
+
 def _get_license_ok() -> bool:
     with _license_lock:
         return _license_ok
+
+
+def _stop_campaign_if_running() -> None:
+    """Stop the active campaign (if any) — called when license is revoked."""
+    global _engine
+    with _status_lock:
+        if _engine is not None:
+            try:
+                _engine.stop_event.set()
+            except Exception:
+                pass
+        _campaign_status.state = "idle"
+
+
+def _periodic_license_checker() -> None:
+    """Background thread: re-validates the license every LICENSE_RECHECK_INTERVAL_SECS.
+
+    Uses validate_on_startup() which:
+      - Always contacts the license server (no cache shortcut).
+      - Revokes immediately when server returns valid=False.
+      - Allows offline grace period only on genuine network errors.
+
+    If the license is found invalid the campaign is stopped and _license_ok
+    is set to False, so the middleware blocks all further API calls until
+    the user re-activates.
+    """
+    import logging as _logging
+    _log = _logging.getLogger("fmailsender.license.periodic")
+
+    while not _license_check_stop.wait(timeout=LICENSE_RECHECK_INTERVAL_SECS):
+        # wait() returns True when the stop event is set → exit immediately.
+        if _license_check_stop.is_set():
+            break
+
+        _log.info("Periodic license check …")
+        try:
+            from core.license import validate_on_startup
+            result = validate_on_startup()
+            is_valid = bool(result.get("valid", False))
+            _set_license_ok(is_valid)
+            if not is_valid:
+                _log.warning(
+                    "License invalid (periodic check): %s — stopping campaign",
+                    result.get("message", ""),
+                )
+                _stop_campaign_if_running()
+            else:
+                _log.info(
+                    "License OK (plan=%s, expires=%s)",
+                    result.get("plan"), result.get("expires_at"),
+                )
+        except ImportError:
+            pass  # no license module → dev mode, keep running
+        except Exception as exc:
+            _log.error("Periodic license check error: %s", exc)
 
 
 # BUG FIX: replaced deprecated @app.on_event("startup") with lifespan (FastAPI 0.93+)
@@ -110,7 +173,19 @@ async def _lifespan(application: FastAPI):
     except Exception:
         _set_license_ok(False)
 
+    # Start periodic license re-check (every 1 hour).
+    _license_check_stop.clear()
+    checker = threading.Thread(
+        target=_periodic_license_checker,
+        name="license-checker",
+        daemon=True,
+    )
+    checker.start()
+
     yield
+
+    # Shutdown: signal the checker thread to exit.
+    _license_check_stop.set()
 
 
 app = FastAPI(title="FMailSender Core", version=APP_VERSION, lifespan=_lifespan)
