@@ -277,3 +277,77 @@ def activate_license_key(key: str) -> dict:
         "expires_at": cache_data.get("expires_at"),
         "message": result.get("message", "Лицензия успешно активирована"),
     }
+
+
+# ── Startup / periodic validation ────────────────────────────────────────────
+
+def validate_on_startup() -> dict:
+    """Always validates online. Used at server startup and for periodic checks.
+
+    Key differences from get_license_status():
+      - ALWAYS calls the license server — never skips network via cache age.
+      - If server explicitly returns valid=False → revoked, NO offline grace.
+      - Grace period applies ONLY when the server is genuinely unreachable
+        (network error / timeout) AND the last successful check was within
+        OFFLINE_GRACE_DAYS.
+
+    Returns the same dict shape as get_license_status().
+    """
+    hwid = _get_hardware_id()
+    cached = _load_cached()
+
+    if not cached or not cached.get("key"):
+        return {
+            "valid": False,
+            "hwid": hwid,
+            "message": "Лицензия не активирована",
+            "requires_activation": True,
+        }
+
+    key = cached["key"]
+    result = _validate_online(key, hwid)
+
+    if not result.get("offline"):
+        # Server responded — trust it unconditionally
+        is_valid = bool(result.get("valid", False))
+        updated = {
+            **cached,
+            "valid": is_valid,
+            "plan": result.get("plan", cached.get("plan")),
+            "expires_at": result.get("expires_at"),
+            "message": result.get("message", ""),
+            "validated_at": time.time(),
+        }
+        _save_cache(updated)
+        return {
+            "valid": is_valid,
+            "plan": updated.get("plan"),
+            "expires_at": updated.get("expires_at"),
+            "hwid": hwid,
+            "key": key[:12] + "****",
+            "message": result.get("message", ""),
+        }
+
+    # Network error — apply grace period ONLY if last validation was successful
+    if cached.get("valid", False):
+        grace_secs = OFFLINE_GRACE_DAYS * 86400
+        if (time.time() - cached.get("validated_at", 0)) < grace_secs:
+            return {
+                "valid": True,
+                "plan": cached.get("plan"),
+                "expires_at": cached.get("expires_at"),
+                "hwid": hwid,
+                "key": key[:12] + "****",
+                "message": "Оффлайн-режим (нет связи с сервером лицензий)",
+                "offline": True,
+                "from_cache": True,
+            }
+
+    return {
+        "valid": False,
+        "hwid": hwid,
+        "message": (
+            "Лицензия не подтверждена: нет связи с сервером лицензий. "
+            "Проверьте подключение к интернету."
+        ),
+    }
