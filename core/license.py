@@ -294,14 +294,13 @@ def activate_license_key(key: str) -> dict:
 # ── Startup / periodic validation ────────────────────────────────────────────
 
 def validate_on_startup() -> dict:
-    """Always validates online. Used at server startup and for periodic checks.
+    """Always validates online. Used by GET /api/license and the hourly checker.
 
     Key differences from get_license_status():
       - ALWAYS calls the license server — never skips network via cache age.
-      - If server explicitly returns valid=False → revoked, NO offline grace.
-      - Grace period applies ONLY when the server is genuinely unreachable
-        (network error / timeout) AND the last successful check was within
-        OFFLINE_GRACE_DAYS.
+      - If server explicitly returns valid=False → revoked, blocked immediately.
+      - If server is unreachable (network error / timeout) → also returns
+        valid=False. OFFLINE_GRACE_DAYS=0 means no offline bypass whatsoever.
 
     Returns the same dict shape as get_license_status().
     """

@@ -306,9 +306,11 @@ export default function StartupOverlay() {
           />
         </div>
         <div className="text-center text-xs min-h-[1rem]" style={{ color: '#6666aa' }}>
-          {online
-            ? <span style={{ color: '#10b981' }}>Готово</span>
-            : <span>{msg}{dots}</span>
+          {!online
+            ? <span>{msg}{dots}</span>
+            : licenseOk === null
+              ? <span style={{ color: '#a0a0dd' }}>Проверка лицензии...</span>
+              : <span style={{ color: '#10b981' }}>Готово</span>
           }
         </div>
       </div>

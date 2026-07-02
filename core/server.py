@@ -115,7 +115,7 @@ def _periodic_license_checker() -> None:
     Uses validate_on_startup() which:
       - Always contacts the license server (no cache shortcut).
       - Revokes immediately when server returns valid=False.
-      - Allows offline grace period only on genuine network errors.
+      - Returns valid=False if server is unreachable (no offline grace period).
 
     If the license is found invalid the campaign is stopped and _license_ok
     is set to False, so the middleware blocks all further API calls until
@@ -147,7 +147,12 @@ def _periodic_license_checker() -> None:
                     result.get("plan"), result.get("expires_at"),
                 )
         except ImportError:
-            pass  # no license module → dev mode, keep running
+            import sys as _sys
+            if getattr(_sys, "frozen", False):
+                # Frozen exe: module missing means bundle is broken — block.
+                _set_license_ok(False)
+                _stop_campaign_if_running()
+            # Dev mode: no license module, keep running.
         except Exception as exc:
             _log.error("Periodic license check error: %s", exc)
 
