@@ -125,7 +125,16 @@ class ReplyMonitor:
         self._host = imap_host
         self._port = imap_port
         self._ssl = imap_ssl
-        self._sent_ids_path = sent_ids_path or Path("data/sent_message_ids.json")
+        if sent_ids_path is not None:
+            self._sent_ids_path = sent_ids_path
+        else:
+            try:
+                from core.storage import _get_data_dir as _gdd  # pylint: disable=import-outside-toplevel
+                self._sent_ids_path = _gdd() / "sent_message_ids.json"
+            except Exception:
+                import os as _os  # pylint: disable=import-outside-toplevel
+                _appdata = _os.environ.get("APPDATA", _os.path.expanduser("~"))
+                self._sent_ids_path = Path(_appdata) / "FMailSender" / "sent_message_ids.json"
         self._on_reply = on_reply or (lambda r: None)
         self._on_count = on_count or (lambda n: None)
         self._on_error = on_error or (lambda e: logger.error(e))
