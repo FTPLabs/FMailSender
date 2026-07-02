@@ -119,20 +119,24 @@ jobs:
             "from core.sender import SendingEngine, test_smtp_connection",
             "from core.models import SmtpAccount, Recipient, CampaignConfig, CampaignStatus",
             "from core.storage import save_accounts, load_accounts",
+            "from core.license import get_license_status, activate_license_key",
             "from core._version import APP_VERSION",
-            "import multipart"
+            "import multipart",
+            "import requests"
           )
-          $failed = $false
-          foreach ($c in $checks) {
-            $out = python -c $c 2>&1
-            if ($LASTEXITCODE -ne 0) {
-              Write-Error "FAIL ($LASTEXITCODE): $c  ->  $out"
-              $failed = $true
-            } else {
-              Write-Host "OK  $c"
-            }
+          $failed = @()
+          foreach ($chk in $checks) {
+            try {
+              python -c $chk 2>&1 | Out-Null
+              if ($LASTEXITCODE -ne 0) { $failed += $chk }
+              else { Write-Host "OK: $chk" }
+            } catch { $failed += $chk }
           }
-          if ($failed) { exit 1 }
+          if ($failed.Count -gt 0) {
+            Write-Error "Import checks failed:`n$($failed -join "`n")"
+            exit 1
+          }
+          Write-Host "All import checks passed."
 
       - name: "PyInstaller - fmail-core.exe"
         shell: pwsh
@@ -176,7 +180,7 @@ jobs:
           if (Test-Path $logo) { tauri icon $logo }
           else { Write-Warning "Logo not found - using existing icons" }
 
-      - name: "Tauri build - NSIS installer"
+      - name: "Tauri build"
         id: tauri_build
         shell: pwsh
         run: |
@@ -184,37 +188,22 @@ jobs:
 
           $target = "x86_64-pc-windows-msvc"
 
-          $nsis = Get-ChildItem -Recurse "src-tauri/target" -ErrorAction SilentlyContinue |
-            Where-Object { ($_.Name -like "*setup*.exe" -or $_.Name -like "*Setup*.exe") -and $_.Length -gt 5MB } |
-            Sort-Object Length -Descending |
-            Select-Object -First 1
-
-          if (-not $nsis) {
-            $nsis = Get-ChildItem -Recurse "src-tauri/target/$target/release/bundle/nsis" `
-              -Filter "*.exe" -ErrorAction SilentlyContinue |
-              Sort-Object Length -Descending |
-              Select-Object -First 1
-          }
-
-          if (-not $nsis) { Write-Error "NSIS installer not found"; exit 1 }
-
-          $sz = [math]::Round($nsis.Length / 1MB, 1)
-          Write-Host "NSIS installer: $($nsis.FullName) ($sz MB)"
-          "installer_path=$($nsis.FullName)" >> $env:GITHUB_OUTPUT
-          "installer_size=$sz"                >> $env:GITHUB_OUTPUT
-
-          # Find app exe (Cargo bin = fmail-sender, but productName = FMailSender)
+          # Locate the compiled app exe (raw binary, NOT the NSIS installer)
           $appExe = Get-ChildItem "src-tauri/target/$target/release" `
             -Filter "*.exe" -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -notlike "fmail-core*" -and $_.Length -gt 1MB } |
             Sort-Object Length -Descending |
             Select-Object -First 1
-          if ($appExe) {
-            Write-Host "App exe: $($appExe.FullName) ($([math]::Round($appExe.Length/1MB,1)) MB)"
-            "app_exe_path=$($appExe.FullName)" >> $env:GITHUB_OUTPUT
-          } else {
-            Write-Warning "App exe not found in release dir — SFX step will search fallback paths"
+
+          if (-not $appExe) {
+            Write-Error "App exe not found in src-tauri/target/$target/release"
+            exit 1
           }
+
+          $sz = [math]::Round($appExe.Length / 1MB, 1)
+          Write-Host "App exe: $($appExe.FullName) ($sz MB)"
+          "app_exe_path=$($appExe.FullName)" >> $env:GITHUB_OUTPUT
+          "app_exe_size=$sz"                  >> $env:GITHUB_OUTPUT
 
       - name: "Verify core embedded in exe"
         shell: pwsh
@@ -222,11 +211,6 @@ jobs:
           # ─── Core Embedding Verification ─────────────────────────────────────────
           # Proves that include_bytes!("../binaries/fmail-core-x86_64-pc-windows-msvc.exe")
           # actually embedded the Python core into the Tauri executable.
-          #
-          # Three checks:
-          #   1. App exe must be > (core size + 3 MB) — Tauri alone is ~5 MB
-          #   2. Byte scan for PyInstaller markers always present in PyInstaller bundles
-          #   3. Core binary on disk must still match its original size (AV not modified it)
           # ──────────────────────────────────────────────────────────────────────────
           $target   = "x86_64-pc-windows-msvc"
           $coreFile = "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
@@ -255,17 +239,13 @@ jobs:
           Write-Host "  Required min:   $minSzMB MB"
           Write-Host ""
 
-          # Check 1 — size
           if ($appSzMB -lt $minSzMB) {
-            Write-Error ""
-            Write-Error "  FAIL [SIZE]: App exe is $appSzMB MB but minimum expected is $minSzMB MB."
-            Write-Error "  This means include_bytes!() did NOT embed the core."
-            Write-Error "  Ensure PyInstaller step runs BEFORE tauri build in the workflow."
+            Write-Error "FAIL [SIZE]: App exe is $appSzMB MB but minimum expected is $minSzMB MB."
+            Write-Error "include_bytes!() did NOT embed the core. Run PyInstaller BEFORE tauri build."
             exit 1
           }
           Write-Host "  [PASS] Size:    $appSzMB MB >= $minSzMB MB"
 
-          # Check 2 — PyInstaller markers inside the app exe bytes
           $bytes   = [System.IO.File]::ReadAllBytes($appExePath)
           $text    = [System.Text.Encoding]::Latin1.GetString($bytes)
           $markers = @("MEI", "PyInstaller", "_MEIPASS", "python3", "fmail")
@@ -277,48 +257,39 @@ jobs:
             }
           }
           if (-not $hit) {
-            Write-Warning "  [WARN] No PyInstaller markers found in exe bytes."
-            Write-Warning "         Size check passed, so the core is likely present but text scan inconclusive."
+            Write-Warning "  [WARN] No PyInstaller markers found — size check passed so core likely present."
           }
-          $bytes = $null; $text = $null   # free memory
+          $bytes = $null; $text = $null
 
-          # Check 3 — core binary integrity (not quarantined / modified during CI)
           $coreSzBytes = (Get-Item $coreFile).Length
           if ($coreSzBytes -lt 5MB) {
-            Write-Error "  FAIL [INTEGRITY]: Core binary is only $([math]::Round($coreSzBytes/1KB))KB — likely corrupted"; exit 1
+            Write-Error "FAIL [INTEGRITY]: Core binary only $([math]::Round($coreSzBytes/1KB))KB — corrupted"; exit 1
           }
           Write-Host "  [PASS] Integrity: core file intact ($coreSzMB MB)"
-
           Write-Host ""
           Write-Host "  ✅  VERIFICATION PASSED — fmail-core IS embedded in FMailSender.exe"
           Write-Host "════════════════════════════════════════════════════════════════"
 
-      - name: "Install NSIS"
-        shell: pwsh
-        run: |
-          $nsisExe = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (Test-Path $nsisExe) {
-            Write-Host "NSIS already present"
-          } else {
-            Write-Host "Installing NSIS via chocolatey..."
-            choco install nsis --no-progress -y 2>&1 | Select-Object -Last 5
-          }
-          & $nsisExe /VERSION
-
-      - name: "Package as portable NSIS launcher"
+      # ── FIX v6.9: Ship raw Tauri exe directly — no NSIS wrapper ──────────────
+      # Previously: NSIS launcher extracted FMailSender.exe to %LOCALAPPDATA% and
+      # created a desktop shortcut — violating the "downloaded file IS the final app"
+      # requirement.
+      #
+      # Now: the raw fmail-sender.exe (output of tauri build) is renamed and shipped
+      # directly. It already contains fmail-core embedded via include_bytes!().
+      # At runtime it extracts core to %LOCALAPPDATA%\FMailSender\core\ (system-level,
+      # no user-visible desktop files) and starts Python server + WebView2 window.
+      # ─────────────────────────────────────────────────────────────────────────────
+      - name: "Package portable EXE (direct, no installer)"
         id: portable
         shell: pwsh
         run: |
-          $ver    = "${{ steps.tag.outputs.version }}"
-          $target = "x86_64-pc-windows-msvc"
-          $outName = "FMailSender-v$ver.exe"
-
-          New-Item -ItemType Directory -Force -Path "dist_portable" | Out-Null
-
-          # fmail-core is embedded inside FMailSender.exe via include_bytes!() —
-          # no separate sidecar is needed in the portable package.
+          $ver        = "${{ steps.tag.outputs.version }}"
           $appExePath = "${{ steps.tauri_build.outputs.app_exe_path }}"
+          $outName    = "FMailSender-v$ver.exe"
+
           if (-not $appExePath -or -not (Test-Path $appExePath)) {
+            $target = "x86_64-pc-windows-msvc"
             $found = Get-ChildItem "src-tauri/target/$target/release" -Filter "*.exe" -ErrorAction SilentlyContinue |
               Where-Object { $_.Name -notlike "fmail-core*" -and $_.Length -gt 1MB } |
               Sort-Object Length -Descending | Select-Object -First 1
@@ -326,24 +297,17 @@ jobs:
             $appExePath = $found.FullName
           }
 
-          $mainSz = [math]::Round((Get-Item $appExePath).Length / 1MB, 1)
-          Write-Host "App exe: $appExePath ($mainSz MB)"
-          # With embedded core the binary should be >20 MB
-          if ($mainSz -lt 15) { Write-Error "App exe too small ($mainSz MB) — core may not be embedded"; exit 1 }
+          $sz = [math]::Round((Get-Item $appExePath).Length / 1MB, 1)
+          if ($sz -lt 15) {
+            Write-Error "App exe too small ($sz MB) — Python core may not be embedded."
+            Write-Error "Ensure PyInstaller ran before tauri build."
+            exit 1
+          }
 
-          Copy-Item $appExePath "dist_portable\FMailSender.exe"
-
-          $nsisExe = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (-not (Test-Path $nsisExe)) { Write-Error "makensis not found"; exit 1 }
-
-          & $nsisExe /V2 "/DOUTFILE=$outName" portable.nsi
-          if (-not (Test-Path $outName)) { Write-Error "NSIS build failed"; exit 1 }
-
-          $sz = [math]::Round((Get-Item $outName).Length / 1MB, 1)
-          if ($sz -lt 15) { Write-Error "Output too small ($sz MB)"; exit 1 }
-          Write-Host "Portable NSIS launcher: $outName ($sz MB)"
-          "name=$outName" >> $env:GITHUB_OUTPUT
-          "size=$sz"      >> $env:GITHUB_OUTPUT
+          Copy-Item $appExePath $outName -Force
+          Write-Host "Portable EXE: $outName ($sz MB)"
+          "name=$outName"   >> $env:GITHUB_OUTPUT
+          "size=$sz"        >> $env:GITHUB_OUTPUT
 
       - name: "GitHub Release"
         uses: softprops/action-gh-release@v2
@@ -357,16 +321,23 @@ jobs:
           body: |
             ## ${{ steps.tag.outputs.name }}
 
-            | File | Size | Description |
-            |------|------|-------------|
-            | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} MB | **Portable EXE — скачай и запусти, установщик не нужен** |
+            | Файл | Размер | Описание |
+            |------|--------|----------|
+            | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} МБ | **Portable EXE — скачай и запусти, установщик не нужен** |
 
             ### Запуск
             1. Скачайте `${{ steps.portable.outputs.name }}`
-            2. Запустите — приложение стартует автоматически
+            2. Запустите — приложение стартует автоматически (ядро встроено)
             3. При первом запуске введите лицензионный ключ
 
-            **Требования:** Windows 10 x64 (build 1803+) или Windows 11 + WebView2 Runtime
+            ### Что происходит при запуске
+            - Первый запуск: Defender может сканировать файл (~10-30 сек) — это нормально
+            - Python-ядро автоматически извлекается в системную папку `%LOCALAPPDATA%\FMailSender\core\`
+            - Все вычисления выполняются на мощностях вашего компьютера
+            - Единственный сетевой запрос при старте — проверка лицензии на fmail.shop
+
+            **Требования:** Windows 10 x64 (build 1803+) или Windows 11.
+            WebView2 Runtime устанавливается автоматически если не установлен.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

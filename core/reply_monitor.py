@@ -252,8 +252,22 @@ class ReplyMonitor:
 
     @staticmethod
     def save_sent_id(message_id: str, campaign_id: str,
-                     path: Path = Path("data/sent_message_ids.json")) -> None:
-        """Call this after each successful send to track Message-IDs."""
+                     path: Optional[Path] = None) -> None:
+        """Call this after each successful send to track Message-IDs.
+
+        FIX v6.9: Default path was Path("data/sent_message_ids.json") which
+        resolves relative to the CWD — incorrect inside a frozen PyInstaller exe
+        (CWD is the system TEMP extraction dir, not the data directory).
+        Now defaults to %%APPDATA%%/FMailSender/sent_message_ids.json via _get_data_dir().
+        """
+        if path is None:
+            try:
+                from core.storage import _get_data_dir as _gdd
+                path = _gdd() / "sent_message_ids.json"
+            except Exception:
+                import os as _os
+                _appdata = _os.environ.get("APPDATA", _os.path.expanduser("~"))
+                path = Path(_appdata) / "FMailSender" / "sent_message_ids.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         data: Dict[str, List[str]] = {}
         if path.exists():

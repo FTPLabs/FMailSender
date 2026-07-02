@@ -13,6 +13,26 @@ _Нет открытых проблем._
 
 ## ✅ ЗАКРЫТЫЕ ПРОБЛЕМЫ
 
+### PORT-1 — NSIS launcher создавал ярлык на рабочем столе при запуске
+**Файлы:** `portable.nsi`, `.github/workflows/release.yml`
+**Описание:** Скачиваемый `FMailSender-vX.X.X.exe` был NSIS-обёрткой, которая при запуске:
+1. Устанавливала настоящий `FMailSender.exe` в `%LOCALAPPDATA%\FMailSender\`
+2. Создавала ярлык `FMailSender.lnk` на **рабочем столе**
+3. Запускала приложение из %LOCALAPPDATA%, а не из скачанного файла
+Нарушало требование: «скачанный файл — финальный .exe, никаких новых файлов на рабочем столе».
+**Решение v6.9.0:** CI теперь шипит сырой Tauri exe (`fmail-sender.exe`) напрямую,
+переименованный в `FMailSender-v{ver}.exe`. Python-ядро уже встроено через `include_bytes!()`.
+**Статус:** ✅ ЗАКРЫТА (v6.9.0, 2026-07-02)
+
+### PATH-1 — ReplyMonitor.save_sent_id использовал хардкодный путь data/
+**Файлы:** `core/reply_monitor.py`
+**Описание:** `path: Path = Path("data/sent_message_ids.json")` — относительный путь
+от CWD. В замороженном PyInstaller exe CWD указывает на временную папку извлечения,
+не на директорию данных. Message IDs записывались в неверное место (system TEMP).
+**Решение v6.9.0:** Значение по умолчанию заменено на `None`. Внутри функции
+путь вычисляется через `_get_data_dir()` из `core/storage.py` — тот же каталог %APPDATA%.
+**Статус:** ✅ ЗАКРЫТА (v6.9.0, 2026-07-02)
+
 ### SEC-1 — refresh_token хранится в открытом виде (storage.py)
 **Файлы:** `core/storage.py`
 **Описание:** `save_accounts()` шифровал `password` и `access_token`, но `refresh_token`

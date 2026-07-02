@@ -1,36 +1,38 @@
-; FMailSender Portable Launcher v4 — Single-EXE (embedded core)
-  ; Behaviour:
-  ;   1. Extracts FMailSender.exe to %LOCALAPPDATA%\FMailSender\
-  ;      (fmail-core is embedded inside FMailSender.exe — no separate sidecar file)
-  ;   2. Creates a Desktop shortcut pointing to the installed EXE
-  ;   3. Launches FMailSender.exe immediately (Exec = non-blocking, launcher exits)
-  ;
-  ; No installer wizard. No UAC prompt. No TEMP cleanup.
-  ; User experience: download → double-click → app opens. Done.
-  ;
-  ; CI build (from repo root, files staged in dist_portable\):
-  ;   makensis /V2 /DOUTFILE=FMailSender-v6.7.4.exe portable.nsi
+; FMailSender Portable Launcher — LEGACY (kept for reference)
+; ─────────────────────────────────────────────────────────────────────────────
+; NOTE: This NSIS script is NO LONGER USED in CI as of v6.9.
+; The release workflow now ships the raw Tauri exe (fmail-sender.exe renamed
+; to FMailSender-vX.X.X.exe) directly without any NSIS wrapper.
+;
+; Reason: The previous NSIS approach created a Desktop shortcut and installed
+; the app to %LOCALAPPDATA% — violating the "downloaded file IS the final app"
+; requirement. The raw Tauri exe already embeds fmail-core via include_bytes!()
+; and is truly self-contained.
+;
+; This file is kept only as a reference for manual builds.
+; ─────────────────────────────────────────────────────────────────────────────
 
-  Unicode true
-  SetCompressor /SOLID lzma
-  Name "FMailSender"
-  InstallDir "$LOCALAPPDATA\FMailSender"
-  RequestExecutionLevel user
-  SilentInstall silent
+Unicode true
+SetCompressor /SOLID lzma
+Name "FMailSender"
+InstallDir "$LOCALAPPDATA\FMailSender"
+RequestExecutionLevel user
+SilentInstall silent
 
-  !ifndef OUTFILE
-    !define OUTFILE "FMailSender.exe"
-  !endif
+!ifndef OUTFILE
+  !define OUTFILE "FMailSender.exe"
+!endif
 
-  OutFile "${OUTFILE}"
+OutFile "${OUTFILE}"
 
-  Section
-    SetOutPath "$INSTDIR"
-    File "dist_portable\FMailSender.exe"
+Section
+  SetOutPath "$INSTDIR"
+  File "dist_portable\FMailSender.exe"
 
-    ; Desktop shortcut — user can double-click this for future launches
-    CreateShortcut "$DESKTOP\FMailSender.lnk" "$INSTDIR\FMailSender.exe" "" "$INSTDIR\FMailSender.exe" 0
+  ; NOTE: Desktop shortcut REMOVED (v6.9) — no user-visible files should be created.
+  ; The previous line was: CreateShortcut "$DESKTOP\FMailSender.lnk" ...
+  ; Removed to match the "downloaded file IS the final app" contract.
 
-    ; Launch immediately — Exec is non-blocking, launcher exits after starting app
-    Exec '"$INSTDIR\FMailSender.exe"'
-  SectionEnd
+  ; Launch immediately — Exec is non-blocking, launcher exits after starting app
+  Exec '"$INSTDIR\FMailSender.exe"'
+SectionEnd
