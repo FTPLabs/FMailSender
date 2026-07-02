@@ -1,5 +1,5 @@
 """
-FMailSender — License validation module v1.3.0
+FMailSender — License validation module v1.4.0
 Validates license against fmail.shop license server.
 Caches valid license locally for offline startup.
 
@@ -10,11 +10,14 @@ Remote API:
   POST https://fmail.shop/v1/verify   — validate existing key + hwid
   POST https://fmail.shop/v1/activate — bind key to hwid
 
-v1.3.0 fixes:
-  - WMIC calls now run in PARALLEL → max 5s instead of 15s
-  - _validate_online() now parses error body on non-200 responses
-  - activate_license_key() now parses JWT payload to extract plan/expires_at
-  - HWID mismatch produces a clear Russian-language error message
+v1.4.0 fixes:
+  - WMIC subprocess calls REMOVED — replaced with:
+      1. winreg  (MachineGuid — <1 ms, always works)
+      2. wmi Python package  (Win32_ComputerSystemProduct + Win32_Processor)
+      3. PowerShell Get-WmiObject fallback (if wmi package unavailable)
+      4. MAC + OS info  (non-Windows / all above failed)
+  - Max HWID latency reduced from 10 s → <1 s on modern Windows
+  - WMIC was deprecated in Win 10 21H1 and removed in some Win 11 builds
 """
 from __future__ import annotations
 
@@ -44,8 +47,7 @@ OFFLINE_GRACE_DAYS = 0        # No offline grace — server must confirm validit
 # Valid key prefixes — must match KEY_PREFIX in server/config.py
 _VALID_PREFIXES = ("FMSND-", "FM-")
 
-# HWID is stable for the lifetime of the process — cache after first call
-# to avoid repeated WMIC subprocess calls (each takes up to 5 seconds).
+# HWID is stable for the lifetime of the process — cache after first call.
 _hwid_cache: Optional[str] = None
 
 
@@ -64,14 +66,17 @@ LICENSE_FILE = DATA_DIR / "license.json"
 def _get_hardware_id() -> str:
     """
     Stable hardware ID (HWID) — survives reboots and minor config changes.
-    Sources (by stability):
-      1. Windows MachineGuid (HKLM\\SOFTWARE\\Microsoft\\Cryptography)
-      2. UUID материнской платы (WMIC csproduct)
-      3. CPU ProcessorId (WMIC cpu)
-      4. Fallback: MAC + OS-info (для не-Windows / если WMIC недоступен).
 
-    FIX v1.3.0: WMIC calls now run in PARALLEL via ThreadPoolExecutor.
-    Max latency drops from 15s (3×5s sequential) to 5s (3×5s parallel).
+    Sources (in order of priority):
+      1. Windows MachineGuid (winreg — <1 ms, always works on Windows)
+      2. Win32_ComputerSystemProduct.UUID  (wmi Python package — <100 ms)
+      3. Win32_Processor.ProcessorId       (wmi Python package — <100 ms)
+      4. PowerShell Get-WmiObject fallback (if wmi package unavailable)
+      5. MAC + OS info (non-Windows / all above failed)
+
+    v1.4.0: WMIC subprocess calls removed — they were deprecated in
+    Windows 10 21H1 and removed in some Windows 11 builds, causing
+    hangs and empty results.
 
     Result is cached for the lifetime of the process.
     """
@@ -79,11 +84,9 @@ def _get_hardware_id() -> str:
     if _hwid_cache is not None:
         return _hwid_cache
 
-    import subprocess as _sp
-    _CF = 0x08000000  # CREATE_NO_WINDOW — скрыть консоль wmic на Windows
-    components: list = []
+    components: list[str] = []
 
-    # 1. Windows MachineGuid — синхронный, быстрый (реестр, <1 ms)
+    # ── 1. Windows MachineGuid (registry, <1 ms) ──────────────────────────────
     try:
         import winreg as _wr
         _key = _wr.OpenKey(_wr.HKEY_LOCAL_MACHINE,
@@ -95,55 +98,69 @@ def _get_hardware_id() -> str:
     except Exception:
         pass
 
-    # 2 & 3. WMIC calls — run in PARALLEL to reduce latency from 10s to 5s
-    def _wmic_uuid():
+    # ── 2 & 3. wmi Python package (fast, no subprocess) ───────────────────────
+    if len(components) < 2:
         try:
-            _r = _sp.run(
-                ["wmic", "csproduct", "get", "UUID", "/value"],
-                capture_output=True, text=True, timeout=5, creationflags=_CF,
-            )
-            for _line in _r.stdout.splitlines():
-                if "UUID=" in _line:
-                    _val = _line.split("=", 1)[-1].strip()
+            import wmi as _wmi
+            _c = _wmi.WMI(find_classes=False)
+
+            # UUID from Win32_ComputerSystemProduct
+            try:
+                for _item in _c.Win32_ComputerSystemProduct():
+                    _val = getattr(_item, "UUID", "") or ""
+                    _val = _val.strip()
                     if _val and "FFFFFFFF" not in _val.upper() and len(_val) > 8:
-                        return f"mb:{_val}"
-        except Exception:
-            pass
-        return None
+                        components.append(f"mb:{_val}")
+                        break
+            except Exception:
+                pass
 
-    def _wmic_cpu():
-        try:
-            _r = _sp.run(
-                ["wmic", "cpu", "get", "ProcessorId", "/value"],
-                capture_output=True, text=True, timeout=5, creationflags=_CF,
-            )
-            for _line in _r.stdout.splitlines():
-                if "ProcessorId=" in _line:
-                    _val = _line.split("=", 1)[-1].strip()
+            # ProcessorId from Win32_Processor
+            try:
+                for _item in _c.Win32_Processor():
+                    _val = getattr(_item, "ProcessorId", "") or ""
+                    _val = _val.strip()
                     if _val:
-                        return f"cpu:{_val}"
+                        components.append(f"cpu:{_val}")
+                        break
+            except Exception:
+                pass
+
         except Exception:
-            pass
-        return None
+            # wmi not available — try PowerShell fallback
+            _ps_tried = False
+            if sys.platform == "win32" and len(components) < 2:
+                try:
+                    import subprocess as _sp
+                    _CF = 0x08000000  # CREATE_NO_WINDOW
+                    _r = _sp.run(
+                        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                         "(Get-WmiObject Win32_ComputerSystemProduct).UUID"],
+                        capture_output=True, text=True, timeout=8,
+                        creationflags=_CF,
+                    )
+                    _val = (_r.stdout or "").strip()
+                    if _val and "FFFFFFFF" not in _val.upper() and len(_val) > 8:
+                        components.append(f"mb:{_val}")
+                    _ps_tried = True
+                except Exception:
+                    pass
 
-    try:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        with ThreadPoolExecutor(max_workers=2) as _pool:
-            _futs = [_pool.submit(_wmic_uuid), _pool.submit(_wmic_cpu)]
-            for _f in as_completed(_futs):
-                _val = _f.result()
-                if _val:
-                    components.append(_val)
-    except Exception:
-        # Fallback: sequential if ThreadPoolExecutor fails
-        _v = _wmic_uuid()
-        if _v:
-            components.append(_v)
-        _v = _wmic_cpu()
-        if _v:
-            components.append(_v)
+                if not _ps_tried or len(components) < 2:
+                    try:
+                        _r = _sp.run(
+                            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                             "(Get-WmiObject Win32_Processor).ProcessorId"],
+                            capture_output=True, text=True, timeout=8,
+                            creationflags=_CF,
+                        )
+                        _val = (_r.stdout or "").strip()
+                        if _val:
+                            components.append(f"cpu:{_val}")
+                    except Exception:
+                        pass
 
-    # 4. Fallback (non-Windows / WMIC unavailable)
+    # ── 4. Fallback: MAC + OS info (non-Windows / WMIC/wmi unavailable) ───────
     if not components:
         try:
             _node = uuid.getnode()
@@ -191,7 +208,6 @@ def _decode_jwt_payload(token: str) -> dict:
         parts = token.split(".")
         if len(parts) != 3:
             return {}
-        # Base64url → base64 padding fix
         payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
         payload_bytes = base64.urlsafe_b64decode(payload_b64)
         return json.loads(payload_bytes.decode("utf-8"))
@@ -221,7 +237,7 @@ def _hwid_mismatch_message() -> str:
 
 
 def get_cached_license_status() -> dict:
-    """Return license status from local cache ONLY — no WMIC, no network, <1 ms.
+    """Return license status from local cache ONLY — no WMI, no network, <1 ms.
 
     Used by GET /api/license for instant startup response.
     Full online validation runs concurrently via the background task.
@@ -253,11 +269,7 @@ def get_cached_license_status() -> dict:
 
 
 def _validate_online(key: str, hwid: str, timeout: float = 10.0) -> dict:
-    """Call /v1/verify on fmail.shop to validate a key.
-
-    FIX v1.3.0: Non-200 responses now have their body parsed for error detail.
-    HWID mismatch (HTTP 403) now produces a clear Russian message.
-    """
+    """Call /v1/verify on fmail.shop to validate a key."""
     try:
         import requests
         connect_t = min(timeout, 5.0)
@@ -270,12 +282,9 @@ def _validate_online(key: str, hwid: str, timeout: float = 10.0) -> dict:
         if resp.status_code == 200:
             return resp.json()
 
-        # Parse error detail from response body
         detail = _parse_error_detail(resp)
 
-        # Friendly messages for known HTTP codes
         if resp.status_code == 403:
-            # Check if it's specifically HWID mismatch
             detail_lower = detail.lower()
             if "hwid" in detail_lower or "mismatch" in detail_lower or "device" in detail_lower:
                 return {
@@ -284,7 +293,6 @@ def _validate_online(key: str, hwid: str, timeout: float = 10.0) -> dict:
                     "message": _hwid_mismatch_message(),
                     "hwid_mismatch": True,
                 }
-            # Could be revoked or expired
             return {
                 "valid": False,
                 "error": detail,
@@ -362,12 +370,7 @@ def get_license_status() -> dict:
 
 
 def activate_license_key(key: str) -> dict:
-    """Activate a license key on this machine via /v1/activate.
-
-    FIX v1.3.0: Server returns {"token": "JWT..."}.
-    We now decode the JWT payload to extract plan / expires_at so the cache
-    is fully populated — the UI can show the correct plan and expiry date.
-    """
+    """Activate a license key on this machine via /v1/activate."""
     if not key or not _is_valid_key_format(key):
         raise ValueError(
             "Неверный формат ключа. Ожидается: FMSND-XXXXXX-XXXXXX-XXXXXX-XXXXXX"
@@ -387,13 +390,11 @@ def activate_license_key(key: str) -> dict:
 
         if resp.status_code != 200:
             detail = _parse_error_detail(resp)
-            # Clear HWID mismatch message
             detail_lower = (detail or "").lower()
             if "hwid" in detail_lower or "mismatch" in detail_lower or "device" in detail_lower:
                 raise RuntimeError(_hwid_mismatch_message())
             raise RuntimeError(detail or "Ключ недействителен")
 
-        # HTTP 200 — check if server explicitly returned valid=false
         if result.get("valid") is False:
             detail = result.get("detail") or result.get("error") or result.get("message") or "Ключ недействителен"
             raise RuntimeError(detail)
@@ -408,13 +409,10 @@ def activate_license_key(key: str) -> dict:
     except Exception as exc:
         raise RuntimeError(f"Не удалось связаться с сервером лицензий: {exc}") from exc
 
-    # FIX v1.3.0: server returns either {token, valid, plan, expires_at}
-    # (new format) or just {token} (old format). For old format, decode JWT.
     plan = result.get("plan")
     expires_at = result.get("expires_at")
 
     if not plan or not expires_at:
-        # Decode JWT to get plan and expiry
         token = result.get("token", "")
         if token:
             payload = _decode_jwt_payload(token)
@@ -457,10 +455,10 @@ def validate_on_startup() -> dict:
     Key differences from get_license_status():
       - ALWAYS calls the license server — never skips network via cache age.
       - If server explicitly returns valid=False → revoked, blocked immediately.
-      - If server is unreachable (network error / timeout) → also returns
-        valid=False. OFFLINE_GRACE_DAYS=0 means no offline bypass whatsoever.
+      - If server is unreachable → also returns valid=False (no offline grace).
 
-    Returns the same dict shape as get_license_status().
+    HWID is cached after first call — subsequent calls within the same process
+    are instant (no WMI, no subprocess).
     """
     hwid = _get_hardware_id()
     cached = _load_cached()
@@ -477,9 +475,7 @@ def validate_on_startup() -> dict:
     result = _validate_online(key, hwid)
 
     if not result.get("offline"):
-        # Server responded — trust it unconditionally
         is_valid = bool(result.get("valid", False))
-        # Use result message if present, otherwise build one from error
         message = result.get("message", "") or result.get("error", "")
         updated = {
             **cached,
@@ -500,7 +496,7 @@ def validate_on_startup() -> dict:
             "hwid_mismatch": result.get("hwid_mismatch", False),
         }
 
-    # Network error or requests module unavailable — NO offline grace period.
+    # Network error or requests unavailable — NO offline grace period.
     return {
         "valid": False,
         "hwid": hwid,

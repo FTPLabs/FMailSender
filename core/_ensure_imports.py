@@ -1,16 +1,16 @@
 """
-FMailSender — Explicit import guard for PyInstaller.
+FMailSender — Explicit import guard.
 
-PyInstaller performs static analysis to discover modules. Any module that is
-loaded lazily at runtime (via importlib, __import__, or plugin mechanisms)
-is invisible to the analyser and gets excluded from the bundle — causing
-ModuleNotFoundError when the frozen exe runs.
+Originally written for PyInstaller, which required explicit imports
+to include lazily-loaded modules in the bundle.
 
-Importing this module from main.py guarantees that every lazy dependency is
-present in the bundle, because PyInstaller follows explicit import statements.
+With Nuitka (v6.9.2+), static analysis is more thorough and usually
+finds lazy imports automatically. We keep this file for:
+  1. Dev-mode compatibility (importing this is harmless)
+  2. Fallback if Nuitka misses any import
+  3. Documentation of all runtime dependencies
 
 DO NOT remove imports from this file without verifying the frozen exe works.
-Add new imports here whenever a new RuntimeError / ModuleNotFoundError appears.
 
 ROOT CAUSE NOTE (v6.7.7):
   core.license and requests were both lazy-imported inside try blocks,
@@ -20,14 +20,10 @@ ROOT CAUSE NOTE (v6.7.7):
   ImportError in lifespan -> _set_license_ok(True) -> all users admitted.
 """
 
-# ── License module (imported lazily inside try blocks in server.py) ───────────
-# Without this, PyInstaller misses core.license entirely, causing lifespan
-# ImportError → _set_license_ok(True) → all users bypassed without a key.
+# ── License module ────────────────────────────────────────────────────────────
 import core.license                         # noqa: F401
 
-# ── requests (imported lazily inside _validate_online() in core/license.py) ───
-# Without this, import requests raises ImportError at runtime → treated as
-# "offline" → 7-day grace period fires → license check bypassed completely!
+# ── requests ──────────────────────────────────────────────────────────────────
 import requests                             # noqa: F401
 import requests.adapters                    # noqa: F401
 import requests.auth                        # noqa: F401
@@ -49,7 +45,7 @@ import idna                                 # noqa: F401
 import multipart                            # noqa: F401
 import multipart.multipart                  # noqa: F401
 
-# ── email.mime (required by smtplib / aiosmtplib for composing emails) ────────
+# ── email.mime (required by smtplib / aiosmtplib) ─────────────────────────────
 import email.mime                           # noqa: F401
 import email.mime.application               # noqa: F401
 import email.mime.audio                     # noqa: F401
@@ -63,7 +59,7 @@ import email.encoders                       # noqa: F401
 import email.header                         # noqa: F401
 import email.utils                          # noqa: F401
 
-# ── FastAPI / Starlette internals loaded lazily ───────────────────────────────
+# ── FastAPI / Starlette internals ─────────────────────────────────────────────
 import fastapi.middleware.cors              # noqa: F401
 import starlette.middleware.cors            # noqa: F401
 import starlette.responses                  # noqa: F401

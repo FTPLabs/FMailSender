@@ -1,7 +1,10 @@
-// FMailSender Tauri shell v6.9.1
+// FMailSender Tauri shell v6.9.2
 //
-// Cold-start robustness: spawn_with_retry() detects when the process exits
-// immediately and retries silently up to 25 times with minimal delay.
+// Fixes in v6.9.2:
+//   - PORT_WAIT_SECS increased 90s → 200s (Nuitka first-run extracts to cache)
+//   - SPAWN_MAX_RETRIES reduced 25 → 8 (avoid long pointless retry loops)
+//   - "av_wait" event emitted while waiting for port (helps frontend show better message)
+//   - av_wait_secs tracking added for UI progress calculation
 //
 // Events emitted to the frontend (via AppHandle::emit):
 //   core://status  →  { stage: str, message: str, attempt: u32 }
@@ -9,6 +12,7 @@
 //
 // Tauri commands:
 //   restart_core  —  kill current core + re-extract + re-spawn (UI "Retry" button)
+//   get_core_url  —  returns "http://127.0.0.1:7531"
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::Serialize;
@@ -30,18 +34,23 @@ const CORE_PORT:            u16 = 7531;
 const CORE_HOST_PRIMARY:    &str = "127.0.0.1";
 const CORE_HOST_FALLBACK:   &str = "localhost";
 
-// How long to wait for the port to open AFTER getting a living process.
-// AV may delay startup but the process itself is alive.
-const PORT_WAIT_SECS:       u64 = 90;
+// v6.9.2: Increased from 90s → 200s.
+// Nuitka onefile extracts to %LOCALAPPDATA%\FMailSender\core\ on first run (~5-30s).
+// Windows Defender may scan extracted files (up to 60s on slow machines).
+// Python uvicorn startup: ~2-5s after extraction.
+// Total worst-case first run: ~120s. We give 200s for safety.
+const PORT_WAIT_SECS:       u64 = 200;
 
-// Spawn retry parameters.  25 × (3s alive-check + 5s retry-delay) ≈ 200s max.
-const SPAWN_MAX_RETRIES:    u32 = 25;
-const SPAWN_ALIVE_CHECK_S:  u64 = 2;   // wait this long before declaring process alive
-const SPAWN_RETRY_DELAY_S:  u64 = 2;   // wait this long before next retry attempt
+// v6.9.2: Reduced from 25 → 8.
+// Each retry cycle = SPAWN_ALIVE_CHECK_S + SPAWN_RETRY_DELAY_S = 6s.
+// 8 retries × 6s = 48s max retry window. Prevents very long pointless loops.
+const SPAWN_MAX_RETRIES:    u32 = 8;
+const SPAWN_ALIVE_CHECK_S:  u64 = 3;
+const SPAWN_RETRY_DELAY_S:  u64 = 3;
 
 /// fmail-core embedded at compile time.
 /// Build will FAIL with a clear error if this file is missing — that is intentional.
-/// CI must run PyInstaller BEFORE `tauri build`.
+/// CI must run Nuitka BEFORE `tauri build`.
 #[cfg(target_os = "windows")]
 static CORE_BYTES: &[u8] = include_bytes!(
     "../binaries/fmail-core-x86_64-pc-windows-msvc.exe"
@@ -68,7 +77,10 @@ fn emit(handle: &AppHandle, stage: &'static str, message: impl Into<String>, att
 
 fn try_connect(host: &str, port: u16) -> bool {
     let addr = format!("{}:{}", host, port);
-    TcpStream::connect(&addr[..]).is_ok()
+    TcpStream::connect_timeout(
+        &addr.parse().unwrap_or_else(|_| format!("127.0.0.1:{}", port).parse().unwrap()),
+        Duration::from_millis(500),
+    ).is_ok()
 }
 
 fn port_open() -> bool {
@@ -76,11 +88,26 @@ fn port_open() -> bool {
 }
 
 /// Wait until the Python core is reachable or timeout elapses.
-fn wait_for_port(timeout: Duration) -> bool {
+/// Emits "av_wait" events every 10s so the UI can update progress.
+fn wait_for_port(timeout: Duration, handle: &AppHandle) -> bool {
     let deadline = Instant::now() + timeout;
+    let mut last_event = Instant::now();
+    let mut elapsed_s: u64 = 0;
+
     while Instant::now() < deadline {
         if port_open() { return true; }
-        thread::sleep(Duration::from_millis(200));
+        thread::sleep(Duration::from_millis(300));
+
+        elapsed_s = Instant::now().duration_since(last_event).as_secs();
+        // Emit progress event every 8 seconds so UI can show "still starting..."
+        if elapsed_s >= 8 {
+            last_event = Instant::now();
+            let total_elapsed = timeout.as_secs().saturating_sub(
+                deadline.duration_since(Instant::now()).as_secs()
+            );
+            emit(handle, "av_wait",
+                format!("Запуск Python ядра... ({} сек)", total_elapsed), 0);
+        }
     }
     false
 }
@@ -172,14 +199,12 @@ fn extract_core(handle: &AppHandle) -> Option<(PathBuf, bool)> {
         f.write_all(CORE_BYTES).ok()?;
         drop(f);
 
-        // Verify write integrity: size must match.
+        // Verify write integrity.
         let written = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         if written != expected {
             eprintln!("[core] write failed: expected {} bytes, got {}", expected, written);
             return None;
         }
-
-
     }
 
     Some((path, needs_write))
@@ -202,14 +227,6 @@ fn spawn_core_from(path: &PathBuf) -> Option<Child> {
 }
 
 /// Spawn fmail-core, retrying if AV kills the process immediately.
-///
-/// AV behaviour on new binaries:
-///   1. Process starts → AV injects into it for scanning
-///   2. AV terminates the process (exit code 0 or non-zero) within 1-3s
-///   3. After 1-3 more attempts the file is trusted → process survives
-///
-/// We detect "killed immediately" by checking if the process is still
-/// alive after SPAWN_ALIVE_CHECK_S seconds.  If not, we retry.
 fn spawn_with_retry(path: &PathBuf, handle: &AppHandle) -> Option<Child> {
     for attempt in 1..=SPAWN_MAX_RETRIES {
         emit(handle, "spawning",
@@ -236,7 +253,7 @@ fn spawn_with_retry(path: &PathBuf, handle: &AppHandle) -> Option<Child> {
                 return Some(child);
             }
             Ok(Some(status)) => {
-                // Process exited immediately — likely AV kill.
+                // Process exited immediately — likely AV kill or crash.
                 eprintln!("[core] process terminated immediately on attempt {} ({})",
                     attempt, status);
                 emit(handle, "killed",
@@ -272,7 +289,7 @@ fn run_startup(core_handle: Arc<Mutex<Option<Child>>>, app_handle: AppHandle) {
         }
     };
 
-    // If binary was freshly written and AV might quarantine it, re-verify size.
+    // If binary was freshly written, re-verify size.
     if fresh {
         let on_disk = std::fs::metadata(&core_path).map(|m| m.len()).unwrap_or(0);
         #[cfg(target_os = "windows")]
@@ -292,12 +309,12 @@ fn run_startup(core_handle: Arc<Mutex<Option<Child>>>, app_handle: AppHandle) {
     *core_handle.lock().unwrap() = child;
 
     // 4. Wait for the TCP port to open.
-    if wait_for_port(Duration::from_secs(PORT_WAIT_SECS)) {
+    if wait_for_port(Duration::from_secs(PORT_WAIT_SECS), &app_handle) {
         emit(&app_handle, "ready", "Python ядро готово", 0);
         eprintln!("[FMailSender] fmail-core is ready on port {}", CORE_PORT);
     } else {
         emit(&app_handle, "failed",
-            format!("Python ядро не ответило на порт {}. Попробуйте перезапустить приложение.", CORE_PORT), 0);
+            format!("Python ядро не ответило на порт {} за {} сек. Нажмите «Перезапустить ядро».", CORE_PORT, PORT_WAIT_SECS), 0);
         eprintln!("[FMailSender] fmail-core failed to open port {} within {}s",
             CORE_PORT, PORT_WAIT_SECS);
     }
@@ -311,7 +328,6 @@ fn restart_core(
     core_handle: tauri::State<Arc<Mutex<Option<Child>>>>,
     app_handle: AppHandle,
 ) {
-    // Kill current core.
     if let Ok(mut guard) = core_handle.lock() {
         if let Some(mut child) = guard.take() {
             let _ = child.kill();

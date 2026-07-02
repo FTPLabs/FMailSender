@@ -1,27 +1,19 @@
 /**
  * StartupOverlay — loading screen + license activation.
  *
- * v6.9.1 startup flow:
- *   1. Tauri spawns fmail-core (background thread — window opens IMMEDIATELY)
- *   2. Rust emits core://status events → we show real-time progress
- *   3. Python starts, uvicorn ready → port opens
- *   4. StatusContext detects backend online (polls /api/status every 500ms)
- *   5. UI calls GET /api/license → returns LOCAL CACHE instantly
- *      - valid=true  → overlay dismissed
- *      - valid=false → activation screen shown
- *
- * Startup:
- *   - Rust retries spawn silently if process exits immediately
- *   - UI shows clean loading indicator without technical details
- *   - StatusContext continues polling FOREVER — auto-recovers when core starts
+ * v6.9.2 fixes:
+ *   - Retry button shows after 60s regardless of coreStage (was: only if stage='failed')
+ *   - "Defender может сканировать..." hint shown after 30s
+ *   - av_wait stage message handled explicitly
+ *   - Progress bar calculation improved for long Nuitka first-run extraction
  */
 import { useEffect, useRef, useState } from 'react'
 import { useStatus } from '../contexts/StatusContext'
 import { getBaseUrl } from '../api'
 import { FRONTEND_VERSION } from '../version'
 
-// After this many seconds, show the manual retry button
-const TIMEOUT_SECS = 120
+// After this many seconds on first load, show retry button
+const RETRY_AFTER_SECS = 60
 
 interface CoreStatus {
   stage:   string
@@ -34,7 +26,6 @@ async function listenCoreStatus(
   cb: (payload: CoreStatus) => void
 ): Promise<(() => void) | null> {
   try {
-    // Tauri v2 injects window.__TAURI_INTERNALS__ in the WebView
     const tauri = (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ as
       { invoke?: unknown; event?: { listen?: (evt: string, cb: (e: { payload: unknown }) => void) => Promise<() => void> } } | undefined
     const listen = tauri?.event?.listen
@@ -90,7 +81,6 @@ export default function StartupOverlay() {
   const [activating,  setActivating]  = useState(false)
   const [activateErr, setActivateErr] = useState('')
   const [bgChecking,  setBgChecking]  = useState(false)
-  // Real-time message from Rust core://status events
   const [coreStage,   setCoreStage]   = useState('')
   const [coreMsg,     setCoreMsg]     = useState('')
   const [restarting,  setRestarting]  = useState(false)
@@ -99,7 +89,7 @@ export default function StartupOverlay() {
   const onlineRef    = useRef(false)
   const licenseOkRef = useRef<boolean | null>(null)
 
-  useEffect(() => { onlineRef.current   = online    }, [online])
+  useEffect(() => { onlineRef.current    = online    }, [online])
   useEffect(() => { licenseOkRef.current = licenseOk }, [licenseOk])
 
   // ── Listen to Tauri core://status events ──────────────────────────────────
@@ -163,8 +153,9 @@ export default function StartupOverlay() {
       const sec = (Date.now() - startedAt.current) / 1000
       setElapsed(sec)
       if (!onlineRef.current) {
-        const target = Math.min(sec / TIMEOUT_SECS, 1) * 90
-        setProgress(p => p + (target - p) * 0.15)
+        // Smooth progress up to 90% over 180s (matches PORT_WAIT_SECS)
+        const target = Math.min(sec / 180, 1) * 90
+        setProgress(p => p + (target - p) * 0.12)
       }
     }, 100)
     return () => clearInterval(timer)
@@ -204,7 +195,6 @@ export default function StartupOverlay() {
     setRestarting(true)
     setCoreMsg('Перезапуск Python ядра...')
     await invokeTauri('restart_core')
-    // reset timer
     startedAt.current = Date.now()
     setElapsed(0)
     setProgress(0)
@@ -277,28 +267,44 @@ export default function StartupOverlay() {
 
   // ── Loading screen ────────────────────────────────────────────────────────
   const elapsedRound = Math.round(elapsed)
-  const isTimeout    = elapsed > TIMEOUT_SECS && !online
+  const isTimeout    = elapsed > 200 && !online   // matches PORT_WAIT_SECS
+  // FIX v6.9.2: Show retry button after 60s regardless of coreStage.
+  // Previously: required coreStage==='failed' — which never happened during AV scan/retry loops.
+  const showRetry    = elapsed > RETRY_AFTER_SECS && !online
 
-  // Priority: Rust event message > fallback text based on elapsed
+  // Stage-to-hint mapping for user-friendly messages
+  const stageHint: Record<string, string> = {
+    extracting: 'Распаковка Python ядра...',
+    av_wait:    'Запуск Python ядра...',
+    spawning:   'Запуск Python ядра...',
+    killed:     'Windows Defender проверяет файлы...',
+    running:    'Ожидание ответа ядра...',
+    ready:      'Готово',
+    failed:     coreMsg || 'Не удалось запустить Python ядро.',
+  }
+
   const fallbackMsg = elapsed < 3  ? 'Инициализация...'
                     : elapsed < 10 ? 'Запуск Python ядра...'
-                    : elapsed < 20 ? 'Загрузка зависимостей...'
+                    : elapsed < 20 ? 'Загрузка компонентов...'
                     : elapsed < 35 ? 'Старт FastAPI сервера...'
                     : elapsed < 60 ? 'Запуск сервисов...'
-                    :                'Загрузка...'
+                    : elapsed < 90 ? 'Почти готово...'
+                    :                'Ожидание ядра...'
 
   const displayMsg   = online
-    ? licenseOk === null ? 'Проверка лицензии...' : 'Готово'
-    : coreMsg || fallbackMsg
+    ? (licenseOk === null ? 'Проверка лицензии...' : 'Готово')
+    : (coreStage && stageHint[coreStage]) || coreMsg || fallbackMsg
 
   const dots = !online ? '.'.repeat(Math.floor(elapsed * 2) % 4) : ''
 
-  // Stage-based color
   const msgColor = coreStage === 'failed'  ? '#ef4444'
                  : coreStage === 'ready'   ? '#10b981'
                  : online                  ? '#10b981'
                  : isTimeout               ? 'rgba(239,68,68,0.85)'
                  : '#6666aa'
+
+  // Hint for Windows Defender delay — shown after 30s if still not online
+  const showDefenderHint = elapsed > 30 && !online && coreStage !== 'failed'
 
   return (
     <div
@@ -309,7 +315,6 @@ export default function StartupOverlay() {
         <AppLogo size={72} />
         <div className="text-center">
           <div className="text-xl font-semibold tracking-tight" style={{ color: '#e8e8ff' }}>FMail Sender</div>
-
         </div>
       </div>
 
@@ -326,19 +331,32 @@ export default function StartupOverlay() {
         <div className="text-center text-xs min-h-[1rem]" style={{ color: msgColor }}>
           <span>{displayMsg}{dots}</span>
         </div>
+        {!online && elapsedRound > 5 && (
+          <div className="text-center text-[0.68rem]" style={{ color: '#383860' }}>
+            {elapsedRound} сек
+          </div>
+        )}
       </div>
 
-
-
-
-
-      {/* Timeout advisory + retry button — shown only on hard failure */}
-      {isTimeout && !online && coreStage === 'failed' && (
-        <div className="mt-5 flex flex-col items-center gap-3 max-w-xs px-4">
-          <p className="text-center text-xs leading-relaxed"
-            style={{ color: 'rgba(239,68,68,0.8)' }}>
-            {coreMsg || 'Не удалось запустить Python ядро.'}
+      {/* Windows Defender hint — shown after 30s */}
+      {showDefenderHint && (
+        <div className="mt-4 max-w-xs px-4 text-center">
+          <p className="text-[0.7rem] leading-relaxed" style={{ color: '#3a3a6a' }}>
+            Windows Defender может проверять файлы при первом запуске.
+            Обычно занимает 30–90 сек.
           </p>
+        </div>
+      )}
+
+      {/* Retry button — shown after 60s regardless of stage (v6.9.2 fix) */}
+      {showRetry && (
+        <div className="mt-5 flex flex-col items-center gap-3 max-w-xs px-4">
+          {coreStage === 'failed' && (
+            <p className="text-center text-xs leading-relaxed"
+              style={{ color: 'rgba(239,68,68,0.8)' }}>
+              {coreMsg || 'Не удалось запустить Python ядро.'}
+            </p>
+          )}
           <button
             onClick={handleRestartCore}
             disabled={restarting}
