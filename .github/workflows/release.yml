@@ -286,7 +286,7 @@ jobs:
         run: |
           $ver        = "${{ steps.tag.outputs.version }}"
           $appExePath = "${{ steps.tauri_build.outputs.app_exe_path }}"
-          $outName    = "FMailSender-v$ver.exe"
+          $outName    = "FMailSender.exe"
 
           if (-not $appExePath -or -not (Test-Path $appExePath)) {
             $target = "x86_64-pc-windows-msvc"

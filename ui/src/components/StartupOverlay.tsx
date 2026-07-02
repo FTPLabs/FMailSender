@@ -1,7 +1,7 @@
 /**
  * StartupOverlay — loading screen + license activation.
  *
- * v6.8.2 startup flow:
+ * v6.9.1 startup flow:
  *   1. Tauri spawns fmail-core (background thread — window opens IMMEDIATELY)
  *   2. Rust emits core://status events → we show real-time progress
  *   3. Python starts, uvicorn ready → port opens
@@ -10,11 +10,9 @@
  *      - valid=true  → overlay dismissed
  *      - valid=false → activation screen shown
  *
- * AV cold-start retry:
- *   - Rust retries spawn up to 25 times if AV kills the process immediately
- *   - UI shows real-time stage messages from Rust
- *   - After WARN_SECS: "still working..." message (not an error)
- *   - After TIMEOUT_SECS: show "Перезапустить ядро" button + advisory
+ * Startup:
+ *   - Rust retries spawn silently if process exits immediately
+ *   - UI shows clean loading indicator without technical details
  *   - StatusContext continues polling FOREVER — auto-recovers when core starts
  */
 import { useEffect, useRef, useState } from 'react'
@@ -22,8 +20,6 @@ import { useStatus } from '../contexts/StatusContext'
 import { getBaseUrl } from '../api'
 import { FRONTEND_VERSION } from '../version'
 
-// Show "still scanning" advisory after this many seconds
-const WARN_SECS    = 45
 // After this many seconds, show the manual retry button
 const TIMEOUT_SECS = 120
 
@@ -282,15 +278,14 @@ export default function StartupOverlay() {
   // ── Loading screen ────────────────────────────────────────────────────────
   const elapsedRound = Math.round(elapsed)
   const isTimeout    = elapsed > TIMEOUT_SECS && !online
-  const isWarning    = elapsed > WARN_SECS    && !online
 
   // Priority: Rust event message > fallback text based on elapsed
   const fallbackMsg = elapsed < 3  ? 'Инициализация...'
                     : elapsed < 10 ? 'Запуск Python ядра...'
                     : elapsed < 20 ? 'Загрузка зависимостей...'
                     : elapsed < 35 ? 'Старт FastAPI сервера...'
-                    : elapsed < 50 ? 'Антивирус сканирует ядро...'
-                    :                'Ожидание антивируса...'
+                    : elapsed < 60 ? 'Запуск сервисов...'
+                    :                'Загрузка...'
 
   const displayMsg   = online
     ? licenseOk === null ? 'Проверка лицензии...' : 'Готово'
@@ -299,12 +294,10 @@ export default function StartupOverlay() {
   const dots = !online ? '.'.repeat(Math.floor(elapsed * 2) % 4) : ''
 
   // Stage-based color
-  const msgColor = coreStage === 'killed'  ? '#f59e0b'   // amber — AV retry
-                 : coreStage === 'failed'  ? '#ef4444'   // red
-                 : coreStage === 'ready'   ? '#10b981'   // green
+  const msgColor = coreStage === 'failed'  ? '#ef4444'
+                 : coreStage === 'ready'   ? '#10b981'
                  : online                  ? '#10b981'
                  : isTimeout               ? 'rgba(239,68,68,0.85)'
-                 : isWarning               ? '#f59e0b'
                  : '#6666aa'
 
   return (
@@ -316,7 +309,7 @@ export default function StartupOverlay() {
         <AppLogo size={72} />
         <div className="text-center">
           <div className="text-xl font-semibold tracking-tight" style={{ color: '#e8e8ff' }}>FMail Sender</div>
-          <div className="text-xs mt-1" style={{ color: '#6666aa' }}>{version || `v${FRONTEND_VERSION}`}</div>
+
         </div>
       </div>
 
@@ -335,42 +328,17 @@ export default function StartupOverlay() {
         </div>
       </div>
 
-      {/* Timer — only show while waiting */}
-      {elapsed > 5 && !online && (
-        <div className="mt-4 text-[10px]" style={{ color: '#3a3a66' }}>
-          {elapsedRound}с / {TIMEOUT_SECS}с
-        </div>
-      )}
 
-      {/* AV scan advisory (not an error — just informational) */}
-      {isWarning && !isTimeout && !online && coreStage !== 'failed' && (
-        <div className="mt-5 max-w-xs text-center text-[11px] px-4 leading-relaxed"
-          style={{ color: 'rgba(245,158,11,0.75)' }}>
-          Антивирус сканирует ядро при первом запуске.<br />
-          Это нормально — подождите ещё немного.
-        </div>
-      )}
 
-      {/* Timeout advisory + retry button */}
-      {isTimeout && !online && (
+
+
+      {/* Timeout advisory + retry button — shown only on hard failure */}
+      {isTimeout && !online && coreStage === 'failed' && (
         <div className="mt-5 flex flex-col items-center gap-3 max-w-xs px-4">
           <p className="text-center text-xs leading-relaxed"
             style={{ color: 'rgba(239,68,68,0.8)' }}>
-            {coreStage === 'failed'
-              ? coreMsg
-              : `Python ядро не ответило в течение ${TIMEOUT_SECS}с. ` +
-                `Антивирус всё ещё может сканировать файл — ` +
-                `приложение продолжает попытки автоматически.`
-            }
+            {coreMsg || 'Не удалось запустить Python ядро.'}
           </p>
-
-          {coreStage === 'failed' && (
-            <p className="text-center text-[10px]" style={{ color: '#5858aa' }}>
-              Добавьте %LOCALAPPDATA%\FMailSender в исключения антивируса,<br />
-              затем нажмите «Перезапустить ядро».
-            </p>
-          )}
-
           <button
             onClick={handleRestartCore}
             disabled={restarting}

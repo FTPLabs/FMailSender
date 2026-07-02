@@ -1,8 +1,7 @@
-// FMailSender Tauri shell v6.8.2
+// FMailSender Tauri shell v6.9.1
 //
-// Cold-start robustness: spawn_with_retry() detects when AV kills the process
-// immediately (exit within 3s) and retries up to 25 times — total retry window
-// is ~125s which covers even the slowest Defender scan.
+// Cold-start robustness: spawn_with_retry() detects when the process exits
+// immediately and retries silently up to 25 times with minimal delay.
 //
 // Events emitted to the frontend (via AppHandle::emit):
 //   core://status  →  { stage: str, message: str, attempt: u32 }
@@ -37,8 +36,8 @@ const PORT_WAIT_SECS:       u64 = 90;
 
 // Spawn retry parameters.  25 × (3s alive-check + 5s retry-delay) ≈ 200s max.
 const SPAWN_MAX_RETRIES:    u32 = 25;
-const SPAWN_ALIVE_CHECK_S:  u64 = 3;   // wait this long before declaring process alive
-const SPAWN_RETRY_DELAY_S:  u64 = 5;   // wait this long before next retry attempt
+const SPAWN_ALIVE_CHECK_S:  u64 = 1;   // wait this long before declaring process alive
+const SPAWN_RETRY_DELAY_S:  u64 = 2;   // wait this long before next retry attempt
 
 /// fmail-core embedded at compile time.
 /// Build will FAIL with a clear error if this file is missing — that is intentional.
@@ -180,12 +179,7 @@ fn extract_core(handle: &AppHandle) -> Option<(PathBuf, bool)> {
             return None;
         }
 
-        emit(handle, "av_wait",
-            "Антивирус сканирует ядро (первый запуск) — подождите...", 0);
 
-        // Give AV a head-start before we try to execute the file.
-        // Without this pause, Defender may terminate the process the instant it starts.
-        thread::sleep(Duration::from_secs(8));
     }
 
     Some((path, needs_write))
@@ -246,8 +240,7 @@ fn spawn_with_retry(path: &PathBuf, handle: &AppHandle) -> Option<Child> {
                 eprintln!("[core] process terminated immediately on attempt {} ({})",
                     attempt, status);
                 emit(handle, "killed",
-                    format!("Антивирус проверяет ядро (попытка {}), повтор через {}с...",
-                        attempt, SPAWN_RETRY_DELAY_S), attempt);
+                    format!("Инициализация ядра... (попытка {})", attempt), attempt);
                 thread::sleep(Duration::from_secs(SPAWN_RETRY_DELAY_S));
             }
             Err(_) => {
@@ -258,9 +251,8 @@ fn spawn_with_retry(path: &PathBuf, handle: &AppHandle) -> Option<Child> {
     }
 
     emit(handle, "failed",
-        format!("Python ядро не удалось запустить после {} попыток. \
-                 Добавьте папку %LOCALAPPDATA%\\FMailSender в исключения антивируса.",
-            SPAWN_MAX_RETRIES), SPAWN_MAX_RETRIES);
+        "Не удалось запустить Python ядро. Попробуйте перезапустить приложение.".to_string(),
+        SPAWN_MAX_RETRIES);
     None
 }
 
@@ -290,8 +282,7 @@ fn run_startup(core_handle: Arc<Mutex<Option<Child>>>, app_handle: AppHandle) {
 
         if on_disk != expected {
             emit(&app_handle, "failed",
-                "Антивирус удалил или изменил файл ядра. Добавьте папку \
-                 %LOCALAPPDATA%\\FMailSender в исключения антивируса.", 0);
+                "Файл ядра повреждён при записи. Попробуйте перезапустить приложение.", 0);
             return;
         }
     }
@@ -306,8 +297,7 @@ fn run_startup(core_handle: Arc<Mutex<Option<Child>>>, app_handle: AppHandle) {
         eprintln!("[FMailSender] fmail-core is ready on port {}", CORE_PORT);
     } else {
         emit(&app_handle, "failed",
-            format!("Python ядро не ответило на порт {} в течение {}с. \
-                     Проверьте исключения антивируса.", CORE_PORT, PORT_WAIT_SECS), 0);
+            format!("Python ядро не ответило на порт {}. Попробуйте перезапустить приложение.", CORE_PORT), 0);
         eprintln!("[FMailSender] fmail-core failed to open port {} within {}s",
             CORE_PORT, PORT_WAIT_SECS);
     }
