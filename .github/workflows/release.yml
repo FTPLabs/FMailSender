@@ -118,6 +118,13 @@ jobs:
       - name: "Nuitka + build tools"
         shell: pwsh
         run: |
+          # setuptools MUST be installed before Nuitka — Nuitka 2.6.x evaluates
+          # 'version("setuptools") >= (71,)' at compile time; if setuptools is absent
+          # importlib.metadata.version() returns None and comparison crashes with FATAL.
+          # GitHub windows-latest runners (2026) no longer pre-install setuptools.
+          pip install setuptools --upgrade --quiet
+          Write-Host "setuptools: $(python -c 'import setuptools; print(setuptools.__version__)')"
+
           # Install Nuitka and required helpers
           pip install "nuitka==${{ env.NUITKA_VERSION }}" ordered-set zstandard --quiet
           Write-Host "Nuitka ${{ env.NUITKA_VERSION }} installed."
@@ -204,11 +211,11 @@ jobs:
             --include-package=concurrent `
             --include-package=wmi `
             --include-package=win32com `
-            --include-package=win32api `
-            --include-package=win32con `
-            --include-package=pythoncom `
-            --include-package=pywintypes `
-            --include-data-dir=core=core `
+            --include-module=win32api `
+            --include-module=win32con `
+            --include-module=win32security `
+            --include-module=pythoncom `
+            --include-module=pywintypes `
             --include-data-files=data/spam_words.json=data/spam_words.json `
             --output-filename=fmail-core.exe `
             --output-dir=nuitka-build `
