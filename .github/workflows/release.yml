@@ -175,6 +175,7 @@ jobs:
             --onefile `
             "--onefile-tempdir-spec={CACHE_DIR}/FMailSender/core/$ver" `
             --windows-console-mode=disable `
+            --msvc=latest `
             --assume-yes-for-downloads `
             --include-package=core `
             --include-package=fastapi `
