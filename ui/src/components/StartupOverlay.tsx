@@ -1,31 +1,34 @@
 /**
- * StartupOverlay — экран загрузки + активации лицензии.
+ * StartupOverlay — loading screen + license activation.
  *
- * Fixes:
- *  - No window.location.reload() on version mismatch (caused reload loop)
- *  - Timer depends only on visible (not online) — no interval restart on online change
- *  - License screen: real app logo instead of letter/icon placeholder
- *  - .catch() on license fetch now shows activation screen (not silently opens app)
+ * v6.8.0 startup flow (target: <10 s on warm start):
+ *   1. Tauri spawns fmail-core (cached binary — no AV re-scan on warm start)
+ *   2. Python starts, uvicorn ready → port opens (~4-7 s)
+ *   3. UI calls GET /api/health → instant
+ *   4. UI calls GET /api/license → returns LOCAL CACHE instantly (<5 ms)
+ *      - valid=true  → overlay dismissed immediately, app shown
+ *      - valid=false → activation screen shown immediately
+ *   5. Background: full WMIC + HTTP validation runs concurrently
+ *   6. UI polls GET /api/license/poll every 10 s
+ *      - if status changes valid→false → activation screen (license revoked)
+ *      - if status changes false→true  → overlay dismissed (rare: cached stale)
  */
 import { useEffect, useRef, useState } from 'react'
 import { useStatus } from '../contexts/StatusContext'
 import { getBaseUrl } from '../api'
 import { FRONTEND_VERSION } from '../version'
 
-const TIMEOUT_SECS = 120
+// Cold start (first-ever run, AV scan on extracted binary): up to 30 s.
+// Warm start (cached binary): 5-8 s. Background license check does NOT block.
+const TIMEOUT_SECS = 30
 
 const MESSAGES: Array<{ at: number; text: string }> = [
-  { at: 0,   text: 'Инициализация...'                },
-  { at: 3,   text: 'Запуск Python ядра...'           },
-  { at: 8,   text: 'Загрузка зависимостей...'        },
-  { at: 14,  text: 'Старт FastAPI сервера...'        },
-  { at: 20,  text: 'Соединение с бэкендом...'        },
-  { at: 28,  text: 'Почти готово...'                 },
-  { at: 40,  text: 'Распаковка компонентов...'       },
-  { at: 55,  text: 'Подготовка окружения...'         },
-  { at: 70,  text: 'Ожидание инициализации...'       },
-  { at: 90,  text: 'Антивирус сканирует файлы...'    },
-  { at: 105, text: 'Финальная инициализация...'      },
+  { at: 0,  text: 'Инициализация...'         },
+  { at: 3,  text: 'Запуск Python ядра...'    },
+  { at: 8,  text: 'Загрузка зависимостей...' },
+  { at: 14, text: 'Старт FastAPI сервера...' },
+  { at: 20, text: 'Соединение с бэкендом...' },
+  { at: 26, text: 'Почти готово...'          },
 ]
 
 const GLOW_STYLES = `
@@ -66,13 +69,19 @@ export default function StartupOverlay() {
   const [licenseKey,  setLicenseKey]  = useState('')
   const [activating,  setActivating]  = useState(false)
   const [activateErr, setActivateErr] = useState('')
+  const [bgChecking,  setBgChecking]  = useState(false)
 
-  const startedAt  = useRef(Date.now())
-  const onlineRef  = useRef(false)
+  const startedAt   = useRef(Date.now())
+  const onlineRef   = useRef(false)
+  const licenseOkRef = useRef<boolean | null>(null)
 
-  useEffect(() => { onlineRef.current = online }, [online])
+  useEffect(() => { onlineRef.current   = online    }, [online])
+  useEffect(() => { licenseOkRef.current = licenseOk }, [licenseOk])
 
-  // Fetch license status once backend comes online (runs exactly once)
+  // ── Step 1: fetch license from cache the moment backend comes online ────────
+  // GET /api/license now returns the LOCAL cache instantly (<5 ms) and fires
+  // background online validation concurrently.  We act on the cached result
+  // immediately — the app appears without waiting for any network call.
   useEffect(() => {
     if (!online) return
     fetch(`${getBaseUrl()}/api/health`)
@@ -82,8 +91,7 @@ export default function StartupOverlay() {
         return fetch(`${getBaseUrl()}/api/license`)
       })
       .then(r => r.json())
-      .then((lic: { valid?: boolean; message?: string } | null) => {
-        // Guard: treat null/malformed response as invalid (show activation screen)
+      .then((lic: { valid?: boolean; message?: string; background_checking?: boolean } | null) => {
         if (!lic || typeof lic !== 'object') {
           setLicenseOk(false)
           setLicenseMsg('Не удалось получить статус лицензии')
@@ -91,29 +99,35 @@ export default function StartupOverlay() {
         }
         setLicenseOk(lic.valid === true)
         setLicenseMsg(lic.message ?? '')
+        setBgChecking(lic.background_checking === true)
       })
-      // BUG FIX: network / parse error must NOT silently open the app.
-      // Show activation screen — user can retry or contact support.
       .catch(() => {
         setLicenseOk(false)
         setLicenseMsg('Не удалось проверить лицензию. Повторите попытку.')
       })
   }, [online])
 
-  // Periodic license re-validation every 60 minutes.
-  // If the license is revoked mid-session, re-show the activation screen.
+  // ── Step 2: poll /api/license/poll to catch background validation result ────
+  // Polling interval: 10 s.  This detects:
+  //   - License revoked mid-session (background check or periodic hourly check)
+  //   - Rare case: cache said invalid but online check confirms valid
   useEffect(() => {
     if (!online || licenseOk === null) return
     const interval = setInterval(async () => {
       try {
-        const lic: { valid?: boolean; message?: string } =
-          await fetch(`${getBaseUrl()}/api/license`).then(r => r.json())
-        if (lic.valid === false) {
+        const status: { valid?: boolean; checking?: boolean } =
+          await fetch(`${getBaseUrl()}/api/license/poll`).then(r => r.json())
+        setBgChecking(status.checking === true)
+        if (status.valid === false && licenseOkRef.current === true) {
           setLicenseOk(false)
-          setLicenseMsg(lic.message ?? 'Лицензия отозвана')
+          setLicenseMsg('Лицензия отозвана или истекла')
+        } else if (status.valid === true && licenseOkRef.current === false) {
+          // Background check passed (cached was stale/invalid)
+          setLicenseOk(true)
+          setLicenseMsg('')
         }
-      } catch { /* network error — server offline grace handles this */ }
-    }, 60 * 60 * 1000)
+      } catch { /* server temporarily unreachable — keep current state */ }
+    }, 10_000)
     return () => clearInterval(interval)
   }, [online, licenseOk])
 
@@ -139,14 +153,14 @@ export default function StartupOverlay() {
     return () => clearInterval(timer)
   }, [visible])
 
-  // Dismiss overlay when license is confirmed valid
+  // Dismiss loading overlay when cached license is confirmed valid
   useEffect(() => {
     if (!online || !visible || licenseOk === null || licenseOk === false) return
     setProgress(100)
     const t = setTimeout(() => {
       setFadeOut(true)
-      setTimeout(() => setVisible(false), 500)
-    }, 350)
+      setTimeout(() => setVisible(false), 400)
+    }, 200)
     return () => clearTimeout(t)
   }, [online, visible, licenseOk])
 
@@ -182,7 +196,6 @@ export default function StartupOverlay() {
           gap: '2rem',
         }}
       >
-        {/* Ambient glow */}
         <div style={{
           position: 'absolute', top: '38%', left: '50%',
           transform: 'translate(-50%, -50%)',
@@ -191,7 +204,6 @@ export default function StartupOverlay() {
           pointerEvents: 'none',
         }} />
 
-        {/* Logo + brand */}
         <div className="relative flex flex-col items-center gap-3">
           <AppLogo size={88} />
           <div className="text-center mt-1">
@@ -204,7 +216,6 @@ export default function StartupOverlay() {
           </div>
         </div>
 
-        {/* Form panel */}
         <div
           className="relative w-full rounded-2xl p-6"
           style={{
@@ -217,6 +228,12 @@ export default function StartupOverlay() {
           {licenseMsg && (
             <p className="text-[0.82rem] mb-4 leading-snug" style={{ color: '#9090cc' }}>
               {licenseMsg}
+            </p>
+          )}
+
+          {bgChecking && (
+            <p className="text-[0.75rem] mb-3" style={{ color: '#5858aa' }}>
+              Идёт проверка лицензии на сервере...
             </p>
           )}
 
@@ -278,7 +295,7 @@ export default function StartupOverlay() {
       style={{
         background: '#040410',
         opacity: fadeOut ? 0 : 1,
-        transition: 'opacity 0.5s ease',
+        transition: 'opacity 0.4s ease',
         pointerEvents: fadeOut ? 'none' : 'all',
       }}
     >

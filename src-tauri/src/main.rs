@@ -1,7 +1,10 @@
-// FMailSender Tauri shell v6.7.8
-// Security: fmail-core is embedded inside this binary via include_bytes!().
-// It is extracted to %TEMP%\fmailsender-{session}\ at startup and deleted on exit.
-// There is no separate fmail-core.exe file next to the app.
+// FMailSender Tauri shell v6.8.0
+//
+// Key change (v6.8.0): fmail-core is cached in %LOCALAPPDATA%\FMailSender\core\
+// under a version-stamped filename (e.g. fmail-core-6.8.0.exe).
+// Windows Defender scans it ONCE on first run of each version; all subsequent
+// launches reuse the cached file — no write, no AV delay, no temp-dir churn.
+// Old version files are cleaned up automatically when a new version is installed.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::Write;
@@ -10,37 +13,28 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tauri::Manager;
 
-// WIN32 CREATE_NO_WINDOW flag — prevents cmd/console windows flashing on spawn
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-const CORE_PORT:            u16 = 7531;
+const CORE_PORT:            u16  = 7531;
 const CORE_HOST:            &str = "127.0.0.1";
-const STARTUP_TIMEOUT_SECS: u64 = 120;
+// Warm start (cached exe, fast lifespan): ~5-8 s.
+// Cold start (first-ever run, AV scan): up to 30 s.
+// License validation now happens in the background — does NOT block startup.
+const STARTUP_TIMEOUT_SECS: u64  = 30;
 
 /// fmail-core embedded at compile time.
-/// The CI workflow builds fmail-core.exe via PyInstaller before `tauri build`,
-/// so this path is always valid in the release pipeline.
 #[cfg(target_os = "windows")]
 static CORE_BYTES: &[u8] = include_bytes!(
     "../binaries/fmail-core-x86_64-pc-windows-msvc.exe"
 );
 
 // ── helpers ────────────────────────────────────────────────────────────────
-
-fn session_hex() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    let pid = std::process::id();
-    format!("{:08x}{:08x}", pid, nanos)
-}
 
 fn wait_for_core(timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
@@ -55,12 +49,17 @@ fn wait_for_core(timeout: Duration) -> bool {
 
 // ── kill helpers ───────────────────────────────────────────────────────────
 
-/// Kill by exe name — used at startup and on exit.
+/// Kill all fmail-core* processes by wildcard — handles version-stamped names.
 fn kill_core_by_name() {
     #[cfg(target_os = "windows")]
-    for name in &["fmail-core-x86_64-pc-windows-msvc.exe", "fmail-core.exe"] {
-        let _ = Command::new("taskkill")
-            .args(["/F", "/IM", name])
+    {
+        let _ = Command::new("powershell")
+            .args([
+                "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+                "-Command",
+                "Get-Process | Where-Object { $_.Name -like 'fmail-core*' } \
+                 | Stop-Process -Force -ErrorAction SilentlyContinue",
+            ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW)
@@ -68,12 +67,11 @@ fn kill_core_by_name() {
     }
 }
 
-/// Full startup kill: port-based + name-based, then wait until port is free.
+/// Full startup cleanup: kill by port, then by name, then wait for port free.
 fn kill_existing_core() {
     #[cfg(target_os = "windows")]
     {
-        // Stage 1 — kill by port (powershell already uses -WindowStyle Hidden,
-        // but CREATE_NO_WINDOW is the Win32-level guarantee against any flash).
+        // Kill any process listening on our port.
         let _ = Command::new("powershell")
             .args([
                 "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
@@ -91,22 +89,18 @@ fn kill_existing_core() {
             .creation_flags(CREATE_NO_WINDOW)
             .status();
 
-        // Stage 2 — kill by name
         kill_core_by_name();
 
-        // Remove any leftover fmail-core*.exe from the %LOCALAPPDATA% install dir
-        // (previous versions placed the sidecar next to FMailSender.exe).
+        // Remove any legacy sidecar left by old versions next to FMailSender.exe.
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
             let app_dir = PathBuf::from(local).join("FMailSender");
             for name in &["fmail-core-x86_64-pc-windows-msvc.exe", "fmail-core.exe"] {
                 let p = app_dir.join(name);
-                if p.exists() {
-                    let _ = std::fs::remove_file(&p);
-                }
+                if p.exists() { let _ = std::fs::remove_file(&p); }
             }
         }
 
-        // Wait until port is confirmed free (up to 5 s), then 300 ms extra.
+        // Wait until port is confirmed free (up to 5 s).
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             thread::sleep(Duration::from_millis(200));
@@ -114,33 +108,62 @@ fn kill_existing_core() {
                 thread::sleep(Duration::from_millis(300));
                 break;
             }
-            if Instant::now() >= deadline {
-                break;
-            }
+            if Instant::now() >= deadline { break; }
         }
     }
 }
 
 // ── core extraction & spawn ────────────────────────────────────────────────
 
-/// Extract the embedded fmail-core binary to a session-specific temp directory.
-/// Returns the path of the extracted exe, or None on error.
+/// Return path to the cached fmail-core binary, extracting it only when needed.
+///
+/// Cache location: %LOCALAPPDATA%\FMailSender\core\fmail-core-{VERSION}.exe
+///
+/// Behaviour:
+///   - If the file already exists with the correct size → return immediately (0 ms).
+///   - If missing or size mismatch → write once, clean up old-version files.
+///
+/// This means Windows Defender scans the file exactly once per app version,
+/// not on every launch.
 #[cfg(target_os = "windows")]
 fn extract_core() -> Option<PathBuf> {
-    let tmp = std::env::temp_dir().join(format!("fmailsender-{}", session_hex()));
-    std::fs::create_dir_all(&tmp).ok()?;
+    let local = std::env::var("LOCALAPPDATA").ok()?;
+    let cache_dir = PathBuf::from(&local).join("FMailSender").join("core");
+    std::fs::create_dir_all(&cache_dir).ok()?;
 
-    let exe_path = tmp.join("fmail-core.exe");
-    let mut f = std::fs::File::create(&exe_path).ok()?;
-    f.write_all(CORE_BYTES).ok()?;
-    drop(f);
+    let version   = env!("CARGO_PKG_VERSION");
+    let exe_name  = format!("fmail-core-{}.exe", version);
+    let exe_path  = cache_dir.join(&exe_name);
+
+    let expected_size = CORE_BYTES.len() as u64;
+    let needs_write   = std::fs::metadata(&exe_path)
+        .map(|m| m.len() != expected_size)
+        .unwrap_or(true);
+
+    if needs_write {
+        // Clean up old-version cached binaries before writing.
+        if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+            for entry in entries.flatten() {
+                let n = entry.file_name();
+                let s = n.to_string_lossy();
+                if s.starts_with("fmail-core-") && s.ends_with(".exe")
+                    && s.as_ref() != exe_name.as_str()
+                {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+        let mut f = std::fs::File::create(&exe_path).ok()?;
+        f.write_all(CORE_BYTES).ok()?;
+        drop(f);
+    }
 
     Some(exe_path)
 }
 
 #[cfg(not(target_os = "windows"))]
 fn extract_core() -> Option<PathBuf> {
-    None // only Windows is supported
+    None
 }
 
 fn spawn_core_from(path: &PathBuf) -> Option<Child> {
@@ -148,21 +171,9 @@ fn spawn_core_from(path: &PathBuf) -> Option<Child> {
     cmd.env("FMAIL_PORT", CORE_PORT.to_string())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    // Prevent any cmd-console window flash during spawn on Windows.
-    // fmail-core.exe is PyInstaller-built with console=False, but the Win32
-    // creation flag is an additional guarantee.
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.spawn().ok()
-}
-
-// ── cleanup ────────────────────────────────────────────────────────────────
-
-fn delete_temp_core(path: &PathBuf) {
-    let _ = std::fs::remove_file(path);
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::remove_dir(dir);
-    }
 }
 
 // ── Tauri command ──────────────────────────────────────────────────────────
@@ -175,11 +186,8 @@ fn get_core_url() -> String {
 // ── main ───────────────────────────────────────────────────────────────────
 
 fn main() {
-    let core_handle:   Arc<Mutex<Option<Child>>>   = Arc::new(Mutex::new(None));
-    let temp_exe_path: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
-
+    let core_handle:   Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
     let core_for_event = Arc::clone(&core_handle);
-    let temp_for_event = Arc::clone(&temp_exe_path);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -187,24 +195,21 @@ fn main() {
             // 1. Kill any leftover core (port + name + port-free wait).
             kill_existing_core();
 
-            // 2. Extract embedded binary to temp.
+            // 2. Get cached binary path (extract only if missing / changed).
             let core_path = match extract_core() {
                 Some(p) => p,
                 None => {
-                    eprintln!("[FMailSender] Failed to extract fmail-core to temp dir");
+                    eprintln!("[FMailSender] Failed to locate fmail-core binary");
                     return Ok(());
                 }
             };
 
-            // 3. Store temp path so we can delete it on exit.
-            *temp_exe_path.lock().unwrap() = Some(core_path.clone());
-
-            // 4. Spawn core from temp location.
+            // 3. Spawn core.
             let child = spawn_core_from(&core_path);
             *core_handle.lock().unwrap() = child;
 
-            // 5. Background thread waits for core to become ready.
-            //    The UI (StartupOverlay) polls /api/health independently.
+            // 4. Background thread: wait for port to open (informational only;
+            //    the UI polls /api/health independently).
             thread::spawn(move || {
                 if !wait_for_core(Duration::from_secs(STARTUP_TIMEOUT_SECS)) {
                     eprintln!(
@@ -218,7 +223,7 @@ fn main() {
         })
         .on_window_event(move |_window, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                // Kill tracked child (current session).
+                // Kill the tracked child process.
                 if let Ok(mut guard) = core_for_event.lock() {
                     if let Some(mut child) = guard.take() {
                         let _ = child.kill();
@@ -226,13 +231,8 @@ fn main() {
                 }
                 // Belt-and-suspenders: kill any orphaned core by name.
                 kill_core_by_name();
-
-                // Delete the temp exe and its directory.
-                if let Ok(mut guard) = temp_for_event.lock() {
-                    if let Some(path) = guard.take() {
-                        delete_temp_core(&path);
-                    }
-                }
+                // Note: the cached binary (%LOCALAPPDATA%\FMailSender\core\) is
+                // intentionally preserved — reused on the next launch with 0 write cost.
             }
         })
         .invoke_handler(tauri::generate_handler![get_core_url])

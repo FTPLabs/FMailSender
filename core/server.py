@@ -75,10 +75,16 @@ _run_id: int = 0
 _status_lock = threading.Lock()
 
 # ── License runtime state ─────────────────────────────────────────────────────
-# Set at startup via _lifespan; updated on every GET /api/license call and
-# by the periodic background checker (every LICENSE_RECHECK_INTERVAL_SECS).
+# _license_ok: gate used by _license_guard middleware.
+#   False at startup → set from cache the moment GET /api/license is called
+#   (instant, <1 ms).  Background task validates online; updates this flag.
 _license_ok: bool = False
 _license_lock = threading.Lock()
+
+# _license_bg_checking: True while the async background validation task runs.
+# Exposed via GET /api/license/poll so the UI can show a subtle indicator.
+_license_bg_checking: bool = False
+_license_bg_lock = threading.Lock()
 
 # Signal used to stop the periodic checker cleanly on shutdown.
 _license_check_stop = threading.Event()
@@ -95,6 +101,17 @@ def _set_license_ok(ok: bool) -> None:
 def _get_license_ok() -> bool:
     with _license_lock:
         return _license_ok
+
+
+def _set_bg_checking(v: bool) -> None:
+    global _license_bg_checking
+    with _license_bg_lock:
+        _license_bg_checking = v
+
+
+def _is_bg_checking() -> bool:
+    with _license_bg_lock:
+        return _license_bg_checking
 
 
 def _stop_campaign_if_running() -> None:
@@ -202,6 +219,7 @@ _LICENSE_EXEMPT = {
     "/api/health",
     "/api/license",
     "/api/license/activate",
+    "/api/license/poll",
     "/api/events",
 }
 
@@ -847,27 +865,88 @@ async def get_events(request: Request):
 
 # ── License ────────────────────────────────────────────────────────────────────────────
 
-@app.get("/api/license")
-async def get_license():
-    """Returns current license status. Always validates online on every call."""
+async def _validate_license_background() -> None:
+    """Async background task: full WMIC + HTTP validation without blocking startup.
+
+    Called by GET /api/license immediately after returning the cached result.
+    Updates _license_ok when the online check completes (~10-20 s on VPN).
+    A second call while already running is a no-op (guarded by _is_bg_checking).
+    """
+    import logging as _log_mod
+    _bg_log = _log_mod.getLogger("fmailsender.license.bg")
+
+    if _is_bg_checking():
+        return
+    _set_bg_checking(True)
     try:
         from core.license import validate_on_startup
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, validate_on_startup)
-        _set_license_ok(bool(result.get("valid", False)))
-        return result
+        result = await asyncio.to_thread(validate_on_startup)
+        is_valid = bool(result.get("valid", False))
+        _set_license_ok(is_valid)
+        if not is_valid:
+            _bg_log.warning("BG license check: invalid — %s", result.get("message", ""))
+            _stop_campaign_if_running()
+        else:
+            _bg_log.info("BG license check: OK (plan=%s)", result.get("plan"))
+    except ImportError:
+        import sys as _sys
+        _bg_log.error("BG license check: core.license ImportError (frozen=%s)",
+                      getattr(_sys, "frozen", False))
+        if getattr(_sys, "frozen", False):
+            _set_license_ok(False)
+            _stop_campaign_if_running()
+    except Exception as exc:
+        _bg_log.error("BG license check error: %s", exc)
+    finally:
+        _set_bg_checking(False)
+
+
+@app.get("/api/license")
+async def get_license():
+    """Return license status instantly from local cache, then validate online in background.
+
+    v6.8.0 design:
+      - Returns immediately (<5 ms) from license.json — no WMIC, no HTTP call.
+      - Fires _validate_license_background() as a non-blocking asyncio task.
+      - background_checking=True in the response lets the UI show a subtle indicator.
+
+    The background task runs for ~10-25 s (WMIC + HTTP).  Its result is surfaced
+    via GET /api/license/poll (polled every 10 s by the UI).
+    """
+    try:
+        from core.license import get_cached_license_status
+        cached = get_cached_license_status()
+        # Mirror cached validity into middleware gate immediately.
+        _set_license_ok(bool(cached.get("valid", False)))
+        # Fire background online validation (non-blocking).
+        asyncio.create_task(_validate_license_background())
+        return {**cached, "background_checking": True}
     except ImportError:
         import sys as _sys
         if getattr(_sys, "frozen", False):
-            # Frozen exe: license module missing = hard block
             _set_license_ok(False)
-            return {"valid": False, "error": "License module unavailable — reinstall the app"}
-        # Dev mode: allow without license module
+            return {"valid": False, "background_checking": False,
+                    "error": "License module unavailable — reinstall the app"}
         _set_license_ok(True)
-        return {"valid": True, "plan": "unlimited", "note": "license module not available"}
+        return {"valid": True, "plan": "unlimited", "background_checking": False,
+                "note": "license module not available (dev mode)"}
     except Exception as exc:
         _set_license_ok(False)
-        return {"valid": False, "error": str(exc)}
+        return {"valid": False, "background_checking": False, "error": str(exc)}
+
+
+@app.get("/api/license/poll")
+async def poll_license():
+    """Lightweight polling endpoint — returns current runtime license state.
+
+    Called every 10 s by the UI to detect background validation result or
+    mid-session revocation (hourly periodic check).
+    Always fast (<1 ms) — reads only in-memory flags.
+    """
+    return {
+        "valid":    _get_license_ok(),
+        "checking": _is_bg_checking(),
+    }
 
 
 @app.post("/api/license/activate")

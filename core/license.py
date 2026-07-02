@@ -156,14 +156,50 @@ def _save_cache(data: dict) -> None:
         logger.warning("license cache write failed: %s", exc)
 
 
+def get_cached_license_status() -> dict:
+    """Return license status from local cache ONLY — no WMIC, no network, <1 ms.
+
+    Used by GET /api/license for instant startup response.
+    Full online validation runs concurrently via the background task.
+
+    Returns the same dict shape as validate_on_startup() but with
+    ``"from_cache": True`` to let callers distinguish the source.
+    """
+    hwid_hint = _hwid_cache or "pending"
+    cached = _load_cached()
+
+    if not cached or not cached.get("key"):
+        return {
+            "valid": False,
+            "hwid": hwid_hint,
+            "message": "Лицензия не активирована",
+            "requires_activation": True,
+            "from_cache": True,
+        }
+
+    return {
+        "valid": bool(cached.get("valid", False)),
+        "plan": cached.get("plan"),
+        "expires_at": cached.get("expires_at"),
+        "hwid": hwid_hint,
+        "key": cached["key"][:12] + "****",
+        "message": cached.get("message", ""),
+        "from_cache": True,
+    }
+
+
 def _validate_online(key: str, hwid: str, timeout: float = 10.0) -> dict:
     """Call /v1/verify on fmail.shop to validate a key."""
     try:
         import requests
+        # Use a tuple timeout: (connect_timeout, read_timeout).
+        # VPN users can have 5-15 s connect latency; 20 s read covers slow servers.
+        connect_t = min(timeout, 5.0)
+        read_t    = max(timeout, 20.0)
         resp = requests.post(
             LICENSE_VALIDATE_URL,
             json={"key": key, "hwid": hwid},
-            timeout=timeout,
+            timeout=(connect_t, read_t),
         )
         if resp.status_code == 200:
             data = resp.json()
