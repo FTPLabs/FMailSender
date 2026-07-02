@@ -174,15 +174,23 @@ jobs:
 
           $ver = "${{ steps.tag.outputs.version }}"
 
+          # Remove system MinGW from PATH before Nuitka runs.
+          # github windows-latest has C:\mingw64 in PATH; Nuitka rejects it as "wrong version"
+          # and then also cannot find MSVC — leaving zero C compilers available.
+          # Nuitka's own --mingw64 + --assume-yes-for-downloads downloads the exact GCC it needs.
+          $env:PATH = ($env:PATH -split ';' |
+            Where-Object { $_ -notmatch 'mingw' -and $_ -notmatch 'MINGW' }) -join ';'
+          Write-Host "System MinGW removed from PATH."
+
           Write-Host "Building fmail-core.exe with Nuitka ${{ env.NUITKA_VERSION }}..."
-          Write-Host "This compiles Python to native C — takes 5-15 minutes."
+          Write-Host "This compiles Python to native C — takes 5-20 minutes."
 
           python -m nuitka `
             --standalone `
             --onefile `
             "--onefile-tempdir-spec={CACHE_DIR}/FMailSender/core/$ver" `
             --windows-console-mode=disable `
-            --msvc=latest `
+            --mingw64 `
             --assume-yes-for-downloads `
             --include-package=core `
             --include-package=fastapi `
