@@ -1,4 +1,4 @@
-// FMailSender Tauri shell v6.7.6
+// FMailSender Tauri shell v6.7.8
 // Security: fmail-core is embedded inside this binary via include_bytes!().
 // It is extracted to %TEMP%\fmailsender-{session}\ at startup and deleted on exit.
 // There is no separate fmail-core.exe file next to the app.
@@ -21,7 +21,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const CORE_PORT:            u16 = 7531;
 const CORE_HOST:            &str = "127.0.0.1";
-const STARTUP_TIMEOUT_SECS: u64 = 60;
+const STARTUP_TIMEOUT_SECS: u64 = 120;
 
 /// fmail-core embedded at compile time.
 /// The CI workflow builds fmail-core.exe via PyInstaller before `tauri build`,

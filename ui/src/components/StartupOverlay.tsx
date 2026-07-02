@@ -12,15 +12,20 @@ import { useStatus } from '../contexts/StatusContext'
 import { getBaseUrl } from '../api'
 import { FRONTEND_VERSION } from '../version'
 
-const TIMEOUT_SECS = 60
+const TIMEOUT_SECS = 120
 
 const MESSAGES: Array<{ at: number; text: string }> = [
-  { at: 0,  text: 'Инициализация...'          },
-  { at: 3,  text: 'Запуск Python ядра...'     },
-  { at: 8,  text: 'Загрузка зависимостей...'  },
-  { at: 14, text: 'Старт FastAPI сервера...'  },
-  { at: 20, text: 'Соединение с бэкендом...'  },
-  { at: 26, text: 'Почти готово...'           },
+  { at: 0,   text: 'Инициализация...'                },
+  { at: 3,   text: 'Запуск Python ядра...'           },
+  { at: 8,   text: 'Загрузка зависимостей...'        },
+  { at: 14,  text: 'Старт FastAPI сервера...'        },
+  { at: 20,  text: 'Соединение с бэкендом...'        },
+  { at: 28,  text: 'Почти готово...'                 },
+  { at: 40,  text: 'Распаковка компонентов...'       },
+  { at: 55,  text: 'Подготовка окружения...'         },
+  { at: 70,  text: 'Ожидание инициализации...'       },
+  { at: 90,  text: 'Антивирус сканирует файлы...'    },
+  { at: 105, text: 'Финальная инициализация...'      },
 ]
 
 const GLOW_STYLES = `

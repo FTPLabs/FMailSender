@@ -38,6 +38,10 @@ OFFLINE_GRACE_DAYS = 0        # No offline grace — server must confirm validit
 # Valid key prefixes — must match KEY_PREFIX in server/config.py
 _VALID_PREFIXES = ("FMSND-", "FM-")
 
+# HWID is stable for the lifetime of the process — cache after first call
+# to avoid repeated WMIC subprocess calls (each takes up to 5 seconds).
+_hwid_cache: Optional[str] = None
+
 
 def _get_data_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -59,7 +63,14 @@ def _get_hardware_id() -> str:
       2. UUID материнской платы (WMIC csproduct)
       3. CPU ProcessorId (WMIC cpu)
       4. Fallback: MAC + OS-info (для не-Windows / если WMIC недоступен).
+
+    Result is cached for the lifetime of the process — WMIC can take up to
+    5 seconds per call and we must not re-run it on every license check.
     """
+    global _hwid_cache
+    if _hwid_cache is not None:
+        return _hwid_cache
+
     import subprocess as _sp
     _CF = 0x08000000  # CREATE_NO_WINDOW — скрыть консоль wmic на Windows
     components: list = []
@@ -117,7 +128,8 @@ def _get_hardware_id() -> str:
             components.append("fallback")
 
     _raw = "|".join(components)
-    return hashlib.sha256(_raw.encode()).hexdigest()[:32]
+    _hwid_cache = hashlib.sha256(_raw.encode()).hexdigest()[:32]
+    return _hwid_cache
 
 
 def _is_valid_key_format(key: str) -> bool:

@@ -161,24 +161,15 @@ async def _lifespan(application: FastAPI):
     _recipients   = load_recipients()
     _campaign_cfg = load_campaign()
 
-    # License check on every startup — always validates online.
-    # Revoked licenses are blocked immediately; offline grace period still applies.
-    try:
-        from core.license import validate_on_startup
-        loop = asyncio.get_running_loop()
-        lic = await loop.run_in_executor(None, validate_on_startup)
-        _set_license_ok(bool(lic.get("valid", False)))
-    except ImportError:
-        # In production (frozen exe) the license module MUST be present.
-        # If it's missing something is wrong with the bundle — block immediately.
-        # In dev/debug mode (not frozen) it's OK to run without the module.
-        import sys as _sys
-        if getattr(_sys, "frozen", False):
-            _set_license_ok(False)
-        else:
-            _set_license_ok(True)
-    except Exception:
-        _set_license_ok(False)
+    # License starts as False (all protected endpoints blocked).
+    # IMPORTANT: We do NOT call validate_on_startup() here because it blocks the
+    # entire lifespan with WMIC subprocess calls (up to 10s) and an HTTP request
+    # to the license server (up to 10s). While lifespan runs, uvicorn serves
+    # NO requests — including /api/health — so Tauri's startup poll times out.
+    #
+    # The first real license check happens when the UI calls GET /api/license,
+    # which is always the first request after the health check passes.
+    _set_license_ok(False)
 
     # Start periodic license re-check (every 1 hour).
     _license_check_stop.clear()
