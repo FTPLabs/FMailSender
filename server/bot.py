@@ -2882,7 +2882,19 @@ async def activate(req: ActivateRequest):
         "hwid": hwid,
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
-    return {"token": token}
+
+    # FIX v1.3.0: Return plain fields alongside JWT token so that
+    # core/license.py can populate the local cache without decoding the JWT.
+    # This fixes plan="unknown" and expires_at=None in the local cache.
+    return {
+        "token": token,
+        "valid": True,
+        "plan": lic.get("plan", ""),
+        "expires_at": expires_at_str,
+        "max_threads": lic["max_threads"],
+        "max_recipients": lic["max_recipients"],
+        "message": "Лицензия успешно активирована",
+    }
 
 
 class VerifyRequest(BaseModel):

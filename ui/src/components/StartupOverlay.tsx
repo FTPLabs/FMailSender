@@ -18,17 +18,18 @@ import { useStatus } from '../contexts/StatusContext'
 import { getBaseUrl } from '../api'
 import { FRONTEND_VERSION } from '../version'
 
-// Cold start (first-ever run, AV scan on extracted binary): up to 30 s.
+// Cold start (first-ever run, AV scan on extracted binary): up to 60 s.
+// v6.8.1: Tauri setup() now runs in background thread → window opens IMMEDIATELY.
 // Warm start (cached binary): 5-8 s. Background license check does NOT block.
-const TIMEOUT_SECS = 30
+const TIMEOUT_SECS = 60
 
 const MESSAGES: Array<{ at: number; text: string }> = [
   { at: 0,  text: 'Инициализация...'         },
   { at: 3,  text: 'Запуск Python ядра...'    },
-  { at: 8,  text: 'Загрузка зависимостей...' },
-  { at: 14, text: 'Старт FastAPI сервера...' },
-  { at: 20, text: 'Соединение с бэкендом...' },
-  { at: 26, text: 'Почти готово...'          },
+  { at: 10, text: 'Загрузка зависимостей...' },
+  { at: 20, text: 'Старт FastAPI сервера...' },
+  { at: 30, text: 'Соединение с бэкендом...' },
+  { at: 50, text: 'Антивирус проверяет файл...(первый запуск)' },
 ]
 
 const GLOW_STYLES = `

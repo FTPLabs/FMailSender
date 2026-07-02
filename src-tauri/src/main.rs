@@ -1,10 +1,14 @@
-// FMailSender Tauri shell v6.8.0
+// FMailSender Tauri shell v6.8.1
 //
-// Key change (v6.8.0): fmail-core is cached in %LOCALAPPDATA%\FMailSender\core\
-// under a version-stamped filename (e.g. fmail-core-6.8.0.exe).
-// Windows Defender scans it ONCE on first run of each version; all subsequent
-// launches reuse the cached file — no write, no AV delay, no temp-dir churn.
-// Old version files are cleaned up automatically when a new version is installed.
+// v6.8.1 fixes:
+//   - setup() now runs kill+extract+spawn in a background thread — window opens IMMEDIATELY
+//   - wait_for_core() now tries 127.0.0.1 AND localhost (IPv4+IPv6) — fixes VPN loopback block
+//   - STARTUP_TIMEOUT_SECS raised from 30 → 60 for AV-heavy/slow systems
+//   - fmail-core is cached in %LOCALAPPDATA%\FMailSender\core\
+//     under a version-stamped filename (e.g. fmail-core-6.8.0.exe).
+//     Windows Defender scans it ONCE on first run of each version; all subsequent
+//     launches reuse the cached file — no write, no AV delay, no temp-dir churn.
+//     Old version files are cleaned up automatically when a new version is installed.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::Write;
@@ -22,11 +26,13 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const CORE_PORT:            u16  = 7531;
-const CORE_HOST:            &str = "127.0.0.1";
+const CORE_HOST_PRIMARY:    &str = "127.0.0.1";
+const CORE_HOST_FALLBACK:   &str = "localhost";
 // Warm start (cached exe, fast lifespan): ~5-8 s.
-// Cold start (first-ever run, AV scan): up to 30 s.
+// Cold start (first-ever run, AV scan): up to 60 s.
+// Raised from 30 to 60 for AV-heavy environments and slow disk.
 // License validation now happens in the background — does NOT block startup.
-const STARTUP_TIMEOUT_SECS: u64  = 30;
+const STARTUP_TIMEOUT_SECS: u64  = 60;
 
 /// fmail-core embedded at compile time.
 #[cfg(target_os = "windows")]
@@ -36,10 +42,20 @@ static CORE_BYTES: &[u8] = include_bytes!(
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
+/// Try to open a TCP connection to host:port.
+fn try_connect(host: &str, port: u16) -> bool {
+    let addr = format!("{}:{}", host, port);
+    TcpStream::connect(&addr[..]).is_ok()
+}
+
+/// Wait until the core is reachable on EITHER 127.0.0.1 OR localhost.
+/// VPN software may intercept one but not the other; we try both every poll.
 fn wait_for_core(timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if TcpStream::connect((CORE_HOST, CORE_PORT)).is_ok() {
+        if try_connect(CORE_HOST_PRIMARY, CORE_PORT)
+            || try_connect(CORE_HOST_FALLBACK, CORE_PORT)
+        {
             return true;
         }
         thread::sleep(Duration::from_millis(200));
@@ -104,7 +120,9 @@ fn kill_existing_core() {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             thread::sleep(Duration::from_millis(200));
-            if TcpStream::connect((CORE_HOST, CORE_PORT)).is_err() {
+            if !try_connect(CORE_HOST_PRIMARY, CORE_PORT)
+                && !try_connect(CORE_HOST_FALLBACK, CORE_PORT)
+            {
                 thread::sleep(Duration::from_millis(300));
                 break;
             }
@@ -169,6 +187,8 @@ fn extract_core() -> Option<PathBuf> {
 fn spawn_core_from(path: &PathBuf) -> Option<Child> {
     let mut cmd = Command::new(path);
     cmd.env("FMAIL_PORT", CORE_PORT.to_string())
+        // FIX VPN: bind to all loopback interfaces so both 127.0.0.1 and localhost work
+        .env("FMAIL_HOST", "127.0.0.1")
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     #[cfg(target_os = "windows")]
@@ -180,7 +200,7 @@ fn spawn_core_from(path: &PathBuf) -> Option<Child> {
 
 #[tauri::command]
 fn get_core_url() -> String {
-    format!("http://{}:{}", CORE_HOST, CORE_PORT)
+    format!("http://{}:{}", CORE_HOST_PRIMARY, CORE_PORT)
 }
 
 // ── main ───────────────────────────────────────────────────────────────────
@@ -188,34 +208,42 @@ fn get_core_url() -> String {
 fn main() {
     let core_handle:   Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
     let core_for_event = Arc::clone(&core_handle);
+    let core_for_setup = Arc::clone(&core_handle);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(move |_app| {
-            // 1. Kill any leftover core (port + name + port-free wait).
-            kill_existing_core();
-
-            // 2. Get cached binary path (extract only if missing / changed).
-            let core_path = match extract_core() {
-                Some(p) => p,
-                None => {
-                    eprintln!("[FMailSender] Failed to locate fmail-core binary");
-                    return Ok(());
-                }
-            };
-
-            // 3. Spawn core.
-            let child = spawn_core_from(&core_path);
-            *core_handle.lock().unwrap() = child;
-
-            // 4. Background thread: wait for port to open (informational only;
-            //    the UI polls /api/health independently).
+            // FIX v6.8.1: Run all blocking startup work in a background thread so
+            // the Tauri window opens IMMEDIATELY instead of waiting for PowerShell
+            // and disk I/O to complete (which could take 30-120s on AV-heavy systems).
             thread::spawn(move || {
+                // 1. Kill any leftover core (port + name + port-free wait).
+                //    This includes PowerShell calls that can be slow on first launch.
+                kill_existing_core();
+
+                // 2. Get cached binary path (extract only if missing / changed).
+                //    First-time extraction writes ~30-50 MB to disk → then AV scans it.
+                let core_path = match extract_core() {
+                    Some(p) => p,
+                    None => {
+                        eprintln!("[FMailSender] Failed to locate fmail-core binary");
+                        return;
+                    }
+                };
+
+                // 3. Spawn core.
+                let child = spawn_core_from(&core_path);
+                *core_for_setup.lock().unwrap() = child;
+
+                // 4. Log whether port opens within timeout (informational only;
+                //    the UI polls /api/health independently via JS fetch).
                 if !wait_for_core(Duration::from_secs(STARTUP_TIMEOUT_SECS)) {
                     eprintln!(
                         "[FMailSender] fmail-core did not start within {}s",
                         STARTUP_TIMEOUT_SECS
                     );
+                } else {
+                    eprintln!("[FMailSender] fmail-core is ready");
                 }
             });
 

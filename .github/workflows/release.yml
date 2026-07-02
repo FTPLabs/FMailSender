@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 6.4.0)"
+        description: "Version (e.g. 6.8.1)"
         required: true
-        default: "6.7.0"
+        default: "6.8.1"
 
 env:
   PYTHON_VERSION: "3.11"
