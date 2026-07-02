@@ -33,7 +33,7 @@ LICENSE_ACTIVATE_URL = LICENSE_SERVER_BASE + "/v1/activate"
 LICENSE_SERVER_URL = LICENSE_SERVER_BASE
 
 CACHE_TTL_SECS = 24 * 3600   # Re-validate every 24 hours
-OFFLINE_GRACE_DAYS = 7        # Allow offline use for up to 7 days
+OFFLINE_GRACE_DAYS = 0        # No offline grace — server must confirm validity
 
 # Valid key prefixes — must match KEY_PREFIX in server/config.py
 _VALID_PREFIXES = ("FMSND-", "FM-")
@@ -195,18 +195,13 @@ def get_license_status() -> dict:
     # Online re-validation
     result = _validate_online(key, hwid)
     if result.get("offline"):
-        if (time.time() - cached.get("validated_at", 0)) < (OFFLINE_GRACE_DAYS * 86400):
-            return {
-                "valid": cached.get("valid", False),
-                "plan": cached.get("plan"),
-                "expires_at": cached.get("expires_at"),
-                "hwid": hwid,
-                "key": key[:12] + "****",
-                "message": "Оффлайн-режим (нет связи с сервером лицензий)",
-                "offline": True,
-                "from_cache": True,
-            }
-        return {"valid": False, "hwid": hwid, "message": "Лицензия не подтверждена: нет связи с сервером"}
+        # Server unreachable — no grace period.
+        return {
+            "valid": False,
+            "hwid": hwid,
+            "message": "Нет связи с сервером лицензий. Проверьте подключение к интернету.",
+            "offline": True,
+        }
 
     cached.update({
         "valid": result.get("valid", False),
@@ -254,7 +249,10 @@ def activate_license_key(key: str) -> dict:
             detail = result.get("detail") or result.get("error") or result.get("message") or "Ключ недействителен или уже использован"
             raise RuntimeError(detail)
     except ImportError:
-        result = {"valid": True, "plan": "offline", "message": "Ключ сохранён (оффлайн)"}
+        raise RuntimeError(
+            "Невозможно проверить лицензию: модуль requests не найден. "
+            "Переустановите приложение."
+        )
     except RuntimeError:
         raise
     except Exception as exc:
@@ -330,26 +328,15 @@ def validate_on_startup() -> dict:
             "message": result.get("message", ""),
         }
 
-    # Network error — apply grace period ONLY if last validation was successful
-    if cached.get("valid", False):
-        grace_secs = OFFLINE_GRACE_DAYS * 86400
-        if (time.time() - cached.get("validated_at", 0)) < grace_secs:
-            return {
-                "valid": True,
-                "plan": cached.get("plan"),
-                "expires_at": cached.get("expires_at"),
-                "hwid": hwid,
-                "key": key[:12] + "****",
-                "message": "Оффлайн-режим (нет связи с сервером лицензий)",
-                "offline": True,
-                "from_cache": True,
-            }
-
+    # Network error or requests module unavailable — NO offline grace period.
+    # The license server must explicitly confirm validity on every startup.
+    # If the server is unreachable the app is blocked immediately.
     return {
         "valid": False,
         "hwid": hwid,
         "message": (
-            "Лицензия не подтверждена: нет связи с сервером лицензий. "
-            "Проверьте подключение к интернету."
+            "Нет связи с сервером лицензий. "
+            "Проверьте подключение к интернету и перезапустите приложение."
         ),
+        "offline": True,
     }

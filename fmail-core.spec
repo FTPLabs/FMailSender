@@ -114,6 +114,32 @@ WINDOWS_HIDDEN = [
     "win32con",
 ]
 
+# requests — required by core/license.py._validate_online().
+# requests is imported LAZILY inside a try block, making it invisible to
+# PyInstaller static analysis. Without this, `import requests` raises
+# ImportError at runtime, _validate_online() returns offline=True, and
+# the 7-day grace period triggers — bypassing the license check entirely.
+REQUESTS_HIDDEN = [
+    "requests",
+    "requests.adapters",
+    "requests.auth",
+    "requests.certs",
+    "requests.cookies",
+    "requests.exceptions",
+    "requests.models",
+    "requests.sessions",
+    "requests.structures",
+    "requests.utils",
+    "urllib3",
+    "urllib3.util",
+    "urllib3.util.retry",
+    "urllib3.util.timeout",
+    "urllib3.util.ssl_",
+    "certifi",
+    "charset_normalizer",
+    "idna",
+]
+
 ALL_HIDDEN = (
     UVICORN_HIDDEN
     + FASTAPI_HIDDEN
@@ -122,9 +148,16 @@ ALL_HIDDEN = (
     + SMTP_HIDDEN
     + MULTIPART_HIDDEN
     + WINDOWS_HIDDEN
+    + REQUESTS_HIDDEN
     + [
         "asyncio",
         "threading",
+        "core.license",
+        "core.sender",
+        "core.storage",
+        "core.models",
+        "core.proxy",
+        "core._version",
     ]
 )
 

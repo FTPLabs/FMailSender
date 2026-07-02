@@ -169,7 +169,14 @@ async def _lifespan(application: FastAPI):
         lic = await loop.run_in_executor(None, validate_on_startup)
         _set_license_ok(bool(lic.get("valid", False)))
     except ImportError:
-        _set_license_ok(True)   # no license module → dev/debug mode, allow
+        # In production (frozen exe) the license module MUST be present.
+        # If it's missing something is wrong with the bundle — block immediately.
+        # In dev/debug mode (not frozen) it's OK to run without the module.
+        import sys as _sys
+        if getattr(_sys, "frozen", False):
+            _set_license_ok(False)
+        else:
+            _set_license_ok(True)
     except Exception:
         _set_license_ok(False)
 
@@ -854,6 +861,12 @@ async def get_license():
         _set_license_ok(bool(result.get("valid", False)))
         return result
     except ImportError:
+        import sys as _sys
+        if getattr(_sys, "frozen", False):
+            # Frozen exe: license module missing = hard block
+            _set_license_ok(False)
+            return {"valid": False, "error": "License module unavailable — reinstall the app"}
+        # Dev mode: allow without license module
         _set_license_ok(True)
         return {"valid": True, "plan": "unlimited", "note": "license module not available"}
     except Exception as exc:
@@ -876,6 +889,9 @@ async def activate_license(req: Request):
             _set_license_ok(True)
         return result
     except ImportError:
+        import sys as _sys
+        if getattr(_sys, "frozen", False):
+            raise HTTPException(status_code=500, detail="License module unavailable — reinstall the app")
         return {"success": True, "message": "Ключ сохранён (оффлайн-режим)"}
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
