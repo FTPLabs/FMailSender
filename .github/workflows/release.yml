@@ -201,6 +201,12 @@ jobs:
             --include-package=smtplib `
             --include-package=imaplib `
             --include-package=concurrent `
+            --include-package=wmi `
+            --include-package=win32com `
+            --include-package=win32api `
+            --include-package=win32con `
+            --include-package=pythoncom `
+            --include-package=pywintypes `
             --include-data-dir=core=core `
             --include-data-files=data/spam_words.json=data/spam_words.json `
             --output-filename=fmail-core.exe `

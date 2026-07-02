@@ -1,10 +1,9 @@
-// FMailSender Tauri shell v6.9.2
+// FMailSender Tauri shell v6.9.3
 //
-// Fixes in v6.9.2:
-//   - PORT_WAIT_SECS increased 90s → 200s (Nuitka first-run extracts to cache)
-//   - SPAWN_MAX_RETRIES reduced 25 → 8 (avoid long pointless retry loops)
-//   - "av_wait" event emitted while waiting for port (helps frontend show better message)
-//   - av_wait_secs tracking added for UI progress calculation
+// Fixes in v6.9.3 (code review follow-up):
+//   - SHORT-CIRCUIT: if spawn_with_retry() returns None, emit "failed" immediately
+//     and skip the 200s port-wait entirely (was: always waited 200s even on total spawn failure)
+//   - try_connect now uses connect_timeout (500ms) to avoid blocking the wait loop
 //
 // Events emitted to the frontend (via AppHandle::emit):
 //   core://status  →  { stage: str, message: str, attempt: u32 }
@@ -17,7 +16,7 @@
 
 use serde::Serialize;
 use std::io::Write;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -34,16 +33,12 @@ const CORE_PORT:            u16 = 7531;
 const CORE_HOST_PRIMARY:    &str = "127.0.0.1";
 const CORE_HOST_FALLBACK:   &str = "localhost";
 
-// v6.9.2: Increased from 90s → 200s.
+// Wait up to 200s for the port after process is alive.
 // Nuitka onefile extracts to %LOCALAPPDATA%\FMailSender\core\ on first run (~5-30s).
-// Windows Defender may scan extracted files (up to 60s on slow machines).
-// Python uvicorn startup: ~2-5s after extraction.
-// Total worst-case first run: ~120s. We give 200s for safety.
+// Defender scanning + uvicorn startup: up to 60s on slow machines.
 const PORT_WAIT_SECS:       u64 = 200;
 
-// v6.9.2: Reduced from 25 → 8.
-// Each retry cycle = SPAWN_ALIVE_CHECK_S + SPAWN_RETRY_DELAY_S = 6s.
-// 8 retries × 6s = 48s max retry window. Prevents very long pointless loops.
+// 8 retries × (3s alive-check + 3s delay) = 48s max retry window.
 const SPAWN_MAX_RETRIES:    u32 = 8;
 const SPAWN_ALIVE_CHECK_S:  u64 = 3;
 const SPAWN_RETRY_DELAY_S:  u64 = 3;
@@ -76,11 +71,16 @@ fn emit(handle: &AppHandle, stage: &'static str, message: impl Into<String>, att
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn try_connect(host: &str, port: u16) -> bool {
-    let addr = format!("{}:{}", host, port);
-    TcpStream::connect_timeout(
-        &addr.parse().unwrap_or_else(|_| format!("127.0.0.1:{}", port).parse().unwrap()),
-        Duration::from_millis(500),
-    ).is_ok()
+    let addr_str = format!("{}:{}", host, port);
+    let mut addrs = match addr_str.to_socket_addrs() {
+        Ok(a) => a,
+        Err(_) => return false,
+    };
+    let addr = match addrs.next() {
+        Some(a) => a,
+        None => return false,
+    };
+    TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok()
 }
 
 fn port_open() -> bool {
@@ -88,25 +88,21 @@ fn port_open() -> bool {
 }
 
 /// Wait until the Python core is reachable or timeout elapses.
-/// Emits "av_wait" events every 10s so the UI can update progress.
+/// Emits "av_wait" events every 8s so the UI can update progress.
 fn wait_for_port(timeout: Duration, handle: &AppHandle) -> bool {
-    let deadline = Instant::now() + timeout;
-    let mut last_event = Instant::now();
-    let mut elapsed_s: u64 = 0;
+    let deadline    = Instant::now() + timeout;
+    let mut last_ev = Instant::now();
 
     while Instant::now() < deadline {
         if port_open() { return true; }
         thread::sleep(Duration::from_millis(300));
 
-        elapsed_s = Instant::now().duration_since(last_event).as_secs();
-        // Emit progress event every 8 seconds so UI can show "still starting..."
-        if elapsed_s >= 8 {
-            last_event = Instant::now();
-            let total_elapsed = timeout.as_secs().saturating_sub(
-                deadline.duration_since(Instant::now()).as_secs()
-            );
+        if last_ev.elapsed().as_secs() >= 8 {
+            last_ev = Instant::now();
+            let elapsed = timeout.as_secs()
+                .saturating_sub(deadline.saturating_duration_since(Instant::now()).as_secs());
             emit(handle, "av_wait",
-                format!("Запуск Python ядра... ({} сек)", total_elapsed), 0);
+                format!("Запуск Python ядра... ({} сек)", elapsed), 0);
         }
     }
     false
@@ -148,10 +144,7 @@ fn kill_existing_core() {
             .stdout(Stdio::null()).stderr(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW)
             .status();
-
         kill_core_by_name();
-
-        // Wait until port is free (up to 5s).
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             thread::sleep(Duration::from_millis(200));
@@ -163,12 +156,10 @@ fn kill_existing_core() {
 
 // ── Core extraction ─────────────────────────────────────────────────────────
 
-/// Extract fmail-core to %LOCALAPPDATA%\FMailSender\core\fmail-core-{VERSION}.exe
-/// Returns (path, was_freshly_written).
 #[cfg(target_os = "windows")]
 fn extract_core(handle: &AppHandle) -> Option<(PathBuf, bool)> {
-    let local    = std::env::var("LOCALAPPDATA").ok()?;
-    let dir      = PathBuf::from(&local).join("FMailSender").join("core");
+    let local   = std::env::var("LOCALAPPDATA").ok()?;
+    let dir     = PathBuf::from(&local).join("FMailSender").join("core");
     std::fs::create_dir_all(&dir).ok()?;
 
     let version  = env!("CARGO_PKG_VERSION");
@@ -199,7 +190,6 @@ fn extract_core(handle: &AppHandle) -> Option<(PathBuf, bool)> {
         f.write_all(CORE_BYTES).ok()?;
         drop(f);
 
-        // Verify write integrity.
         let written = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         if written != expected {
             eprintln!("[core] write failed: expected {} bytes, got {}", expected, written);
@@ -226,49 +216,41 @@ fn spawn_core_from(path: &PathBuf) -> Option<Child> {
     cmd.spawn().ok()
 }
 
-/// Spawn fmail-core, retrying if AV kills the process immediately.
 fn spawn_with_retry(path: &PathBuf, handle: &AppHandle) -> Option<Child> {
     for attempt in 1..=SPAWN_MAX_RETRIES {
         emit(handle, "spawning",
             format!("Запуск Python ядра... (попытка {})", attempt), attempt);
 
-        let child = spawn_core_from(path);
-        let Some(mut child) = child else {
+        let Some(mut child) = spawn_core_from(path) else {
             eprintln!("[core] spawn() failed on attempt {}", attempt);
             emit(handle, "killed",
-                format!("Не удалось запустить процесс (попытка {}), повтор через {}с...",
-                    attempt, SPAWN_RETRY_DELAY_S), attempt);
+                format!("Не удалось запустить процесс (попытка {})", attempt), attempt);
             thread::sleep(Duration::from_secs(SPAWN_RETRY_DELAY_S));
             continue;
         };
 
-        // Wait a few seconds and check whether the process survived.
         thread::sleep(Duration::from_secs(SPAWN_ALIVE_CHECK_S));
 
         match child.try_wait() {
             Ok(None) => {
-                // Process is still running — AV allowed it.
-                emit(handle, "running",
-                    "Python ядро запущено, ожидание порта...", attempt);
+                emit(handle, "running", "Python ядро запущено, ожидание порта...", attempt);
                 return Some(child);
             }
             Ok(Some(status)) => {
-                // Process exited immediately — likely AV kill or crash.
-                eprintln!("[core] process terminated immediately on attempt {} ({})",
-                    attempt, status);
+                eprintln!("[core] process died immediately on attempt {} ({})", attempt, status);
                 emit(handle, "killed",
                     format!("Инициализация ядра... (попытка {})", attempt), attempt);
                 thread::sleep(Duration::from_secs(SPAWN_RETRY_DELAY_S));
             }
             Err(_) => {
-                // Cannot query process status — assume it is alive.
+                // Cannot query — assume alive.
                 return Some(child);
             }
         }
     }
 
     emit(handle, "failed",
-        "Не удалось запустить Python ядро. Попробуйте перезапустить приложение.".to_string(),
+        "Не удалось запустить Python ядро. Нажмите «↺ Перезапустить ядро».".to_string(),
         SPAWN_MAX_RETRIES);
     None
 }
@@ -276,20 +258,17 @@ fn spawn_with_retry(path: &PathBuf, handle: &AppHandle) -> Option<Child> {
 // ── Full startup sequence ───────────────────────────────────────────────────
 
 fn run_startup(core_handle: Arc<Mutex<Option<Child>>>, app_handle: AppHandle) {
-    // 1. Kill any leftover instance.
     kill_existing_core();
 
-    // 2. Extract binary (no-op on warm start).
     let (core_path, fresh) = match extract_core(&app_handle) {
         Some(x) => x,
         None => {
             emit(&app_handle, "failed",
-                "Не удалось извлечь Python ядро. Попробуйте переустановить приложение.", 0);
+                "Не удалось извлечь Python ядро. Переустановите приложение.", 0);
             return;
         }
     };
 
-    // If binary was freshly written, re-verify size.
     if fresh {
         let on_disk = std::fs::metadata(&core_path).map(|m| m.len()).unwrap_or(0);
         #[cfg(target_os = "windows")]
@@ -304,25 +283,31 @@ fn run_startup(core_handle: Arc<Mutex<Option<Child>>>, app_handle: AppHandle) {
         }
     }
 
-    // 3. Spawn with retry (handles AV killing the process immediately).
+    // FIX v6.9.3: SHORT-CIRCUIT — if all spawn attempts exhausted, do not wait 200s.
+    // spawn_with_retry() already emitted "failed" — return immediately.
     let child = spawn_with_retry(&core_path, &app_handle);
     *core_handle.lock().unwrap() = child;
 
-    // 4. Wait for the TCP port to open.
+    if core_handle.lock().unwrap().is_none() {
+        // All retries failed — "failed" event already emitted by spawn_with_retry.
+        eprintln!("[FMailSender] all spawn attempts exhausted — not waiting for port");
+        return;
+    }
+
+    // Process is alive — wait for the TCP port to open.
     if wait_for_port(Duration::from_secs(PORT_WAIT_SECS), &app_handle) {
         emit(&app_handle, "ready", "Python ядро готово", 0);
         eprintln!("[FMailSender] fmail-core is ready on port {}", CORE_PORT);
     } else {
         emit(&app_handle, "failed",
-            format!("Python ядро не ответило на порт {} за {} сек. Нажмите «Перезапустить ядро».", CORE_PORT, PORT_WAIT_SECS), 0);
-        eprintln!("[FMailSender] fmail-core failed to open port {} within {}s",
-            CORE_PORT, PORT_WAIT_SECS);
+            format!("Python ядро не ответило за {} сек. Нажмите «↺ Перезапустить ядро».",
+                PORT_WAIT_SECS), 0);
+        eprintln!("[FMailSender] port {} not open within {}s", CORE_PORT, PORT_WAIT_SECS);
     }
 }
 
 // ── Tauri commands ──────────────────────────────────────────────────────────
 
-/// UI "Retry" button — kills the running core and restarts the full sequence.
 #[tauri::command]
 fn restart_core(
     core_handle: tauri::State<Arc<Mutex<Option<Child>>>>,
@@ -334,9 +319,8 @@ fn restart_core(
         }
     }
     kill_core_by_name();
-
-    let handle_clone   = Arc::clone(&core_handle);
-    let app_clone      = app_handle.clone();
+    let handle_clone = Arc::clone(&core_handle);
+    let app_clone    = app_handle.clone();
     thread::spawn(move || run_startup(handle_clone, app_clone));
 }
 
