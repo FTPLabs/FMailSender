@@ -36,7 +36,7 @@ const PORT_WAIT_SECS:       u64 = 90;
 
 // Spawn retry parameters.  25 × (3s alive-check + 5s retry-delay) ≈ 200s max.
 const SPAWN_MAX_RETRIES:    u32 = 25;
-const SPAWN_ALIVE_CHECK_S:  u64 = 1;   // wait this long before declaring process alive
+const SPAWN_ALIVE_CHECK_S:  u64 = 2;   // wait this long before declaring process alive
 const SPAWN_RETRY_DELAY_S:  u64 = 2;   // wait this long before next retry attempt
 
 /// fmail-core embedded at compile time.
