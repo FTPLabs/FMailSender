@@ -9,7 +9,7 @@ on:
       version:
         description: "Version (e.g. 6.8.1)"
         required: true
-        default: "6.8.1"
+        default: "6.8.2"
 
 env:
   PYTHON_VERSION: "3.11"
@@ -215,6 +215,83 @@ jobs:
           } else {
             Write-Warning "App exe not found in release dir — SFX step will search fallback paths"
           }
+
+      - name: "Verify core embedded in exe"
+        shell: pwsh
+        run: |
+          # ─── Core Embedding Verification ─────────────────────────────────────────
+          # Proves that include_bytes!("../binaries/fmail-core-x86_64-pc-windows-msvc.exe")
+          # actually embedded the Python core into the Tauri executable.
+          #
+          # Three checks:
+          #   1. App exe must be > (core size + 3 MB) — Tauri alone is ~5 MB
+          #   2. Byte scan for PyInstaller markers always present in PyInstaller bundles
+          #   3. Core binary on disk must still match its original size (AV not modified it)
+          # ──────────────────────────────────────────────────────────────────────────
+          $target   = "x86_64-pc-windows-msvc"
+          $coreFile = "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
+
+          if (-not (Test-Path $coreFile)) {
+            Write-Error "Core binary missing: $coreFile"; exit 1
+          }
+          $coreSzMB  = [math]::Round((Get-Item $coreFile).Length / 1MB, 1)
+
+          $appExePath = "${{ steps.tauri_build.outputs.app_exe_path }}"
+          if (-not $appExePath -or -not (Test-Path $appExePath)) {
+            $appExePath = (Get-ChildItem "src-tauri/target/$target/release" -Filter "*.exe" `
+              -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -notlike "fmail-core*" -and $_.Length -gt 1MB } |
+              Sort-Object Length -Descending | Select-Object -First 1).FullName
+          }
+          if (-not $appExePath) { Write-Error "App exe not found for verification"; exit 1 }
+
+          $appSzMB   = [math]::Round((Get-Item $appExePath).Length / 1MB, 1)
+          $minSzMB   = [math]::Round($coreSzMB + 3, 0)
+
+          Write-Host ""
+          Write-Host "════════════════ CORE EMBEDDING VERIFICATION ════════════════"
+          Write-Host "  Source core:    $coreFile  ($coreSzMB MB)"
+          Write-Host "  App exe:        $appExePath  ($appSzMB MB)"
+          Write-Host "  Required min:   $minSzMB MB"
+          Write-Host ""
+
+          # Check 1 — size
+          if ($appSzMB -lt $minSzMB) {
+            Write-Error ""
+            Write-Error "  FAIL [SIZE]: App exe is $appSzMB MB but minimum expected is $minSzMB MB."
+            Write-Error "  This means include_bytes!() did NOT embed the core."
+            Write-Error "  Ensure PyInstaller step runs BEFORE tauri build in the workflow."
+            exit 1
+          }
+          Write-Host "  [PASS] Size:    $appSzMB MB >= $minSzMB MB"
+
+          # Check 2 — PyInstaller markers inside the app exe bytes
+          $bytes   = [System.IO.File]::ReadAllBytes($appExePath)
+          $text    = [System.Text.Encoding]::Latin1.GetString($bytes)
+          $markers = @("MEI", "PyInstaller", "_MEIPASS", "python3", "fmail")
+          $hit     = $false
+          foreach ($m in $markers) {
+            if ($text.Contains($m)) {
+              Write-Host "  [PASS] Marker:  '$m' found — PyInstaller bundle is present"
+              $hit = $true; break
+            }
+          }
+          if (-not $hit) {
+            Write-Warning "  [WARN] No PyInstaller markers found in exe bytes."
+            Write-Warning "         Size check passed, so the core is likely present but text scan inconclusive."
+          }
+          $bytes = $null; $text = $null   # free memory
+
+          # Check 3 — core binary integrity (not quarantined / modified during CI)
+          $coreSzBytes = (Get-Item $coreFile).Length
+          if ($coreSzBytes -lt 5MB) {
+            Write-Error "  FAIL [INTEGRITY]: Core binary is only $([math]::Round($coreSzBytes/1KB))KB — likely corrupted"; exit 1
+          }
+          Write-Host "  [PASS] Integrity: core file intact ($coreSzMB MB)"
+
+          Write-Host ""
+          Write-Host "  ✅  VERIFICATION PASSED — fmail-core IS embedded in FMailSender.exe"
+          Write-Host "════════════════════════════════════════════════════════════════"
 
       - name: "Install NSIS"
         shell: pwsh

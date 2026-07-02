@@ -1,16 +1,18 @@
-// FMailSender Tauri shell v6.8.1
+// FMailSender Tauri shell v6.8.2
 //
-// v6.8.1 fixes:
-//   - setup() now runs kill+extract+spawn in a background thread — window opens IMMEDIATELY
-//   - wait_for_core() now tries 127.0.0.1 AND localhost (IPv4+IPv6) — fixes VPN loopback block
-//   - STARTUP_TIMEOUT_SECS raised from 30 → 60 for AV-heavy/slow systems
-//   - fmail-core is cached in %LOCALAPPDATA%\FMailSender\core\
-//     under a version-stamped filename (e.g. fmail-core-6.8.0.exe).
-//     Windows Defender scans it ONCE on first run of each version; all subsequent
-//     launches reuse the cached file — no write, no AV delay, no temp-dir churn.
-//     Old version files are cleaned up automatically when a new version is installed.
+// Cold-start robustness: spawn_with_retry() detects when AV kills the process
+// immediately (exit within 3s) and retries up to 25 times — total retry window
+// is ~125s which covers even the slowest Defender scan.
+//
+// Events emitted to the frontend (via AppHandle::emit):
+//   core://status  →  { stage: str, message: str, attempt: u32 }
+//     stages: extracting | av_wait | spawning | killed | running | ready | failed
+//
+// Tauri commands:
+//   restart_core  —  kill current core + re-extract + re-spawn (UI "Retry" button)
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use serde::Serialize;
 use std::io::Write;
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -18,54 +20,74 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::Manager;
+use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-const CORE_PORT:            u16  = 7531;
+const CORE_PORT:            u16 = 7531;
 const CORE_HOST_PRIMARY:    &str = "127.0.0.1";
 const CORE_HOST_FALLBACK:   &str = "localhost";
-// Warm start (cached exe, fast lifespan): ~5-8 s.
-// Cold start (first-ever run, AV scan): up to 60 s.
-// Raised from 30 to 60 for AV-heavy environments and slow disk.
-// License validation now happens in the background — does NOT block startup.
-const STARTUP_TIMEOUT_SECS: u64  = 60;
+
+// How long to wait for the port to open AFTER getting a living process.
+// AV may delay startup but the process itself is alive.
+const PORT_WAIT_SECS:       u64 = 90;
+
+// Spawn retry parameters.  25 × (3s alive-check + 5s retry-delay) ≈ 200s max.
+const SPAWN_MAX_RETRIES:    u32 = 25;
+const SPAWN_ALIVE_CHECK_S:  u64 = 3;   // wait this long before declaring process alive
+const SPAWN_RETRY_DELAY_S:  u64 = 5;   // wait this long before next retry attempt
 
 /// fmail-core embedded at compile time.
+/// Build will FAIL with a clear error if this file is missing — that is intentional.
+/// CI must run PyInstaller BEFORE `tauri build`.
 #[cfg(target_os = "windows")]
 static CORE_BYTES: &[u8] = include_bytes!(
     "../binaries/fmail-core-x86_64-pc-windows-msvc.exe"
 );
 
-// ── helpers ────────────────────────────────────────────────────────────────
+// ── Event payload ──────────────────────────────────────────────────────────
 
-/// Try to open a TCP connection to host:port.
+#[derive(Clone, Serialize)]
+struct CoreStatus {
+    stage:   &'static str,
+    message: String,
+    attempt: u32,
+}
+
+fn emit(handle: &AppHandle, stage: &'static str, message: impl Into<String>, attempt: u32) {
+    let _ = handle.emit("core://status", CoreStatus {
+        stage,
+        message: message.into(),
+        attempt,
+    });
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
 fn try_connect(host: &str, port: u16) -> bool {
     let addr = format!("{}:{}", host, port);
     TcpStream::connect(&addr[..]).is_ok()
 }
 
-/// Wait until the core is reachable on EITHER 127.0.0.1 OR localhost.
-/// VPN software may intercept one but not the other; we try both every poll.
-fn wait_for_core(timeout: Duration) -> bool {
+fn port_open() -> bool {
+    try_connect(CORE_HOST_PRIMARY, CORE_PORT) || try_connect(CORE_HOST_FALLBACK, CORE_PORT)
+}
+
+/// Wait until the Python core is reachable or timeout elapses.
+fn wait_for_port(timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if try_connect(CORE_HOST_PRIMARY, CORE_PORT)
-            || try_connect(CORE_HOST_FALLBACK, CORE_PORT)
-        {
-            return true;
-        }
+        if port_open() { return true; }
         thread::sleep(Duration::from_millis(200));
     }
     false
 }
 
-// ── kill helpers ───────────────────────────────────────────────────────────
+// ── Kill helpers ────────────────────────────────────────────────────────────
 
-/// Kill all fmail-core* processes by wildcard — handles version-stamped names.
 fn kill_core_by_name() {
     #[cfg(target_os = "windows")]
     {
@@ -76,28 +98,24 @@ fn kill_core_by_name() {
                 "Get-Process | Where-Object { $_.Name -like 'fmail-core*' } \
                  | Stop-Process -Force -ErrorAction SilentlyContinue",
             ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::null()).stderr(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW)
             .status();
     }
 }
 
-/// Full startup cleanup: kill by port, then by name, then wait for port free.
 fn kill_existing_core() {
     #[cfg(target_os = "windows")]
     {
-        // Kill any process listening on our port.
         let _ = Command::new("powershell")
             .args([
                 "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
                 "-Command",
                 &format!(
-                    "$pids = (Get-NetTCPConnection -LocalPort {port} -State Listen \
+                    "$p = (Get-NetTCPConnection -LocalPort {port} -State Listen \
                      -ErrorAction SilentlyContinue | Select-Object -ExpandProperty \
                      OwningProcess -ErrorAction SilentlyContinue); \
-                     if ($pids) {{ foreach ($p in @($pids)) {{ \
-                       Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }} }}",
+                     if ($p) {{ $p | ForEach-Object {{ Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }} }}",
                     port = CORE_PORT
                 ),
             ])
@@ -107,87 +125,80 @@ fn kill_existing_core() {
 
         kill_core_by_name();
 
-        // Remove any legacy sidecar left by old versions next to FMailSender.exe.
-        if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            let app_dir = PathBuf::from(local).join("FMailSender");
-            for name in &["fmail-core-x86_64-pc-windows-msvc.exe", "fmail-core.exe"] {
-                let p = app_dir.join(name);
-                if p.exists() { let _ = std::fs::remove_file(&p); }
-            }
-        }
-
-        // Wait until port is confirmed free (up to 5 s).
+        // Wait until port is free (up to 5s).
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             thread::sleep(Duration::from_millis(200));
-            if !try_connect(CORE_HOST_PRIMARY, CORE_PORT)
-                && !try_connect(CORE_HOST_FALLBACK, CORE_PORT)
-            {
-                thread::sleep(Duration::from_millis(300));
-                break;
-            }
+            if !port_open() { thread::sleep(Duration::from_millis(300)); break; }
             if Instant::now() >= deadline { break; }
         }
     }
 }
 
-// ── core extraction & spawn ────────────────────────────────────────────────
+// ── Core extraction ─────────────────────────────────────────────────────────
 
-/// Return path to the cached fmail-core binary, extracting it only when needed.
-///
-/// Cache location: %LOCALAPPDATA%\FMailSender\core\fmail-core-{VERSION}.exe
-///
-/// Behaviour:
-///   - If the file already exists with the correct size → return immediately (0 ms).
-///   - If missing or size mismatch → write once, clean up old-version files.
-///
-/// This means Windows Defender scans the file exactly once per app version,
-/// not on every launch.
+/// Extract fmail-core to %LOCALAPPDATA%\FMailSender\core\fmail-core-{VERSION}.exe
+/// Returns (path, was_freshly_written).
 #[cfg(target_os = "windows")]
-fn extract_core() -> Option<PathBuf> {
-    let local = std::env::var("LOCALAPPDATA").ok()?;
-    let cache_dir = PathBuf::from(&local).join("FMailSender").join("core");
-    std::fs::create_dir_all(&cache_dir).ok()?;
+fn extract_core(handle: &AppHandle) -> Option<(PathBuf, bool)> {
+    let local    = std::env::var("LOCALAPPDATA").ok()?;
+    let dir      = PathBuf::from(&local).join("FMailSender").join("core");
+    std::fs::create_dir_all(&dir).ok()?;
 
-    let version   = env!("CARGO_PKG_VERSION");
-    let exe_name  = format!("fmail-core-{}.exe", version);
-    let exe_path  = cache_dir.join(&exe_name);
+    let version  = env!("CARGO_PKG_VERSION");
+    let name     = format!("fmail-core-{}.exe", version);
+    let path     = dir.join(&name);
 
-    let expected_size = CORE_BYTES.len() as u64;
-    let needs_write   = std::fs::metadata(&exe_path)
-        .map(|m| m.len() != expected_size)
+    let expected = CORE_BYTES.len() as u64;
+    let needs_write = std::fs::metadata(&path)
+        .map(|m| m.len() != expected)
         .unwrap_or(true);
 
     if needs_write {
-        // Clean up old-version cached binaries before writing.
-        if let Ok(entries) = std::fs::read_dir(&cache_dir) {
-            for entry in entries.flatten() {
-                let n = entry.file_name();
+        emit(handle, "extracting",
+            format!("Извлечение Python ядра ({:.0} МБ)...", expected as f64 / 1_048_576.0), 0);
+
+        // Remove stale versions.
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for e in entries.flatten() {
+                let n = e.file_name();
                 let s = n.to_string_lossy();
-                if s.starts_with("fmail-core-") && s.ends_with(".exe")
-                    && s.as_ref() != exe_name.as_str()
-                {
-                    let _ = std::fs::remove_file(entry.path());
+                if s.starts_with("fmail-core-") && s.ends_with(".exe") && s.as_ref() != name {
+                    let _ = std::fs::remove_file(e.path());
                 }
             }
         }
-        let mut f = std::fs::File::create(&exe_path).ok()?;
+
+        let mut f = std::fs::File::create(&path).ok()?;
         f.write_all(CORE_BYTES).ok()?;
         drop(f);
+
+        // Verify write integrity: size must match.
+        let written = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        if written != expected {
+            eprintln!("[core] write failed: expected {} bytes, got {}", expected, written);
+            return None;
+        }
+
+        emit(handle, "av_wait",
+            "Антивирус сканирует ядро (первый запуск) — подождите...", 0);
+
+        // Give AV a head-start before we try to execute the file.
+        // Without this pause, Defender may terminate the process the instant it starts.
+        thread::sleep(Duration::from_secs(8));
     }
 
-    Some(exe_path)
+    Some((path, needs_write))
 }
 
 #[cfg(not(target_os = "windows"))]
-fn extract_core() -> Option<PathBuf> {
-    None
-}
+fn extract_core(_handle: &AppHandle) -> Option<(PathBuf, bool)> { None }
+
+// ── Spawn helpers ───────────────────────────────────────────────────────────
 
 fn spawn_core_from(path: &PathBuf) -> Option<Child> {
     let mut cmd = Command::new(path);
     cmd.env("FMAIL_PORT", CORE_PORT.to_string())
-        // FIX VPN: bind to all loopback interfaces so both 127.0.0.1 and localhost work
         .env("FMAIL_HOST", "127.0.0.1")
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -196,74 +207,163 @@ fn spawn_core_from(path: &PathBuf) -> Option<Child> {
     cmd.spawn().ok()
 }
 
-// ── Tauri command ──────────────────────────────────────────────────────────
+/// Spawn fmail-core, retrying if AV kills the process immediately.
+///
+/// AV behaviour on new binaries:
+///   1. Process starts → AV injects into it for scanning
+///   2. AV terminates the process (exit code 0 or non-zero) within 1-3s
+///   3. After 1-3 more attempts the file is trusted → process survives
+///
+/// We detect "killed immediately" by checking if the process is still
+/// alive after SPAWN_ALIVE_CHECK_S seconds.  If not, we retry.
+fn spawn_with_retry(path: &PathBuf, handle: &AppHandle) -> Option<Child> {
+    for attempt in 1..=SPAWN_MAX_RETRIES {
+        emit(handle, "spawning",
+            format!("Запуск Python ядра... (попытка {})", attempt), attempt);
+
+        let child = spawn_core_from(path);
+        let Some(mut child) = child else {
+            eprintln!("[core] spawn() failed on attempt {}", attempt);
+            emit(handle, "killed",
+                format!("Не удалось запустить процесс (попытка {}), повтор через {}с...",
+                    attempt, SPAWN_RETRY_DELAY_S), attempt);
+            thread::sleep(Duration::from_secs(SPAWN_RETRY_DELAY_S));
+            continue;
+        };
+
+        // Wait a few seconds and check whether the process survived.
+        thread::sleep(Duration::from_secs(SPAWN_ALIVE_CHECK_S));
+
+        match child.try_wait() {
+            Ok(None) => {
+                // Process is still running — AV allowed it.
+                emit(handle, "running",
+                    "Python ядро запущено, ожидание порта...", attempt);
+                return Some(child);
+            }
+            Ok(Some(status)) => {
+                // Process exited immediately — likely AV kill.
+                eprintln!("[core] process terminated immediately on attempt {} ({})",
+                    attempt, status);
+                emit(handle, "killed",
+                    format!("Антивирус проверяет ядро (попытка {}), повтор через {}с...",
+                        attempt, SPAWN_RETRY_DELAY_S), attempt);
+                thread::sleep(Duration::from_secs(SPAWN_RETRY_DELAY_S));
+            }
+            Err(_) => {
+                // Cannot query process status — assume it is alive.
+                return Some(child);
+            }
+        }
+    }
+
+    emit(handle, "failed",
+        format!("Python ядро не удалось запустить после {} попыток. \
+                 Добавьте папку %LOCALAPPDATA%\\FMailSender в исключения антивируса.",
+            SPAWN_MAX_RETRIES), SPAWN_MAX_RETRIES);
+    None
+}
+
+// ── Full startup sequence ───────────────────────────────────────────────────
+
+fn run_startup(core_handle: Arc<Mutex<Option<Child>>>, app_handle: AppHandle) {
+    // 1. Kill any leftover instance.
+    kill_existing_core();
+
+    // 2. Extract binary (no-op on warm start).
+    let (core_path, fresh) = match extract_core(&app_handle) {
+        Some(x) => x,
+        None => {
+            emit(&app_handle, "failed",
+                "Не удалось извлечь Python ядро. Попробуйте переустановить приложение.", 0);
+            return;
+        }
+    };
+
+    // If binary was freshly written and AV might quarantine it, re-verify size.
+    if fresh {
+        let on_disk = std::fs::metadata(&core_path).map(|m| m.len()).unwrap_or(0);
+        #[cfg(target_os = "windows")]
+        let expected = CORE_BYTES.len() as u64;
+        #[cfg(not(target_os = "windows"))]
+        let expected = 0u64;
+
+        if on_disk != expected {
+            emit(&app_handle, "failed",
+                "Антивирус удалил или изменил файл ядра. Добавьте папку \
+                 %LOCALAPPDATA%\\FMailSender в исключения антивируса.", 0);
+            return;
+        }
+    }
+
+    // 3. Spawn with retry (handles AV killing the process immediately).
+    let child = spawn_with_retry(&core_path, &app_handle);
+    *core_handle.lock().unwrap() = child;
+
+    // 4. Wait for the TCP port to open.
+    if wait_for_port(Duration::from_secs(PORT_WAIT_SECS)) {
+        emit(&app_handle, "ready", "Python ядро готово", 0);
+        eprintln!("[FMailSender] fmail-core is ready on port {}", CORE_PORT);
+    } else {
+        emit(&app_handle, "failed",
+            format!("Python ядро не ответило на порт {} в течение {}с. \
+                     Проверьте исключения антивируса.", CORE_PORT, PORT_WAIT_SECS), 0);
+        eprintln!("[FMailSender] fmail-core failed to open port {} within {}s",
+            CORE_PORT, PORT_WAIT_SECS);
+    }
+}
+
+// ── Tauri commands ──────────────────────────────────────────────────────────
+
+/// UI "Retry" button — kills the running core and restarts the full sequence.
+#[tauri::command]
+fn restart_core(
+    core_handle: tauri::State<Arc<Mutex<Option<Child>>>>,
+    app_handle: AppHandle,
+) {
+    // Kill current core.
+    if let Ok(mut guard) = core_handle.lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+        }
+    }
+    kill_core_by_name();
+
+    let handle_clone   = Arc::clone(&core_handle);
+    let app_clone      = app_handle.clone();
+    thread::spawn(move || run_startup(handle_clone, app_clone));
+}
 
 #[tauri::command]
 fn get_core_url() -> String {
     format!("http://{}:{}", CORE_HOST_PRIMARY, CORE_PORT)
 }
 
-// ── main ───────────────────────────────────────────────────────────────────
+// ── main ────────────────────────────────────────────────────────────────────
 
 fn main() {
-    let core_handle:   Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+    let core_handle: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
     let core_for_event = Arc::clone(&core_handle);
-    let core_for_setup = Arc::clone(&core_handle);
+    let core_for_cmd   = Arc::clone(&core_handle);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .setup(move |_app| {
-            // FIX v6.8.1: Run all blocking startup work in a background thread so
-            // the Tauri window opens IMMEDIATELY instead of waiting for PowerShell
-            // and disk I/O to complete (which could take 30-120s on AV-heavy systems).
-            thread::spawn(move || {
-                // 1. Kill any leftover core (port + name + port-free wait).
-                //    This includes PowerShell calls that can be slow on first launch.
-                kill_existing_core();
-
-                // 2. Get cached binary path (extract only if missing / changed).
-                //    First-time extraction writes ~30-50 MB to disk → then AV scans it.
-                let core_path = match extract_core() {
-                    Some(p) => p,
-                    None => {
-                        eprintln!("[FMailSender] Failed to locate fmail-core binary");
-                        return;
-                    }
-                };
-
-                // 3. Spawn core.
-                let child = spawn_core_from(&core_path);
-                *core_for_setup.lock().unwrap() = child;
-
-                // 4. Log whether port opens within timeout (informational only;
-                //    the UI polls /api/health independently via JS fetch).
-                if !wait_for_core(Duration::from_secs(STARTUP_TIMEOUT_SECS)) {
-                    eprintln!(
-                        "[FMailSender] fmail-core did not start within {}s",
-                        STARTUP_TIMEOUT_SECS
-                    );
-                } else {
-                    eprintln!("[FMailSender] fmail-core is ready");
-                }
-            });
-
+        .manage(core_for_cmd)
+        .setup(move |app| {
+            let app_handle = app.handle().clone();
+            let ch         = Arc::clone(&core_handle);
+            thread::spawn(move || run_startup(ch, app_handle));
             Ok(())
         })
-        .on_window_event(move |_window, event| {
+        .on_window_event(move |_win, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                // Kill the tracked child process.
-                if let Ok(mut guard) = core_for_event.lock() {
-                    if let Some(mut child) = guard.take() {
-                        let _ = child.kill();
-                    }
+                if let Ok(mut g) = core_for_event.lock() {
+                    if let Some(mut c) = g.take() { let _ = c.kill(); }
                 }
-                // Belt-and-suspenders: kill any orphaned core by name.
                 kill_core_by_name();
-                // Note: the cached binary (%LOCALAPPDATA%\FMailSender\core\) is
-                // intentionally preserved — reused on the next launch with 0 write cost.
             }
         })
-        .invoke_handler(tauri::generate_handler![get_core_url])
+        .invoke_handler(tauri::generate_handler![get_core_url, restart_core])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("tauri runtime error");
 }
