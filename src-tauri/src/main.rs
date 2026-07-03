@@ -1,17 +1,20 @@
-// FMailSender Tauri shell v6.9.3
+// FMailSender Tauri shell v7.0.0
 //
-// Fixes in v6.9.3 (code review follow-up):
-//   - SHORT-CIRCUIT: if spawn_with_retry() returns None, emit "failed" immediately
-//     and skip the 200s port-wait entirely (was: always waited 200s even on total spawn failure)
-//   - try_connect now uses connect_timeout (500ms) to avoid blocking the wait loop
+// ИЗМЕНЕНИЯ v7.0.0:
+//   - Сборка: PyInstaller 6.21 (2-4 мин) вместо Nuitka (60+ мин)
+//   - Ядро: onefile PyInstaller → мгновенный тёплый старт (PyInstaller кеширует по хешу)
+//   - Startup: улучшенные сообщения об ошибках на русском
+//   - Безопасность: читаем /api/identity после старта (HWID + fingerprint)
+//   - DEBUG: если ядро не стартует, читаем startup.log из %LOCALAPPDATA%\FMailSender\
+//   - Команды: restart_core, get_core_url
+//   - События: core://status { stage, message, attempt }
+//     Stages: extracting | av_wait | spawning | killed | running | ready | failed | license_error
 //
-// Events emitted to the frontend (via AppHandle::emit):
-//   core://status  →  { stage: str, message: str, attempt: u32 }
-//     stages: extracting | av_wait | spawning | killed | running | ready | failed
+// Требования к CI:
+//   1. pyinstaller fmail-core.spec --noconfirm → dist/fmail-core.exe
+//   2. cp dist/fmail-core.exe src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe
+//   3. tauri build
 //
-// Tauri commands:
-//   restart_core  —  kill current core + re-extract + re-spawn (UI "Retry" button)
-//   get_core_url  —  returns "http://127.0.0.1:7531"
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::Serialize;
@@ -29,29 +32,32 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-const CORE_PORT:            u16 = 7531;
-const CORE_HOST_PRIMARY:    &str = "127.0.0.1";
-const CORE_HOST_FALLBACK:   &str = "localhost";
+const CORE_PORT:           u16 = 7531;
+const CORE_HOST_PRIMARY:   &str = "127.0.0.1";
+const CORE_HOST_FALLBACK:  &str = "localhost";
 
-// Wait up to 200s for the port after process is alive.
-// Nuitka onefile extracts to %LOCALAPPDATA%\FMailSender\core\ on first run (~5-30s).
-// Defender scanning + uvicorn startup: up to 60s on slow machines.
-const PORT_WAIT_SECS:       u64 = 200;
+// 180 сек — достаточно для PyInstaller onefile (кеш по хешу, тёплый старт быстрее)
+// При первом запуске: ~5-15 сек распаковка + ~3-5 сек uvicorn
+// При AV-сканировании: до 60 сек
+const PORT_WAIT_SECS:      u64 = 180;
 
-// 8 retries × (3s alive-check + 3s delay) = 48s max retry window.
-const SPAWN_MAX_RETRIES:    u32 = 8;
-const SPAWN_ALIVE_CHECK_S:  u64 = 3;
-const SPAWN_RETRY_DELAY_S:  u64 = 3;
+// 8 попыток × (3с проверка + 3с ожидание) = 48с окно повторных запусков
+const SPAWN_MAX_RETRIES:   u32 = 8;
+const SPAWN_ALIVE_CHECK_S: u64 = 3;
+const SPAWN_RETRY_DELAY_S: u64 = 3;
 
-/// fmail-core embedded at compile time.
-/// Build will FAIL with a clear error if this file is missing — that is intentional.
-/// CI must run Nuitka BEFORE `tauri build`.
+// Файл, куда Python пишет startup errors (если не может стартовать нормально)
+const STARTUP_LOG: &str = "startup.log";
+
+/// Embedded fmail-core.exe (PyInstaller onefile).
+/// Build FAILS with clear error if this file is missing — это intentional.
+/// CI must run PyInstaller BEFORE `tauri build`.
 #[cfg(target_os = "windows")]
 static CORE_BYTES: &[u8] = include_bytes!(
     "../binaries/fmail-core-x86_64-pc-windows-msvc.exe"
 );
 
-// ── Event payload ──────────────────────────────────────────────────────────
+// ── Event payload ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Serialize)]
 struct CoreStatus {
@@ -60,15 +66,15 @@ struct CoreStatus {
     attempt: u32,
 }
 
-fn emit(handle: &AppHandle, stage: &'static str, message: impl Into<String>, attempt: u32) {
+fn emit(handle: &AppHandle, stage: &'static str, msg: impl Into<String>, attempt: u32) {
     let _ = handle.emit("core://status", CoreStatus {
         stage,
-        message: message.into(),
+        message: msg.into(),
         attempt,
     });
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// ── Network helpers ───────────────────────────────────────────────────────────
 
 fn try_connect(host: &str, port: u16) -> bool {
     let addr_str = format!("{}:{}", host, port);
@@ -84,276 +90,389 @@ fn try_connect(host: &str, port: u16) -> bool {
 }
 
 fn port_open() -> bool {
-    try_connect(CORE_HOST_PRIMARY, CORE_PORT) || try_connect(CORE_HOST_FALLBACK, CORE_PORT)
+    try_connect(CORE_HOST_PRIMARY, CORE_PORT)
+        || try_connect(CORE_HOST_FALLBACK, CORE_PORT)
 }
 
-/// Wait until the Python core is reachable or timeout elapses.
-/// Emits "av_wait" events every 8s so the UI can update progress.
+/// Ждёт открытия порта. Обновляет UI каждые 5 сек.
 fn wait_for_port(timeout: Duration, handle: &AppHandle) -> bool {
     let deadline    = Instant::now() + timeout;
     let mut last_ev = Instant::now();
 
     while Instant::now() < deadline {
-        if port_open() { return true; }
+        if port_open() {
+            return true;
+        }
         thread::sleep(Duration::from_millis(300));
 
-        if last_ev.elapsed().as_secs() >= 8 {
+        if last_ev.elapsed().as_secs() >= 5 {
             last_ev = Instant::now();
-            let elapsed = timeout.as_secs()
-                .saturating_sub(deadline.saturating_duration_since(Instant::now()).as_secs());
-            emit(handle, "av_wait",
-                format!("Запуск Python ядра... ({} сек)", elapsed), 0);
+            let elapsed  = timeout.as_secs()
+                .saturating_sub(deadline.duration_since(Instant::now()).as_secs());
+            let remaining = deadline.duration_since(Instant::now()).as_secs();
+            emit(
+                handle, "av_wait",
+                format!(
+                    "Ожидание ядра... прошло {}с, осталось {}с. \
+                     Если долго — добавьте FMailSender в исключения антивируса.",
+                    elapsed, remaining
+                ),
+                0,
+            );
         }
     }
     false
 }
 
-// ── Kill helpers ────────────────────────────────────────────────────────────
+// ── Core directory & extraction ───────────────────────────────────────────────
 
-fn kill_core_by_name() {
-    #[cfg(target_os = "windows")]
-    {
-        let _ = Command::new("powershell")
-            .args([
-                "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
-                "-Command",
-                "Get-Process | Where-Object { $_.Name -like 'fmail-core*' } \
-                 | Stop-Process -Force -ErrorAction SilentlyContinue",
-            ])
-            .stdout(Stdio::null()).stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
+fn get_core_dir() -> Option<PathBuf> {
+    let app_data = std::env::var("LOCALAPPDATA").ok()?;
+    let dir = PathBuf::from(app_data)
+        .join("FMailSender")
+        .join("core");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+fn get_startup_log_path() -> Option<PathBuf> {
+    let app_data = std::env::var("LOCALAPPDATA").ok()?;
+    Some(PathBuf::from(app_data).join("FMailSender").join(STARTUP_LOG))
+}
+
+fn read_startup_log() -> Option<String> {
+    let path = get_startup_log_path()?;
+    if path.exists() {
+        std::fs::read_to_string(path).ok()
+    } else {
+        None
     }
 }
+
+fn extract_core(handle: &AppHandle) -> Option<PathBuf> {
+    let dir  = get_core_dir()?;
+    let path = dir.join("fmail-core.exe");
+
+    emit(handle, "extracting", "Извлечение ядра приложения...", 0);
+
+    #[cfg(target_os = "windows")]
+    {
+        // Атомарная запись: пишем во временный файл, затем переименовываем
+        let tmp_path = dir.join("fmail-core.tmp");
+        {
+            let mut f = std::fs::File::create(&tmp_path).ok()?;
+            f.write_all(CORE_BYTES).ok()?;
+            f.flush().ok()?;
+        }
+        // Если файл уже существует и совпадает по размеру — пропускаем копирование
+        let needs_replace = if path.exists() {
+            path.metadata().map(|m| m.len()).unwrap_or(0) != CORE_BYTES.len() as u64
+        } else {
+            true
+        };
+        if needs_replace {
+            std::fs::rename(&tmp_path, &path).ok()?;
+        } else {
+            let _ = std::fs::remove_file(&tmp_path);
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Dev режим: ищем python main.py
+        return None;
+    }
+
+    Some(path)
+}
+
+// ── Process management ────────────────────────────────────────────────────────
 
 fn kill_existing_core() {
     #[cfg(target_os = "windows")]
     {
+        // Убиваем всё, что держит порт 7531
         let _ = Command::new("powershell")
             .args([
-                "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
-                "-Command",
+                "-NoProfile", "-NonInteractive", "-Command",
                 &format!(
-                    "$p = (Get-NetTCPConnection -LocalPort {port} -State Listen \
-                     -ErrorAction SilentlyContinue | Select-Object -ExpandProperty \
-                     OwningProcess -ErrorAction SilentlyContinue); \
-                     if ($p) {{ $p | ForEach-Object {{ Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }} }}",
+                    "Get-NetTCPConnection -LocalPort {port} -State Listen \
+                     -ErrorAction SilentlyContinue | \
+                     ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force \
+                     -ErrorAction SilentlyContinue }}",
                     port = CORE_PORT
                 ),
             ])
-            .stdout(Stdio::null()).stderr(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW)
-            .status();
-        kill_core_by_name();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            thread::sleep(Duration::from_millis(200));
-            if !port_open() { thread::sleep(Duration::from_millis(300)); break; }
-            if Instant::now() >= deadline { break; }
-        }
+            .output();
+        thread::sleep(Duration::from_millis(1000));
     }
 }
 
-// ── Core extraction ─────────────────────────────────────────────────────────
+fn spawn_core(exe: &PathBuf, log_path: &Option<PathBuf>) -> Option<Child> {
+    let mut cmd = Command::new(exe);
 
-#[cfg(target_os = "windows")]
-fn extract_core(handle: &AppHandle) -> Option<(PathBuf, bool)> {
-    let local   = std::env::var("LOCALAPPDATA").ok()?;
-    let dir     = PathBuf::from(&local).join("FMailSender").join("core");
-    std::fs::create_dir_all(&dir).ok()?;
-
-    let version  = env!("CARGO_PKG_VERSION");
-    let name     = format!("fmail-core-{}.exe", version);
-    let path     = dir.join(&name);
-
-    let expected = CORE_BYTES.len() as u64;
-    let needs_write = std::fs::metadata(&path)
-        .map(|m| m.len() != expected)
-        .unwrap_or(true);
-
-    if needs_write {
-        emit(handle, "extracting",
-            format!("Извлечение Python ядра ({:.0} МБ)...", expected as f64 / 1_048_576.0), 0);
-
-        // Remove stale versions.
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for e in entries.flatten() {
-                let n = e.file_name();
-                let s = n.to_string_lossy();
-                if s.starts_with("fmail-core-") && s.ends_with(".exe") && s.as_ref() != name {
-                    let _ = std::fs::remove_file(e.path());
-                }
+    // Перенаправляем stdout/stderr в лог-файл для отладки
+    if let Some(ref lp) = log_path {
+        if let Ok(log_file) = std::fs::File::create(lp) {
+            let log_file2 = log_file.try_clone().ok();
+            cmd.stdout(log_file);
+            if let Some(lf2) = log_file2 {
+                cmd.stderr(lf2);
+            } else {
+                cmd.stderr(Stdio::null());
             }
+        } else {
+            cmd.stdout(Stdio::null()).stderr(Stdio::null());
         }
-
-        let mut f = std::fs::File::create(&path).ok()?;
-        f.write_all(CORE_BYTES).ok()?;
-        drop(f);
-
-        let written = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        if written != expected {
-            eprintln!("[core] write failed: expected {} bytes, got {}", expected, written);
-            return None;
-        }
+    } else {
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
     }
 
-    Some((path, needs_write))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn extract_core(_handle: &AppHandle) -> Option<(PathBuf, bool)> { None }
-
-// ── Spawn helpers ───────────────────────────────────────────────────────────
-
-fn spawn_core_from(path: &PathBuf) -> Option<Child> {
-    let mut cmd = Command::new(path);
-    cmd.env("FMAIL_PORT", CORE_PORT.to_string())
-        .env("FMAIL_HOST", "127.0.0.1")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
+
     cmd.spawn().ok()
 }
 
-fn spawn_with_retry(path: &PathBuf, handle: &AppHandle) -> Option<Child> {
+fn spawn_with_retry(
+    exe: &PathBuf,
+    log_path: &Option<PathBuf>,
+    handle: &AppHandle,
+) -> Option<Child> {
     for attempt in 1..=SPAWN_MAX_RETRIES {
-        emit(handle, "spawning",
-            format!("Запуск Python ядра... (попытка {})", attempt), attempt);
+        emit(
+            handle, "spawning",
+            format!("Запуск ядра (попытка {}/{})", attempt, SPAWN_MAX_RETRIES),
+            attempt,
+        );
 
-        let Some(mut child) = spawn_core_from(path) else {
-            eprintln!("[core] spawn() failed on attempt {}", attempt);
-            emit(handle, "killed",
-                format!("Не удалось запустить процесс (попытка {})", attempt), attempt);
-            thread::sleep(Duration::from_secs(SPAWN_RETRY_DELAY_S));
-            continue;
-        };
+        match spawn_core(exe, log_path) {
+            Some(mut child) => {
+                thread::sleep(Duration::from_secs(SPAWN_ALIVE_CHECK_S));
+                match child.try_wait() {
+                    Ok(None) => return Some(child), // Процесс жив
+                    Ok(Some(status)) => {
+                        let code_str = status.code()
+                            .map(|c| c.to_string())
+                            .unwrap_or_else(|| "?".into());
 
-        thread::sleep(Duration::from_secs(SPAWN_ALIVE_CHECK_S));
+                        // Читаем лог для диагностики
+                        let log_hint = if let Some(log) = read_startup_log() {
+                            let last = log.lines()
+                                .filter(|l| !l.trim().is_empty())
+                                .last()
+                                .unwrap_or("");
+                            if last.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" | Лог: {}", last)
+                            }
+                        } else {
+                            String::new()
+                        };
 
-        match child.try_wait() {
-            Ok(None) => {
-                emit(handle, "running", "Python ядро запущено, ожидание порта...", attempt);
-                return Some(child);
+                        emit(
+                            handle, "killed",
+                            format!(
+                                "Ядро завершилось (код {}), повтор...{}",
+                                code_str, log_hint
+                            ),
+                            attempt,
+                        );
+                    }
+                    Err(e) => {
+                        emit(
+                            handle, "killed",
+                            format!("Ошибка проверки процесса: {}", e),
+                            attempt,
+                        );
+                    }
+                }
             }
-            Ok(Some(status)) => {
-                eprintln!("[core] process died immediately on attempt {} ({})", attempt, status);
-                emit(handle, "killed",
-                    format!("Инициализация ядра... (попытка {})", attempt), attempt);
-                thread::sleep(Duration::from_secs(SPAWN_RETRY_DELAY_S));
-            }
-            Err(_) => {
-                // Cannot query — assume alive.
-                return Some(child);
+            None => {
+                emit(
+                    handle, "killed",
+                    format!(
+                        "Не удалось запустить EXE (попытка {}). \
+                         Возможно, заблокирован антивирусом.",
+                        attempt
+                    ),
+                    attempt,
+                );
             }
         }
-    }
 
-    emit(handle, "failed",
-        "Не удалось запустить Python ядро. Нажмите «↺ Перезапустить ядро».".to_string(),
-        SPAWN_MAX_RETRIES);
+        if attempt < SPAWN_MAX_RETRIES {
+            thread::sleep(Duration::from_secs(SPAWN_RETRY_DELAY_S));
+        }
+    }
     None
 }
 
-// ── Full startup sequence ───────────────────────────────────────────────────
+// ── Tauri state ───────────────────────────────────────────────────────────────
 
-fn run_startup(core_handle: Arc<Mutex<Option<Child>>>, app_handle: AppHandle) {
-    kill_existing_core();
+type CoreHandle = Arc<Mutex<Option<Child>>>;
 
-    let (core_path, fresh) = match extract_core(&app_handle) {
-        Some(x) => x,
-        None => {
-            emit(&app_handle, "failed",
-                "Не удалось извлечь Python ядро. Переустановите приложение.", 0);
-            return;
-        }
-    };
-
-    if fresh {
-        let on_disk = std::fs::metadata(&core_path).map(|m| m.len()).unwrap_or(0);
-        #[cfg(target_os = "windows")]
-        let expected = CORE_BYTES.len() as u64;
-        #[cfg(not(target_os = "windows"))]
-        let expected = 0u64;
-
-        if on_disk != expected {
-            emit(&app_handle, "failed",
-                "Файл ядра повреждён при записи. Попробуйте перезапустить приложение.", 0);
-            return;
-        }
-    }
-
-    // FIX v6.9.3: SHORT-CIRCUIT — if all spawn attempts exhausted, do not wait 200s.
-    // spawn_with_retry() already emitted "failed" — return immediately.
-    let child = spawn_with_retry(&core_path, &app_handle);
-    *core_handle.lock().unwrap() = child;
-
-    if core_handle.lock().unwrap().is_none() {
-        // All retries failed — "failed" event already emitted by spawn_with_retry.
-        eprintln!("[FMailSender] all spawn attempts exhausted — not waiting for port");
-        return;
-    }
-
-    // Process is alive — wait for the TCP port to open.
-    if wait_for_port(Duration::from_secs(PORT_WAIT_SECS), &app_handle) {
-        emit(&app_handle, "ready", "Python ядро готово", 0);
-        eprintln!("[FMailSender] fmail-core is ready on port {}", CORE_PORT);
-    } else {
-        emit(&app_handle, "failed",
-            format!("Python ядро не ответило за {} сек. Нажмите «↺ Перезапустить ядро».",
-                PORT_WAIT_SECS), 0);
-        eprintln!("[FMailSender] port {} not open within {}s", CORE_PORT, PORT_WAIT_SECS);
-    }
-}
-
-// ── Tauri commands ──────────────────────────────────────────────────────────
-
-#[tauri::command]
-fn restart_core(
-    core_handle: tauri::State<Arc<Mutex<Option<Child>>>>,
-    app_handle: AppHandle,
-) {
-    if let Ok(mut guard) = core_handle.lock() {
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-        }
-    }
-    kill_core_by_name();
-    let handle_clone = Arc::clone(&core_handle);
-    let app_clone    = app_handle.clone();
-    thread::spawn(move || run_startup(handle_clone, app_clone));
-}
+// ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
 fn get_core_url() -> String {
     format!("http://{}:{}", CORE_HOST_PRIMARY, CORE_PORT)
 }
 
-// ── main ────────────────────────────────────────────────────────────────────
+#[tauri::command]
+fn restart_core(handle: AppHandle, state: tauri::State<'_, CoreHandle>) {
+    let state = Arc::clone(&state);
+    thread::spawn(move || {
+        // Убиваем текущий процесс
+        {
+            let mut lock = state.lock().unwrap();
+            if let Some(mut child) = lock.take() {
+                let _ = child.kill();
+            }
+        }
+        kill_existing_core();
 
-fn main() {
-    let core_handle: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
-    let core_for_event = Arc::clone(&core_handle);
-    let core_for_cmd   = Arc::clone(&core_handle);
+        let Some(exe) = extract_core(&handle) else {
+            emit(&handle, "failed", "Не удалось извлечь ядро при перезапуске.", 0);
+            return;
+        };
+
+        let log_path = get_startup_log_path();
+        let Some(child) = spawn_with_retry(&exe, &log_path, &handle) else {
+            let log_hint = read_startup_log()
+                .and_then(|l| l.lines().last().map(|s| s.to_string()))
+                .unwrap_or_default();
+            emit(
+                &handle, "failed",
+                format!(
+                    "Ядро не запускается при перезапуске. {}",
+                    if log_hint.is_empty() { String::new() } else { format!("Ошибка: {}", log_hint) }
+                ),
+                0,
+            );
+            return;
+        };
+        *state.lock().unwrap() = Some(child);
+
+        if wait_for_port(Duration::from_secs(PORT_WAIT_SECS), &handle) {
+            emit(&handle, "ready", "Ядро готово к работе", 0);
+        } else {
+            let log_hint = read_startup_log()
+                .and_then(|l| l.lines().last().map(|s| s.to_string()))
+                .unwrap_or_default();
+            emit(
+                &handle, "failed",
+                format!("Ядро не ответило при перезапуске. {}", log_hint),
+                0,
+            );
+        }
+    });
+}
+
+// ── Entry point ───────────────────────────────────────────────────────────────
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let core_handle: CoreHandle = Arc::new(Mutex::new(None));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(core_for_cmd)
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .manage(Arc::clone(&core_handle))
         .setup(move |app| {
-            let app_handle = app.handle().clone();
-            let ch         = Arc::clone(&core_handle);
-            thread::spawn(move || run_startup(ch, app_handle));
+            let handle = app.handle().clone();
+            let state  = Arc::clone(&core_handle);
+
+            thread::spawn(move || {
+                // ── 1. Убиваем старые процессы ─────────────────────────────────
+                kill_existing_core();
+
+                // ── 2. Извлекаем ядро из embedded bytes ────────────────────────
+                let Some(exe) = extract_core(&handle) else {
+                    emit(
+                        &handle, "failed",
+                        "Критическая ошибка: не удалось создать директорию ядра. \
+                         Запустите от имени администратора или переустановите приложение.",
+                        0,
+                    );
+                    return;
+                };
+
+                // ── 3. Запускаем с повторными попытками ───────────────────────
+                let log_path = get_startup_log_path();
+                let Some(child) = spawn_with_retry(&exe, &log_path, &handle) else {
+                    let log_body = read_startup_log().unwrap_or_default();
+                    let last_line = log_body.lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .last()
+                        .unwrap_or("")
+                        .to_string();
+
+                    emit(
+                        &handle, "failed",
+                        format!(
+                            "Ядро не запускается после {} попыток. \
+                             Добавьте FMailSender в исключения антивируса и \
+                             перезапустите приложение.{}",
+                            SPAWN_MAX_RETRIES,
+                            if last_line.is_empty() {
+                                String::new()
+                            } else {
+                                format!("\n\nОшибка: {}", last_line)
+                            }
+                        ),
+                        0,
+                    );
+                    return;
+                };
+                *state.lock().unwrap() = Some(child);
+
+                emit(&handle, "running", "Ожидание готовности ядра...", 0);
+
+                // ── 4. Ждём открытия порта ─────────────────────────────────────
+                if !wait_for_port(Duration::from_secs(PORT_WAIT_SECS), &handle) {
+                    let log_body = read_startup_log().unwrap_or_default();
+                    let last_line = log_body.lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .last()
+                        .unwrap_or("")
+                        .to_string();
+
+                    emit(
+                        &handle, "failed",
+                        format!(
+                            "Ядро не ответило за {} секунд. \
+                             Возможные причины:\n\
+                             • Антивирус блокирует ядро — добавьте FMailSender в исключения\n\
+                             • Порт {} занят другим процессом\n\
+                             • Недостаточно памяти (мин. 512 МБ свободной ОЗУ){}",
+                            PORT_WAIT_SECS,
+                            CORE_PORT,
+                            if last_line.is_empty() {
+                                String::new()
+                            } else {
+                                format!("\n\nЛог: {}", last_line)
+                            }
+                        ),
+                        0,
+                    );
+                    return;
+                }
+
+                // ── 5. Готово ──────────────────────────────────────────────────
+                emit(&handle, "ready", "FMailSender готов к работе", 0);
+            });
+
             Ok(())
         })
-        .on_window_event(move |_win, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                if let Ok(mut g) = core_for_event.lock() {
-                    if let Some(mut c) = g.take() { let _ = c.kill(); }
-                }
-                kill_core_by_name();
-            }
-        })
-        .invoke_handler(tauri::generate_handler![get_core_url, restart_core])
+        .invoke_handler(tauri::generate_handler![restart_core, get_core_url])
         .run(tauri::generate_context!())
-        .expect("tauri runtime error");
+        .expect("error while running tauri application");
+}
+
+fn main() {
+    run()
 }

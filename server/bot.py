@@ -2988,6 +2988,96 @@ async def download_file(filename: str, key: str = ""):
     return FileResponse(str(_file_path), filename=safe, media_type="application/octet-stream")
 
 
+
+# ─── API v2 Security Endpoints ────────────────────────────────────────────────
+# v7.0.0: HWID + fingerprint verification on every app startup
+
+class StartupVerifyRequest(BaseModel):
+    key:         str
+    hwid:        str
+    fingerprint: str = ""
+    action:      str = "startup_verify"
+
+
+class BindHwidRequest(BaseModel):
+    key:  str
+    hwid: str
+
+
+@api_app.post("/api/v2/verify")
+async def api_v2_verify(req: StartupVerifyRequest, request: Request):
+    """
+    Проверяет лицензию при каждом запуске приложения.
+    Привязывает HWID при первом запуске, проверяет при повторных.
+    """
+    from datetime import datetime, timezone
+    key  = req.key.strip().upper()
+    hwid = req.hwid.strip().upper()
+
+    lic = await db.get_license(key)
+    if not lic:
+        raise HTTPException(status_code=403, detail="invalid_key")
+    if not lic.get("is_active"):
+        raise HTTPException(status_code=403, detail="revoked")
+
+    expires_at_str = lic.get("expires_at", "")
+    try:
+        expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > expires_at:
+            raise HTTPException(status_code=403, detail="expired")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="invalid_expiry")
+
+    stored_hwid = (lic.get("hwid") or "").strip().upper()
+    hwid_bound  = bool(stored_hwid)
+
+    if not stored_hwid:
+        bound = await db.bind_hwid_to_license(key, hwid)
+        if bound:
+            await db.set_user_hwid(lic.get("telegram_id", 0), hwid)
+            asyncio.create_task(_notify_hwid_bound(lic, key, hwid))
+        hwid_bound = True
+    elif stored_hwid != hwid:
+        raise HTTPException(status_code=403, detail="hwid_mismatch")
+
+    if req.fingerprint:
+        await db.log_startup_fingerprint(key, hwid, req.fingerprint)
+
+    return {
+        "ok":         True,
+        "plan":       lic.get("plan", ""),
+        "expires_at": expires_at_str,
+        "hwid_bound": hwid_bound,
+        "hwid_match": True,
+    }
+
+
+@api_app.post("/api/v2/bind_hwid")
+async def api_v2_bind_hwid(req: BindHwidRequest, request: Request):
+    """Явная привязка HWID к лицензии после первой активации."""
+    key  = req.key.strip().upper()
+    hwid = req.hwid.strip().upper()
+
+    lic = await db.get_license(key)
+    if not lic:
+        raise HTTPException(status_code=403, detail="invalid_key")
+
+    stored_hwid = (lic.get("hwid") or "").strip().upper()
+    if stored_hwid and stored_hwid != hwid:
+        raise HTTPException(status_code=403, detail="hwid_already_bound")
+
+    bound = await db.bind_hwid_to_license(key, hwid)
+    if bound:
+        await db.set_user_hwid(lic.get("telegram_id", 0), hwid)
+        asyncio.create_task(_notify_hwid_bound(lic, key, hwid))
+
+    return {"ok": True, "hwid_bound": True}
+
+
 @api_app.get("/health")
 async def health():
     stats = await db.get_stats()

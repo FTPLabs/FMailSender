@@ -1144,3 +1144,27 @@ async def deduct_user_balance(telegram_id: int, amount: float) -> tuple:
       await conn.commit()
       logger.info("Balance -%.2f USDT for tg=%d. New: %.2f", amount, telegram_id, new_balance)
       return True, new_balance
+
+async def log_startup_fingerprint(key: str, hwid: str, fingerprint: str) -> None:
+  """Логирует отпечаток бинаря при каждом запуске.
+  
+  Используется для мониторинга подмены EXE:
+  если fingerprint резко изменился у многих пользователей - алерт.
+  Таблица startup_logs создаётся автоматически.
+  """
+  ts = _now()
+  async with _db() as db:
+      await db.execute(
+          """CREATE TABLE IF NOT EXISTS startup_logs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            license_key TEXT NOT NULL,
+            hwid        TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            logged_at   TEXT NOT NULL
+          )"""
+      )
+      await db.execute(
+          "INSERT INTO startup_logs (license_key, hwid, fingerprint, logged_at) VALUES (?,?,?,?)",
+          (key.upper(), hwid.upper(), fingerprint, ts),
+      )
+      await db.commit()

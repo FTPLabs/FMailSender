@@ -1,12 +1,30 @@
-# FMailSender core dependencies
+# FMailSender core runtime dependencies
+# v7.0.0: PyInstaller 6.21 build (NOT listed here — installed separately in CI)
+
+# FastAPI server
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 python-multipart>=0.0.12
+
+# Async SMTP (aiosmtplib 3.x — breaking API change from 2.x, no start_tls= arg)
 aiosmtplib>=3.0.0
 aiofiles>=23.0.0
+
+# Cryptography (Fernet for local storage encryption)
 cryptography>=43.0.0
+
+# DNS + DKIM
 dnspython>=2.7.0
+
+# HTTP client (license server, OAuth)
 requests>=2.32.0
+
+# Proxy support
 PySocks>=1.7.1
+
+# JWT (license tokens)
+PyJWT>=2.8.0
+
+# Windows hardware ID (required for HWID generation)
 wmi>=1.5.1; sys_platform == "win32"
 pywin32>=306; sys_platform == "win32"

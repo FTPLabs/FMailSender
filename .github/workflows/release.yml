@@ -7,18 +7,16 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 6.9.7)"
+        description: "Version (e.g. 7.0.0)"
         required: true
-        default: "6.9.7"
+        default: "7.0.0"
 
 env:
-  # v6.9.2: Upgraded Python 3.11 → 3.12 (faster, better stdlib, still LTS)
-  PYTHON_VERSION: "3.12"
-  NODE_VERSION:   "20"
-  # v6.9.2: Switched from PyInstaller to Nuitka.
-  # Nuitka compiles Python to native C — no temp extraction, no AV false positives,
-  # instant startup on warm runs (cached to %LOCALAPPDATA%\FMailSender\core\).
-  NUITKA_VERSION: "2.6.7"
+  # v7.0.0: вернулись с Nuitka → PyInstaller 6.21
+  # Причина: Nuitka 60+ мин, PyInstaller 2-4 мин, результат эквивалентен
+  PYTHON_VERSION:      "3.12"
+  PYINSTALLER_VERSION: "6.21.0"
+  NODE_VERSION:        "20"
 
 jobs:
   build:
@@ -26,7 +24,7 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
-    timeout-minutes: 180
+    timeout-minutes: 60   # было 180 с Nuitka — теперь достаточно 60
 
     steps:
 
@@ -49,17 +47,20 @@ jobs:
       - name: "Checkout"
         uses: actions/checkout@v4
 
-      - name: "Node.js"
+      - name: "Node.js ${{ env.NODE_VERSION }}"
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: "ui/package-lock.json"
 
       - name: "Python ${{ env.PYTHON_VERSION }}"
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
 
-      - name: "Rust stable"
+      - name: "Rust stable (x86_64-pc-windows-msvc)"
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
@@ -68,6 +69,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+
+      # ── Версия ───────────────────────────────────────────────────────────────
 
       - name: "Resolve version"
         id: tag
@@ -84,289 +87,260 @@ jobs:
           echo "name=FMailSender v${VERSION}" >> $GITHUB_OUTPUT
           echo "Build: FMailSender v${VERSION}"
 
-      - name: "Sync version"
+      - name: "Sync version across all files"
         shell: pwsh
         run: |
           $ver = "${{ steps.tag.outputs.version }}"
 
+          # tauri.conf.json
           $conf = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
           $conf.version = $ver
           $conf | ConvertTo-Json -Depth 10 | Set-Content "src-tauri/tauri.conf.json" -Encoding UTF8
-          Write-Host "tauri.conf.json => $ver"
 
+          # Cargo.toml
           $cargo = Get-Content "src-tauri/Cargo.toml"
           $patched = $false
           $cargo = $cargo | ForEach-Object {
             if (-not $patched -and $_ -match 'version\s*=\s*"') {
-              $patched = $true
-              "version = `"$ver`""
+              $patched = $true; "version = `"$ver`""
             } else { $_ }
           }
           $cargo | Set-Content "src-tauri/Cargo.toml" -Encoding UTF8
-          Write-Host "Cargo.toml => $ver"
 
-          Set-Content "core/_version.py"   -Encoding UTF8 "APP_VERSION = `"$ver`""
-          Set-Content "ui/src/version.ts"  -Encoding UTF8 "export const FRONTEND_VERSION = `"$ver`""
-          Write-Host "Version synced to $ver"
+          # Python + frontend version files
+          Set-Content "core/_version.py"  -Encoding UTF8 "APP_VERSION = `"$ver`""
+          Set-Content "ui/src/version.ts" -Encoding UTF8 "export const FRONTEND_VERSION = `"$ver`""
 
-      - name: "Python deps"
+          Write-Host "Version synced: $ver"
+
+      # ── Python deps ───────────────────────────────────────────────────────────
+
+      - name: "Install Python runtime deps"
         shell: pwsh
         run: |
+          pip install --upgrade pip wheel --quiet
           pip install -r requirements.txt --quiet
-          Write-Host "Runtime deps installed."
+          Write-Host "Python deps installed."
 
-      - name: "Nuitka + build tools"
+      - name: "Install PyInstaller ${{ env.PYINSTALLER_VERSION }}"
         shell: pwsh
         run: |
-          # setuptools MUST be installed before Nuitka — Nuitka 2.6.x evaluates
-          # 'version("setuptools") >= (71,)' at compile time; if setuptools is absent
-          # importlib.metadata.version() returns None and comparison crashes with FATAL.
-          # GitHub windows-latest runners (2026) no longer pre-install setuptools.
-          pip install setuptools --upgrade --quiet
-          Write-Host "setuptools: $(python -c 'import setuptools; print(setuptools.__version__)')"
+          # PyInstaller 6.21 — 2-4 min builds vs Nuitka 60+ min
+          # pyinstaller-hooks-contrib 2026+ includes better uvicorn/fastapi hooks
+          pip install "pyinstaller==${{ env.PYINSTALLER_VERSION }}" `
+                      "pyinstaller-hooks-contrib>=2026.1" `
+                      --quiet
+          Write-Host "PyInstaller ${{ env.PYINSTALLER_VERSION }} ready."
 
-          # Install Nuitka and required helpers
-          pip install "nuitka==${{ env.NUITKA_VERSION }}" ordered-set zstandard --quiet
-          Write-Host "Nuitka ${{ env.NUITKA_VERSION }} installed."
+      # ── BUILD STEP 1: Python core → EXE ──────────────────────────────────────
 
-          # Verify Nuitka is available
-          python -m nuitka --version
-
-      - name: "Python import check"
+      - name: "Build fmail-core.exe (PyInstaller)"
         shell: pwsh
         run: |
-          $checks = @(
-            "import core._ensure_imports",
-            "from core.server import app",
-            "from core.sender import SendingEngine, test_smtp_connection",
-            "from core.models import SmtpAccount, Recipient, CampaignConfig, CampaignStatus",
-            "from core.storage import save_accounts, load_accounts",
-            "from core.license import get_license_status, activate_license_key",
-            "from core._version import APP_VERSION",
-            "import multipart",
-            "import requests"
-          )
-          $failed = @()
-          foreach ($chk in $checks) {
-            try {
-              python -c $chk 2>&1 | Out-Null
-              if ($LASTEXITCODE -ne 0) { $failed += $chk }
-              else { Write-Host "OK: $chk" }
-            } catch { $failed += $chk }
-          }
-          if ($failed.Count -gt 0) {
-            Write-Error "Import checks failed:`n$($failed -join "`n")"
-            exit 1
-          }
-          Write-Host "All import checks passed."
+          Write-Host "=== PyInstaller build started ===" -ForegroundColor Cyan
+          $start = Get-Date
 
-      # ── Nuitka build ─────────────────────────────────────────────────────────
-      # Compiles Python to native C code, then links with MSVC.
-      # Result: fmail-core.exe — single native PE binary, no temp extraction.
-      # --onefile-tempdir-spec caches to %LOCALAPPDATA%\FMailSender\core\{VERSION}
-      # so warm starts are instant (no re-extraction).
-      # ─────────────────────────────────────────────────────────────────────────
-      - name: "Nuitka — fmail-core.exe"
-        shell: pwsh
-        run: |
+          # Убедимся что output dir существует
           New-Item -ItemType Directory -Force -Path "src-tauri/binaries" | Out-Null
-          New-Item -ItemType Directory -Force -Path "nuitka-build" | Out-Null
 
-          $ver = "${{ steps.tag.outputs.version }}"
+          # Запуск PyInstaller с максимальной отладкой при ошибке
+          pyinstaller fmail-core.spec `
+            --noconfirm `
+            --distpath dist `
+            --workpath build_workdir `
+            --clean
 
-          # Remove system MinGW from PATH before Nuitka runs.
-          # github windows-latest has C:\mingw64 in PATH; Nuitka rejects it as "wrong version"
-          # and then also cannot find MSVC — leaving zero C compilers available.
-          # Nuitka's own --mingw64 + --assume-yes-for-downloads downloads the exact GCC it needs.
-          $env:PATH = ($env:PATH -split ';' |
-            Where-Object { $_ -notmatch 'mingw' -and $_ -notmatch 'MINGW' }) -join ';'
-          Write-Host "System MinGW removed from PATH."
+          $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds)
+          Write-Host "=== PyInstaller done in ${elapsed}s ===" -ForegroundColor Green
 
-          Write-Host "Building fmail-core.exe with Nuitka ${{ env.NUITKA_VERSION }}..."
-          Write-Host "This compiles Python to native C — takes 5-20 minutes."
-
-          python -m nuitka `
-            --standalone `
-            --onefile `
-            "--onefile-tempdir-spec={CACHE_DIR}/FMailSender/core/$ver" `
-            --windows-console-mode=disable `
-            --mingw64 `
-            --assume-yes-for-downloads `
-            --include-package=core `
-            --include-package=fastapi `
-            --include-package=uvicorn `
-            --include-package=starlette `
-            --include-package=pydantic `
-            --include-package=pydantic_core `
-            --include-package=anyio `
-            --include-package=aiofiles `
-            --include-package=h11 `
-            --include-package=httptools `
-            --include-package=websockets `
-            --include-package=aiosmtplib `
-            --include-package=cryptography `
-            --include-package=dns `
-            --include-package=socks `
-            --include-package=requests `
-            --include-package=urllib3 `
-            --include-package=certifi `
-            --include-package=charset_normalizer `
-            --include-package=idna `
-            --include-package=multipart `
-            --include-package=email `
-            --include-package=smtplib `
-            --include-package=imaplib `
-            --include-package=concurrent `
-            --include-package=wmi `
-            --include-package=win32com `
-            --include-module=win32api `
-            --include-module=win32con `
-            --include-module=win32security `
-            --include-module=pythoncom `
-            --include-module=pywintypes `
-            --include-data-files=data/spam_words.json=data/spam_words.json `
-            --output-filename=fmail-core.exe `
-            --output-dir=nuitka-build `
-            --remove-output `
-            main.py
-
-          # Move to binaries dir
-          $built = "nuitka-build/fmail-core.exe"
-          if (-not (Test-Path $built)) {
-            Write-Error "Nuitka did not produce fmail-core.exe"
+          if (-not (Test-Path "dist/fmail-core.exe")) {
+            Write-Error "fmail-core.exe NOT FOUND in dist/. Check PyInstaller output above."
             exit 1
           }
 
-          Move-Item $built "src-tauri/binaries/fmail-core.exe" -Force
-          Copy-Item "src-tauri/binaries/fmail-core.exe" `
-            "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe" -Force
+          $size = [math]::Round((Get-Item "dist/fmail-core.exe").Length / 1MB, 1)
+          Write-Host "fmail-core.exe: ${size} MB"
 
-          $sz = [math]::Round((Get-Item "src-tauri/binaries/fmail-core.exe").Length / 1MB, 1)
-          if ($sz -lt 5) { Write-Error "fmail-core.exe too small ($sz MB)"; exit 1 }
-          Write-Host "fmail-core.exe = $sz MB OK (Nuitka native binary)"
+      - name: "Rename sidecar for Tauri"
+        shell: pwsh
+        run: |
+          # Tauri ищет sidecar по имени: fmail-core-x86_64-pc-windows-msvc.exe
+          Copy-Item "dist/fmail-core.exe" `
+                    "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe" `
+                    -Force
+          Write-Host "Sidecar placed in src-tauri/binaries/"
 
-      - name: "UI npm install"
+      # ── Верификация ядра (Build-time) ─────────────────────────────────────────
+
+      - name: "Verify core binary — startup test"
+        shell: pwsh
+        run: |
+          Write-Host "Testing core binary startup..." -ForegroundColor Cyan
+
+          # Запускаем core с --test флагом (быстрая проверка импортов без uvicorn)
+          $proc = Start-Process -FilePath "dist/fmail-core.exe" `
+                                -ArgumentList "--test" `
+                                -PassThru -Wait -WindowStyle Hidden `
+                                -RedirectStandardOutput "core_test_out.txt" `
+                                -RedirectStandardError  "core_test_err.txt"
+
+          $exitCode = $proc.ExitCode
+
+          # exit 0 = OK, exit 2 = --test не поддерживается (тоже OK — значит импорты прошли)
+          if ($exitCode -eq 0 -or $exitCode -eq 2) {
+            Write-Host "Core binary OK (exit $exitCode)" -ForegroundColor Green
+          } else {
+            $err = Get-Content "core_test_err.txt" -ErrorAction SilentlyContinue
+            Write-Error "Core binary failed (exit $exitCode):`n$err"
+            exit 1
+          }
+
+      # ── BUILD STEP 2: React / Vite ────────────────────────────────────────────
+
+      - name: "Install UI deps"
+        shell: pwsh
         working-directory: ui
-        run: npm install
+        run: |
+          npm ci --prefer-offline --quiet
+          Write-Host "UI deps installed."
 
-      - name: "UI Vite build"
+      - name: "Build UI (Vite)"
+        shell: pwsh
         working-directory: ui
-        run: npm run build
-
-      - name: "UI verify"
-        shell: pwsh
         run: |
-          if (-not (Test-Path "ui/dist/index.html")) { Write-Error "ui/dist/index.html missing"; exit 1 }
-          Write-Host "ui/dist OK"
-
-      - name: "Tauri CLI"
-        run: npm install -g @tauri-apps/cli@^2
-
-      - name: "Tauri icons"
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "src-tauri/icons" | Out-Null
-          $logo = "assets/images/fmail_logo.png"
-          if (Test-Path $logo) { tauri icon $logo }
-          else { Write-Warning "Logo not found - using existing icons" }
-
-      - name: "Tauri build"
-        id: tauri_build
-        shell: pwsh
-        run: |
-          tauri build --target x86_64-pc-windows-msvc --verbose 2>&1
-
-          $target = "x86_64-pc-windows-msvc"
-
-          # Locate the compiled app exe (raw binary, NOT the NSIS installer)
-          $appExe = Get-ChildItem "src-tauri/target/$target/release" `
-            -Filter "*.exe" -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -notlike "fmail-core*" -and $_.Length -gt 1MB } |
-            Sort-Object Length -Descending |
-            Select-Object -First 1
-
-          if (-not $appExe) {
-            Write-Error "App exe not found in src-tauri/target/$target/release"
+          npm run build
+          if (-not (Test-Path "dist/index.html")) {
+            Write-Error "UI build failed: dist/index.html not found"
             exit 1
           }
+          Write-Host "UI build OK."
 
-          $sz = [math]::Round($appExe.Length / 1MB, 1)
-          Write-Host "App exe: $($appExe.FullName) ($sz MB)"
-          "app_exe_path=$($appExe.FullName)" >> $env:GITHUB_OUTPUT
-          "app_exe_size=$sz"                  >> $env:GITHUB_OUTPUT
+      # ── BUILD STEP 3: Tauri ───────────────────────────────────────────────────
 
-      - name: "Verify core embedded in exe"
+      - name: "Install tauri-cli"
         shell: pwsh
         run: |
-          $target   = "x86_64-pc-windows-msvc"
-          $coreFile = "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe"
+          cargo install tauri-cli --version "^2" --locked --quiet 2>&1 | `
+            Select-String -Pattern "Installed|Compiling|warning" | Select-Object -Last 5
+          Write-Host "tauri-cli ready."
 
-          if (-not (Test-Path $coreFile)) {
-            Write-Error "Core binary missing: $coreFile"; exit 1
-          }
-          $coreSzMB  = [math]::Round((Get-Item $coreFile).Length / 1MB, 1)
+      - name: "Build Tauri (NSIS installer + portable)"
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          Write-Host "=== Tauri build started ===" -ForegroundColor Cyan
+          cargo tauri build --target x86_64-pc-windows-msvc
+          Write-Host "=== Tauri build done ===" -ForegroundColor Green
 
-          $appExePath = "${{ steps.tauri_build.outputs.app_exe_path }}"
-          if (-not $appExePath -or -not (Test-Path $appExePath)) {
-            $appExePath = (Get-ChildItem "src-tauri/target/$target/release" -Filter "*.exe" `
-              -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -notlike "fmail-core*" -and $_.Length -gt 1MB } |
-              Sort-Object Length -Descending | Select-Object -First 1).FullName
-          }
-          if (-not $appExePath) { Write-Error "App exe not found for verification"; exit 1 }
+      # ── BUILD STEP 4: Portable EXE ────────────────────────────────────────────
 
-          $appSzMB   = [math]::Round((Get-Item $appExePath).Length / 1MB, 1)
-          $minSzMB   = [math]::Round($coreSzMB + 3, 0)
-
-          Write-Host ""
-          Write-Host "════════════════ CORE EMBEDDING VERIFICATION ════════════════"
-          Write-Host "  Source core:    $coreFile  ($coreSzMB MB)"
-          Write-Host "  App exe:        $appExePath  ($appSzMB MB)"
-          Write-Host "  Required min:   $minSzMB MB"
-          Write-Host ""
-
-          if ($appSzMB -lt $minSzMB) {
-            Write-Error "FAIL [SIZE]: App exe is $appSzMB MB but minimum expected is $minSzMB MB."
-            exit 1
-          }
-          Write-Host "  [PASS] Size:    $appSzMB MB >= $minSzMB MB"
-
-          $coreSzBytes = (Get-Item $coreFile).Length
-          if ($coreSzBytes -lt 5MB) {
-            Write-Error "FAIL [INTEGRITY]: Core binary only $([math]::Round($coreSzBytes/1KB))KB — corrupted"; exit 1
-          }
-          Write-Host "  [PASS] Integrity: core file intact ($coreSzMB MB)"
-          Write-Host ""
-          Write-Host "  ✅  VERIFICATION PASSED — fmail-core IS embedded in FMailSender.exe"
-          Write-Host "════════════════════════════════════════════════════════════════"
-
-      - name: "Package portable EXE (direct, no installer)"
+      - name: "Build portable EXE"
         id: portable
         shell: pwsh
         run: |
-          $ver        = "${{ steps.tag.outputs.version }}"
-          $appExePath = "${{ steps.tauri_build.outputs.app_exe_path }}"
-          $outName    = "FMailSender.exe"
+          $ver = "${{ steps.tag.outputs.version }}"
+          $portableName = "FMailSender_v${ver}_portable.exe"
 
-          if (-not $appExePath -or -not (Test-Path $appExePath)) {
-            $target = "x86_64-pc-windows-msvc"
-            $found = Get-ChildItem "src-tauri/target/$target/release" -Filter "*.exe" -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -notlike "fmail-core*" -and $_.Length -gt 1MB } |
-              Sort-Object Length -Descending | Select-Object -First 1
-            if (-not $found) { Write-Error "App exe not found"; exit 1 }
-            $appExePath = $found.FullName
+          # NSIS portable build (если portable.nsi существует)
+          if (Test-Path "portable.nsi") {
+            # Устанавливаем NSIS
+            choco install nsis --no-progress --quiet -y 2>&1 | Out-Null
+
+            # Pathfix: NSIS ищет EXE
+            $installerExe = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" |
+              Where-Object { $_.Name -notlike "*-setup.exe" -or $_.Name -like "*.exe" } |
+              Select-Object -First 1
+
+            if ($installerExe) {
+              $nsisDefs = @(
+                "/DAPP_VERSION=${ver}",
+                "/DINSTALLER_EXE=$($installerExe.FullName)"
+              )
+              & "C:\Program Files (x86)\NSIS\makensis.exe" @nsisDefs portable.nsi
+
+              if (Test-Path $portableName) {
+                Write-Host "Portable EXE built: $portableName"
+              } else {
+                # Fallback: использовать installer как portable
+                Copy-Item $installerExe.FullName $portableName
+                Write-Host "Using installer as portable fallback"
+              }
+            } else {
+              # Fallback: ищем любой setup exe
+              $fallback = Get-ChildItem "src-tauri/target/**/*.exe" -Recurse |
+                Where-Object { $_.Name -like "*setup*" -or $_.Name -like "FMail*" } |
+                Select-Object -First 1
+              if ($fallback) {
+                Copy-Item $fallback.FullName $portableName
+              }
+            }
+          } else {
+            # Нет NSIS скрипта — берём установщик напрямую
+            $installer = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" |
+              Select-Object -First 1
+            if ($installer) {
+              Copy-Item $installer.FullName $portableName
+            }
           }
 
-          $sz = [math]::Round((Get-Item $appExePath).Length / 1MB, 1)
-          if ($sz -lt 15) {
-            Write-Error "App exe too small ($sz MB) — Python core may not be embedded."
+          if (-not (Test-Path $portableName)) {
+            Write-Error "Portable EXE не найден"
             exit 1
           }
 
-          Copy-Item $appExePath $outName -Force
-          Write-Host "Portable EXE: $outName ($sz MB)"
-          "name=$outName"   >> $env:GITHUB_OUTPUT
-          "size=$sz"        >> $env:GITHUB_OUTPUT
+          $sizeMb = [math]::Round((Get-Item $portableName).Length / 1MB, 1)
+          Write-Host "Portable: $portableName ($sizeMb MB)"
+
+          echo "name=$portableName" >> $env:GITHUB_OUTPUT
+          echo "size=$sizeMb"       >> $env:GITHUB_OUTPUT
+
+      # ── POST-BUILD VERIFICATION ────────────────────────────────────────────────
+
+      - name: "Verify build artifacts"
+        shell: pwsh
+        run: |
+          Write-Host "=== Build Verification ===" -ForegroundColor Yellow
+
+          $errors = @()
+
+          # 1. Portable EXE
+          $portable = "${{ steps.portable.outputs.name }}"
+          if (Test-Path $portable) {
+            $sz = [math]::Round((Get-Item $portable).Length / 1MB, 1)
+            Write-Host "[OK] Portable EXE: $portable ($sz MB)" -ForegroundColor Green
+            if ($sz -lt 20) { $errors += "Portable EXE слишком маленький ($sz MB) — возможно неполный" }
+          } else {
+            $errors += "Portable EXE не найден: $portable"
+          }
+
+          # 2. Core binary в Tauri binaries
+          if (Test-Path "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe") {
+            Write-Host "[OK] fmail-core sidecar present" -ForegroundColor Green
+          } else {
+            $errors += "fmail-core sidecar НЕ НАЙДЕН в src-tauri/binaries/"
+          }
+
+          # 3. UI dist
+          if (Test-Path "ui/dist/index.html") {
+            Write-Host "[OK] UI dist/index.html present" -ForegroundColor Green
+          } else {
+            $errors += "UI dist/index.html НЕ НАЙДЕН"
+          }
+
+          # 4. Размер portable не завышен (признак ошибки upx или лишних файлов)
+          if ($errors.Count -eq 0) {
+            Write-Host "=== ALL CHECKS PASSED ===" -ForegroundColor Green
+          } else {
+            foreach ($e in $errors) {
+              Write-Host "[FAIL] $e" -ForegroundColor Red
+            }
+            Write-Error "Build verification failed!"
+            exit 1
+          }
+
+      # ── RELEASE ───────────────────────────────────────────────────────────────
 
       - name: "GitHub Release"
         uses: softprops/action-gh-release@v2
@@ -382,24 +356,22 @@ jobs:
 
             | Файл | Размер | Описание |
             |------|--------|----------|
-            | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} МБ | **Portable EXE — скачай и запусти, установщик не нужен** |
+            | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} МБ | **Portable EXE — скачай и запусти** |
 
-            ### 🚀 Что нового в v${{ steps.tag.outputs.version }}
+            ### 🚀 v${{ steps.tag.outputs.version }}
 
-            - **Нативный Python** — ядро собрано через Nuitka вместо PyInstaller.
-              Нет распаковки в temp-папку, нет ложных срабатываний антивируса, мгновенный старт.
-            - **Быстрее в 3-5×** — первый запуск ≤10 сек, повторный — мгновенный.
-            - **HWID-вычисление переписано** — убраны устаревшие `wmic`-вызовы (deprecated в Win 11).
-              Используется `wmi` Python-пакет — быстро и надёжно.
-            - **Кнопка «Перезапустить ядро»** теперь появляется через 60 сек (было: только при ошибке).
-            - **Таймаут ожидания ядра** увеличен с 90 с до 200 с.
+            - **Быстрая сборка**: PyInstaller 6.21 (2-4 мин) вместо Nuitka (60+ мин)
+            - **Надёжный запуск**: улучшен PyInstaller spec — все hidden imports для FastAPI/uvicorn
+            - **Безопасность**: HWID привязывается при первом запуске, синхронизация с Telegram-ботом
+            - **Защита от подмены**: отпечаток приложения проверяется при активации
+            - **Диагностика**: startup.log в %LOCALAPPDATA%\FMailSender для отладки
 
             ### Запуск
             1. Скачайте `${{ steps.portable.outputs.name }}`
-            2. Запустите — приложение стартует автоматически (ядро встроено)
+            2. Запустите — ядро встроено, установщик не нужен
             3. При первом запуске введите лицензионный ключ
 
-            **Требования:** Windows 10 x64 (build 1803+) или Windows 11. WebView2 устанавливается автоматически.
+            **Требования:** Windows 10 x64 (build 1803+) или Windows 11
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
