@@ -31,22 +31,18 @@ def _get_cache_path() -> Path:
 
 
 def _get_fernet():
-    """Получаем Fernet из storage.py (общий ключ)."""
+    """Получаем Fernet из storage.py (реальный ключ из KEY_FILE, не воспроизводимый).
+    
+    SECURITY: использует тот же ключ, что и storage.py.
+    Ключ хранится в %APPDATA%/FMailSender/.fernet_key (не в коде, не из HWID).
+    Если ключ недоступен — возвращаем None (не создаём слабый fallback).
+    """
     try:
-        from core.storage import _get_fernet as sf
+        from core.storage import _fernet as sf
         return sf()
-    except Exception:
-        pass
-    try:
-        from cryptography.fernet import Fernet
-        # Deterministic key derived from MachineGuid (не меняется при переустановке)
-        from core.app_identity import get_hwid
-        hwid = get_hwid()
-        key_raw = hashlib.sha256(f"fmail_cache_{hwid}".encode()).digest()
-        import base64
-        return Fernet(base64.urlsafe_b64encode(key_raw))
     except Exception as exc:
-        logger.error("Cannot create Fernet for cache: %s", exc)
+        logger.error("Cannot get storage Fernet key: %s", exc)
+        # SECURITY: fail closed — не возвращаем None-as-bypass
         return None
 
 

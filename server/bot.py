@@ -3040,7 +3040,15 @@ async def api_v2_verify(req: StartupVerifyRequest, request: Request):
         if bound:
             await db.set_user_hwid(lic.get("telegram_id", 0), hwid)
             asyncio.create_task(_notify_hwid_bound(lic, key, hwid))
-        hwid_bound = True
+            hwid_bound = True
+        else:
+            # Race: другой процесс привязал HWID одновременно
+            # Перечитываем лицензию для получения актуального HWID
+            lic_refreshed = await db.get_license(key)
+            fresh_hwid = (lic_refreshed.get("hwid") or "").strip().upper() if lic_refreshed else ""
+            if fresh_hwid and fresh_hwid != hwid:
+                raise HTTPException(status_code=403, detail="hwid_mismatch")
+            hwid_bound = bool(fresh_hwid)
     elif stored_hwid != hwid:
         raise HTTPException(status_code=403, detail="hwid_mismatch")
 

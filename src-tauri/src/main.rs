@@ -149,6 +149,16 @@ fn read_startup_log() -> Option<String> {
     }
 }
 
+/// Compute a simple FNV-1a 64-bit hash of a byte slice (no extra crates).
+fn fnv64(data: &[u8]) -> u64 {
+    let mut h: u64 = 14695981039346656037u64;
+    for &b in data {
+        h ^= b as u64;
+        h = h.wrapping_mul(1099511628211u64);
+    }
+    h
+}
+
 fn extract_core(handle: &AppHandle) -> Option<PathBuf> {
     let dir  = get_core_dir()?;
     let path = dir.join("fmail-core.exe");
@@ -157,23 +167,39 @@ fn extract_core(handle: &AppHandle) -> Option<PathBuf> {
 
     #[cfg(target_os = "windows")]
     {
-        // Атомарная запись: пишем во временный файл, затем переименовываем
-        let tmp_path = dir.join("fmail-core.tmp");
-        {
-            let mut f = std::fs::File::create(&tmp_path).ok()?;
-            f.write_all(CORE_BYTES).ok()?;
-            f.flush().ok()?;
-        }
-        // Если файл уже существует и совпадает по размеру — пропускаем копирование
+        // Вычисляем хеш встроенных байт для проверки целостности
+        let embedded_hash = fnv64(CORE_BYTES);
+
+        // Проверяем, нужно ли перезаписывать файл
         let needs_replace = if path.exists() {
-            path.metadata().map(|m| m.len()).unwrap_or(0) != CORE_BYTES.len() as u64
+            // Сравниваем хеш на диске с хешем встроенных байт
+            let on_disk = std::fs::read(&path).unwrap_or_default();
+            fnv64(&on_disk) != embedded_hash
         } else {
             true
         };
+
         if needs_replace {
-            std::fs::rename(&tmp_path, &path).ok()?;
-        } else {
-            let _ = std::fs::remove_file(&tmp_path);
+            // Атомарная запись через временный файл
+            let tmp_path = dir.join("fmail-core.tmp");
+            {
+                let mut f = match std::fs::File::create(&tmp_path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        emit(handle, "failed",
+                             format!("Ошибка создания temp файла: {}", e), 0);
+                        return None;
+                    }
+                };
+                if f.write_all(CORE_BYTES).is_err() || f.flush().is_err() {
+                    return None;
+                }
+            }
+            // На Windows rename может не сработать если файл заблокирован — fallback на copy+delete
+            if std::fs::rename(&tmp_path, &path).is_err() {
+                let _ = std::fs::copy(&tmp_path, &path);
+                let _ = std::fs::remove_file(&tmp_path);
+            }
         }
     }
 

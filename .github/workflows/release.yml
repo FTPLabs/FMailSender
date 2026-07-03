@@ -375,6 +375,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # SECURITY: This step has if:always() to ensure repo returns to private
+      # even on failure. PAT_TOKEN must be set in repo secrets.
       - name: "Repo PRIVATE — build window closed"
         if: always()
         shell: bash
