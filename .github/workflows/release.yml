@@ -16,7 +16,7 @@ env:
   # Причина: Nuitka 60+ мин, PyInstaller 2-4 мин, результат эквивалентен
   PYTHON_VERSION:      "3.12"
   PYINSTALLER_VERSION: "6.21.0"
-  NODE_VERSION:        "20"
+  NODE_VERSION:        "22"
 
 jobs:
   build:
