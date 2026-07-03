@@ -254,13 +254,20 @@ def verify_on_startup(license_key: str) -> VerifyResult:
         data: dict = resp.json()
 
         if resp.status_code == 200 and data.get("ok"):
-            return VerifyResult(
+            result = VerifyResult(
                 ok         = True,
                 plan       = data.get("plan", ""),
                 expires_at = data.get("expires_at", ""),
                 hwid_bound = data.get("hwid_bound", False),
                 hwid_match = data.get("hwid_match", True),
             )
+            # Сохраняем в кеш для offline-режима (TTL=24ч)
+            try:
+                from core.identity_cache import save_to_cache
+                save_to_cache(license_key, result.to_dict())
+            except Exception:
+                pass
+            return result
 
         reason = data.get("reason") or data.get("detail") or f"HTTP {resp.status_code}"
 
@@ -271,12 +278,15 @@ def verify_on_startup(license_key: str) -> VerifyResult:
         return VerifyResult(ok=False, reason=reason)
 
     except requests.exceptions.ConnectionError:
-        logger.warning("License server unreachable — offline mode")
-        return VerifyResult(ok=True, reason="offline", offline=True)
+        # SECURITY: не разрешаем безусловный offline bypass.
+        # Проверяем зашифрованный локальный кеш (TTL=24ч).
+        # Блокировка сети не даёт обойти лицензионную проверку.
+        logger.warning("License server unreachable — checking local cache")
+        return _verify_from_cache(license_key)
 
     except requests.exceptions.Timeout:
-        logger.warning("License server timed out — offline mode")
-        return VerifyResult(ok=True, reason="timeout", offline=True)
+        logger.warning("License server timed out — checking local cache")
+        return _verify_from_cache(license_key)
 
     except Exception as exc:
         logger.error("startup verify error: %s", exc)
@@ -323,3 +333,38 @@ def bind_hwid(license_key: str) -> bool:
     except Exception as exc:
         logger.warning("HWID bind request failed: %s", exc)
         return False
+
+def _verify_from_cache(license_key: str) -> VerifyResult:
+    """
+    Offline-проверка через зашифрованный локальный кеш.
+    
+    Разрешает запуск только если:
+      1. Кеш существует и расшифровывается
+      2. Ключ совпадает
+      3. cached_at + 24ч > сейчас (кеш свежий)
+    
+    Это предотвращает байпас лицензии блокировкой сети.
+    """
+    try:
+        from core.identity_cache import load_from_cache
+        cached = load_from_cache(license_key)
+        if cached and cached.get("ok"):
+            logger.info("Offline: using cached license (age < 24h)")
+            return VerifyResult(
+                ok         = True,
+                reason     = "offline_cache",
+                plan       = cached.get("plan", ""),
+                expires_at = cached.get("expires_at", ""),
+                hwid_bound = cached.get("hwid_bound", False),
+                offline    = True,
+            )
+        else:
+            logger.error("Offline: no valid cache — license check failed")
+            return VerifyResult(
+                ok     = False,
+                reason = "offline_no_cache",
+                offline = True,
+            )
+    except Exception as exc:
+        logger.error("Cache check error: %s", exc)
+        return VerifyResult(ok=False, reason="cache_error", offline=True)

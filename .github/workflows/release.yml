@@ -126,9 +126,9 @@ jobs:
         shell: pwsh
         run: |
           # PyInstaller 6.21 — 2-4 min builds vs Nuitka 60+ min
-          # pyinstaller-hooks-contrib 2026+ includes better uvicorn/fastapi hooks
+          # pyinstaller-hooks-contrib provides better hooks for uvicorn/fastapi
           pip install "pyinstaller==${{ env.PYINSTALLER_VERSION }}" `
-                      "pyinstaller-hooks-contrib>=2026.1" `
+                      "pyinstaller-hooks-contrib>=2024.11" `
                       --quiet
           Write-Host "PyInstaller ${{ env.PYINSTALLER_VERSION }} ready."
 

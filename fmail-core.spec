@@ -132,6 +132,16 @@ AIOSMTPLIB_HIDDEN = [
     "aiosmtplib.compat",
 ]
 
+# CRITICAL FIX: python-multipart required for FastAPI form endpoints
+# Without this, any form-data endpoint raises ModuleNotFoundError in frozen build
+MULTIPART_HIDDEN = [
+    "multipart",
+    "multipart.multipart",
+    "python_multipart",
+    "starlette.formparsers",
+    "starlette.datastructures",
+]
+
 SOCKS_HIDDEN = [
     "socks",
     "sockshandler",
@@ -196,8 +206,8 @@ ASYNCIO_HIDDEN = [
 
 ALL_HIDDEN = (
     UVICORN_HIDDEN + FASTAPI_HIDDEN + CRYPTO_HIDDEN + EMAIL_HIDDEN +
-    AIOSMTPLIB_HIDDEN + SOCKS_HIDDEN + DKIM_HIDDEN + REQUESTS_HIDDEN +
-    JWT_HIDDEN + WIN32_HIDDEN + ASYNCIO_HIDDEN + [
+    AIOSMTPLIB_HIDDEN + MULTIPART_HIDDEN + SOCKS_HIDDEN + DKIM_HIDDEN +
+    REQUESTS_HIDDEN + JWT_HIDDEN + WIN32_HIDDEN + ASYNCIO_HIDDEN + [
         "logging.handlers",
         "xml.etree.ElementTree",
         "zipimport",
@@ -261,6 +271,8 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
+    # PyInstaller onefile: шаблоны доступны через sys._MEIPASS
+    # Сервер должен использовать get_resource_path() из utils.py
     # КРИТИЧНО: исключить тяжёлые пакеты, которых нет в требованиях
     # Это главная причина долгих сборок — PyInstaller сканирует всё подряд
     excludes=[
