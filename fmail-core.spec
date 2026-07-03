@@ -294,9 +294,8 @@ a = Analysis(
         # Test infrastructure
         "pytest", "unittest",
         "_pytest",
-        # Build tools
+        # Build tools (distutils НЕЛЬЗЯ исключать — PyInstaller 6.x сам его алиасит)
         "setuptools._vendor", "pkg_resources._vendor",
-        "distutils",
         "docutils", "sphinx",
         # Unused DB
         "sqlalchemy", "alembic", "django", "flask",
