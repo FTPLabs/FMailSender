@@ -18,6 +18,11 @@ ROOT CAUSE NOTE (v6.7.7):
   caused _validate_online() to always raise ImportError -> "offline: True"
   -> 7-day grace period -> license bypass. Missing core.license caused
   ImportError in lifespan -> _set_license_ok(True) -> all users admitted.
+
+v6.9.7 fix:
+  Removed `starlette.staticfiles` import — server.py does NOT mount StaticFiles,
+  and starlette.staticfiles requires `aiofiles` in some versions which was not
+  in requirements.txt, causing ModuleNotFoundError on frozen exe startup.
 """
 
 # ── License module ────────────────────────────────────────────────────────────
@@ -64,7 +69,8 @@ import fastapi.middleware.cors              # noqa: F401
 import starlette.middleware.cors            # noqa: F401
 import starlette.responses                  # noqa: F401
 import starlette.routing                    # noqa: F401
-import starlette.staticfiles                # noqa: F401
+# NOTE: starlette.staticfiles intentionally excluded — not used by server.py
+#       and requires aiofiles which is not always available in frozen exe.
 
 # ── uvicorn protocols (loaded by string name at startup) ──────────────────────
 import uvicorn.protocols.http.h11_impl      # noqa: F401

@@ -1,3 +1,19 @@
+## [6.9.7] — 2026-07-03
+
+### Fixed
+
+- **VER-SYNC — Синхронизация версий** (`core/_version.py`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `ui/src/version.ts`): все файлы версий синхронизированы на 6.9.7. До исправления `tauri.conf.json` и `Cargo.toml` показывали `6.8.2`, тогда как `_version.py` содержал `6.9.6` — расхождение версий в исходном коде.
+
+- **CORE-IMPORT-FIX — Удалён импорт `starlette.staticfiles` из `_ensure_imports.py`** (`core/_ensure_imports.py`): `starlette.staticfiles` требует `aiofiles` в некоторых версиях starlette. При отсутствии `aiofiles` в Nuitka-бандле это приводило к `ModuleNotFoundError` при старте ядра (процесс умирал мгновенно, `spawn_with_retry` исчерпывал 8 попыток и завершался ошибкой). Модуль `starlette.staticfiles` не используется сервером — FastAPI-приложение не монтирует `StaticFiles`.
+
+- **DEPS-AIOFILES — `aiofiles` добавлен в `requirements.txt`** (`requirements.txt`): явная зависимость устраняет неявный транзитивный импорт и гарантирует включение в Nuitka-бандл через `--include-package=aiofiles`.
+
+- **NUITKA-SOCKSHANDLER — Убран `--include-package=sockshandler` из Nuitka-команды** (`.github/workflows/release.yml`): `sockshandler` не является реальным Python-пакетом (его нет в `requirements.txt`, он не импортируется в коде). Лишний `--include-package` вызывал предупреждения Nuitka и потенциально мог прерывать сборку.
+
+- **NUITKA-AIOFILES — Добавлен `--include-package=aiofiles`** (`.github/workflows/release.yml`): явное включение `aiofiles` в Nuitka-бандл гарантирует доступность пакета в замороженном exe.
+
+---
+
 ## [6.7.5] — 2026-07-01
 
 ### Security / Fixed

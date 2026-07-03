@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 6.9.2)"
+        description: "Version (e.g. 6.9.7)"
         required: true
-        default: "6.9.2"
+        default: "6.9.7"
 
 env:
   # v6.9.2: Upgraded Python 3.11 → 3.12 (faster, better stdlib, still LTS)
@@ -199,6 +199,7 @@ jobs:
             --include-package=pydantic `
             --include-package=pydantic_core `
             --include-package=anyio `
+            --include-package=aiofiles `
             --include-package=h11 `
             --include-package=httptools `
             --include-package=websockets `
@@ -206,7 +207,6 @@ jobs:
             --include-package=cryptography `
             --include-package=dns `
             --include-package=socks `
-            --include-package=sockshandler `
             --include-package=requests `
             --include-package=urllib3 `
             --include-package=certifi `
