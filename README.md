@@ -1,70 +1,66 @@
 # FMailSender
 
-  Профессиональный инструмент для массовых email-рассылок с поддержкой SMTP через SOCKS5/HTTP прокси.
+Профессиональный инструмент для массовых email-рассылок.
 
-  ## Возможности
+## Архитектура (v7)
 
-  - Рассылки до **10-15к+ писем** с оптимизированным пулом соединений
-  - SMTP Connection Pool — 5-10x быстрее стандартной отправки
-  - Чекпоинты кампаний — resume при перезапуске/крэше
-  - SOCKS5/HTTP прокси для всех соединений (защита IP)
-  - OAuth2/XOAUTH2 для Microsoft (Outlook/Hotmail)
-  - 300+ SMTP-провайдеров предварительно настроены
-  - Уникализация писем (spintax, CSS fingerprint)
-  - IMAP bounce-монитор + автоматический blacklist
-  - Прогрев аккаунтов (warmup scheduler)
-  - Спам-скор проверка
-  - Мультиязычный GUI (PyQt6, RU/EN)
+```
+FMailSender.exe  ← один portable EXE, без установщика
+  └── Tauri v2 (WebView2 shell)
+        ├── Python FastAPI ядро (fmail-core, встроен внутрь EXE)
+        │     └── core/ — SMTP движок, лицензия, прокси, DKIM...
+        └── React/Vite UI (встроен в bundle)
+```
 
-  ## Быстрый старт
+**Запуск:** скачал → запустил → приложение открылось. Установщик не нужен.
 
-  ```bash
-  pip install -r requirements.txt
-  python main.py
-  ```
+## Возможности
 
-  ## Архитектура (v5.0)
+- Рассылки до **10-15к+ писем** с оптимизированным пулом соединений
+- SMTP Connection Pool — 5-10x быстрее стандартной отправки
+- Чекпоинты кампаний — resume при перезапуске/крэше
+- SOCKS5/HTTP прокси для всех соединений (защита IP)
+- OAuth2/XOAUTH2 для Microsoft (Outlook/Hotmail)
+- 300+ SMTP-провайдеров предварительно настроены
+- Уникализация писем (spintax, CSS fingerprint)
+- IMAP bounce-монитор + автоматический blacklist
+- Прогрев аккаунтов (warmup scheduler)
+- Спам-скор проверка
 
-  ```
-  core/
-    sender.py          — Основной движок (SendingEngine)
-    smtp_pool.py       — Пул SMTP-соединений (NEW v5.0)
-    send_checkpoint.py — Чекпоинты кампаний  (NEW v5.0)
-    smtp_validator.py  — Валидатор аккаунтов
-    warmup.py          — Прогрев аккаунтов
-    bounce.py          — IMAP bounce-монитор
-    uniqueizer.py      — Уникализация писем
-    spam_checker.py    — Спам-скор
-  gui/
-    app.py             — Главное окно
-    screens/           — Экраны приложения
-    dialogs/           — Диалоги
-  server/
-    bot.py             — Telegram-бот для управления
-  scripts/
-    rlm_agent/         — AI-ассистент (gptvibe.ru)
-  ```
+## Системные требования
 
-  ## Производительность
+- Windows 10/11 x64
+- WebView2 Runtime (предустановлен в Windows 11)
+- 512 МБ свободной памяти
 
-  | Аккаунты | Провайдер | Писем/час |
-  |----------|-----------|-----------|
-  | 1 | Gmail | ~7,000 |
-  | 5 | Mix | ~20,000 |
-  | 10 | Mix | ~35,000 |
+## Установка
 
-  *С пулом соединений (smtp_pool.py) + корректными задержками по провайдерам*
+1. Скачайте **FMailSender_vX.X.X.exe** из [Releases](https://github.com/FTPLabs/FMailSender/releases)
+2. Запустите — окно откроется сразу (установщик не нужен)
+3. При **первом** запуске Windows Defender проверяет файлы Python ядра (20–90 сек) — это нормально
+4. Для мгновенного старта добавьте `%LOCALAPPDATA%\FMailSender` в исключения антивируса
 
-  ## RLM Agent (AI-ассистент)
+## Разработка
 
-  ```bash
-  cd scripts/rlm_agent
-  cp .env.example .env  # заполнить OPENAI_API_KEY
-  python run_agent.py "почему ошибка 535 на GMX?"
-  python run_agent.py --diagnose
-  ```
+```bash
+# Терминал 1: Python core
+pip install -r requirements.txt
+python main.py
 
-  ## Лицензия
+# Терминал 2: React UI
+cd ui && npm install && npm run dev
+```
 
-  Платный продукт. Активация на сайте [fmail.shop](https://fmail.shop/)
-  
+## Сборка релиза (CI)
+
+Сборка и деплой запускаются автоматически при создании тега:
+
+```bash
+git tag v7.0.2 && git push origin v7.0.2
+```
+
+Результат: `FMailSender_v7.0.2.exe` — portable EXE, ~28 МБ, без установщика.
+
+## Лицензия
+
+Платный продукт. Активация на сайте [fmail.shop](https://fmail.shop/)
