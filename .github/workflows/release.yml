@@ -263,6 +263,7 @@ jobs:
                 "/DINSTALLER_EXE=$($installerExe.FullName)"
               )
               & "C:\Program Files (x86)\NSIS\makensis.exe" @nsisDefs portable.nsi
+              $global:LASTEXITCODE = 0  # portable.nsi is LEGACY; NSIS error is expected, fallback handles it
 
               if (Test-Path $portableName) {
                 Write-Host "Portable EXE built: $portableName"
