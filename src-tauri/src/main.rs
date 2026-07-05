@@ -1,25 +1,33 @@
-// FMailSender Tauri shell v7.0.2
+// FMailSender Tauri shell v7.0.3
 //
-// ИЗМЕНЕНИЯ v7.0.2 (ИСПРАВЛЕНИЕ ЯДРА):
-//   - КЛЮЧЕВОЙ ФИК: PyInstaller больше не извлекает файлы в %TEMP% (где AV сканирует интенсивно).
-//     Теперь переопределяем TEMP/TMP → LOCALAPPDATA\FMailSender\pytemp при запуске ядра.
-//     Результат: AV доверяет LOCALAPPDATA, кеш персистентен, тёплый старт ~0 сек.
-//   - ALIVE MONITOR: фоновый тред следит за живостью процесса. Если ядро падает
-//     после старта — немедленно перезапускает без ожидания PORT_WAIT_SECS.
-//   - SPAWN_ALIVE_CHECK_S: увеличен 3→15с (PyInstaller нужно время на первую распаковку).
-//   - PORT_WAIT_SECS: увеличен 180→300с (5 мин запас для агрессивных AV).
-//   - SPAWN_MAX_RETRIES: уменьшен 8→5 (меньше бесполезных попыток, быстрее fail).
-//   - Запрет установщиков: собирается ТОЛЬКО portable EXE, bundle.active=false.
+// АРХИТЕКТУРА v7.0.3: PyInstaller ONEDIR — полное устранение AV-проблем
+// ======================================================================
 //
-// ЗАПРЕЩЕНО (это portable приложение, никаких установщиков):
-//   - NSIS bundle
-//   - MSI bundle
-//   - auto-updater/installer wrappers
+// ПРОБЛЕМА v7.0.1-7.0.2 (onefile):
+//   PyInstaller onefile при КАЖДОМ запуске распаковывает Python-среду в temp.
+//   AV перехватывает запись исполняемых файлов в temp → блокирует / убивает процесс.
+//   Даже redirect TEMP→LOCALAPPDATA не помогает: AV ловит сам момент записи.
 //
-// Требования к CI:
-//   1. pyinstaller fmail-core.spec --noconfirm → dist/fmail-core.exe
-//   2. cp dist/fmail-core.exe src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe
-//   3. cargo tauri build --target x86_64-pc-windows-msvc
+// РЕШЕНИЕ v7.0.3 (onedir):
+//   CI собирает fmail-core/ (директория с DLL/pyd/exe), зипует → fmail-core.zip.
+//   Tauri встраивает ZIP через include_bytes! (один раз при сборке EXE).
+//   При ПЕРВОМ запуске: Tauri распаковывает ZIP в LOCALAPPDATA\FMailSender\
+//   через PowerShell Expand-Archive (занимает 5-30 сек, только один раз).
+//   При ПОСЛЕДУЮЩИХ запусках: хеш ZIP совпадает → распаковка пропускается,
+//   fmail-core.exe стартует немедленно из уже существующих файлов.
+//   НИКАКОЙ РАСПАКОВКИ ПРИ СТАРТЕ → AV не мешает.
+//
+// Расположение файлов после установки:
+//   %LOCALAPPDATA%\FMailSender\fmail-core\fmail-core.exe  ← запускаем это
+//   %LOCALAPPDATA%\FMailSender\fmail-core\_internal\      ← DLLs, .pyd
+//   %LOCALAPPDATA%\FMailSender\.core_hash                 ← хеш ZIP для кеша
+//
+// Требования к CI (release.yml):
+//   1. pyinstaller fmail-core.spec --noconfirm → dist/fmail-core/ (ONEDIR)
+//   2. Compress-Archive dist/fmail-core → src-tauri/binaries/fmail-core.zip
+//   3. cargo tauri build (встраивает fmail-core.zip через include_bytes!)
+//
+// ЗАПРЕЩЕНО: NSIS, MSI, установщики. Только portable EXE.
 //
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -38,32 +46,25 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-const CORE_PORT:           u16 = 7531;
-const CORE_HOST_PRIMARY:   &str = "127.0.0.1";
-const CORE_HOST_FALLBACK:  &str = "localhost";
+const CORE_PORT:         u16  = 7531;
+const CORE_HOST_PRIMARY: &str = "127.0.0.1";
+const CORE_HOST_FALLBACK: &str = "localhost";
 
-// 300 сек (5 мин) — запас для первого запуска с агрессивным AV.
-// Тёплый старт (кеш PyInstaller в LOCALAPPDATA): 3-8 сек.
-// Первый запуск (PyInstaller распаковывает в LOCALAPPDATA/pytemp): 15-60 сек.
-// С тяжёлым AV: до 180 сек. 300 сек — безопасный потолок.
-const PORT_WAIT_SECS:      u64 = 300;
+// 120 сек: достаточно для uvicorn startup без распаковки.
+// onedir не извлекает ничего при старте → порт открывается за 3-15 сек.
+const PORT_WAIT_SECS:      u64 = 120;
+const SPAWN_MAX_RETRIES:   u32 = 3;
+const SPAWN_ALIVE_CHECK_S: u64 = 8;   // Время на старт uvicorn
+const SPAWN_RETRY_DELAY_S: u64 = 3;
 
-// 5 попыток × (15с проверка + 5с ожидание) = 100с окно повторных запусков
-// SPAWN_ALIVE_CHECK_S=15: даём PyInstaller время завершить первую распаковку (~10-15с)
-const SPAWN_MAX_RETRIES:   u32 = 5;
-const SPAWN_ALIVE_CHECK_S: u64 = 15;
-const SPAWN_RETRY_DELAY_S: u64 = 5;
-
-// Файл, куда Python пишет startup errors (если не может стартовать нормально)
 const STARTUP_LOG: &str = "startup.log";
 
-/// Embedded fmail-core.exe (PyInstaller onefile).
-/// Build FAILS with clear error if this file is missing — это intentional.
-/// CI must run PyInstaller BEFORE `cargo tauri build`.
+/// Встроенный ZIP архив Python onedir дистрибутива.
+/// Содержимое: папка fmail-core/ с fmail-core.exe + _internal/ (DLLs, .pyd).
+/// Распаковывается один раз при первом запуске в LOCALAPPDATA\FMailSender\.
+/// AV не мешает: файлы не пишутся при каждом старте — только один раз.
 #[cfg(target_os = "windows")]
-static CORE_BYTES: &[u8] = include_bytes!(
-    "../binaries/fmail-core-x86_64-pc-windows-msvc.exe"
-);
+static CORE_ZIP: &[u8] = include_bytes!("../binaries/fmail-core.zip");
 
 // ── Event payload ─────────────────────────────────────────────────────────────
 
@@ -103,37 +104,32 @@ fn port_open() -> bool {
 }
 
 /// Ждёт открытия порта. Обновляет UI каждые 5 сек.
-/// child_pid: опциональный PID процесса — проверяем живость каждые 10 сек.
-/// Если процесс завершился — немедленно возвращаем false (не ждём истечения таймаута).
+/// Проверяет живость процесса каждые 10 сек — если умер, немедленно возвращает false.
 fn wait_for_port(timeout: Duration, handle: &AppHandle, child_pid: Option<u32>) -> bool {
-    let deadline    = Instant::now() + timeout;
-    let mut last_ev = Instant::now();
-    let mut last_pid_check = Instant::now();
+    let deadline       = Instant::now() + timeout;
+    let mut last_ev    = Instant::now();
+    let mut last_pid_c = Instant::now();
 
     while Instant::now() < deadline {
         if port_open() {
             return true;
         }
-
         thread::sleep(Duration::from_millis(300));
 
         // Проверяем живость процесса каждые 10 сек
         if let Some(pid) = child_pid {
-            if last_pid_check.elapsed().as_secs() >= 10 {
-                last_pid_check = Instant::now();
+            if last_pid_c.elapsed().as_secs() >= 10 {
+                last_pid_c = Instant::now();
                 if !is_process_alive(pid) {
-                    // Процесс умер — читаем лог и сообщаем об ошибке немедленно
                     let log_hint = read_startup_log()
-                        .and_then(|l| l.lines().filter(|x| !x.trim().is_empty()).last().map(|s| s.to_string()))
+                        .and_then(|l| l.lines().filter(|x| !x.trim().is_empty())
+                                       .last().map(|s| s.to_string()))
                         .unwrap_or_default();
-                    emit(
-                        handle, "killed",
-                        format!(
-                            "Ядро завершилось неожиданно.{}",
-                            if log_hint.is_empty() { String::new() } else { format!(" Лог: {}", log_hint) }
-                        ),
-                        0,
-                    );
+                    emit(handle, "killed",
+                        format!("Ядро упало неожиданно.{}",
+                            if log_hint.is_empty() { String::new() }
+                            else { format!(" Лог: {}", log_hint) }
+                        ), 0);
                     return false;
                 }
             }
@@ -141,83 +137,61 @@ fn wait_for_port(timeout: Duration, handle: &AppHandle, child_pid: Option<u32>) 
 
         if last_ev.elapsed().as_secs() >= 5 {
             last_ev = Instant::now();
-            let elapsed   = deadline.duration_since(Instant::now());
-            let elapsed_s = timeout.as_secs().saturating_sub(elapsed.as_secs());
-            let remain_s  = elapsed.as_secs();
-            emit(
-                handle, "av_wait",
-                format!(
-                    "Ожидание ядра... {}с. Первый запуск: AV проверяет файлы в защищённой папке. \
-                     Осталось ~{}с.",
-                    elapsed_s, remain_s
-                ),
-                0,
-            );
+            let rem = deadline.saturating_duration_since(Instant::now()).as_secs();
+            let ela = timeout.as_secs().saturating_sub(rem);
+            emit(handle, "av_wait",
+                format!("Ожидание FastAPI сервера... {}с (осталось ~{}с)", ela, rem),
+                0);
         }
     }
     false
 }
 
-/// Проверяет, жив ли процесс по PID (Windows: OpenProcess + GetExitCodeProcess).
 fn is_process_alive(pid: u32) -> bool {
     #[cfg(target_os = "windows")]
     {
-        // Используем tasklist как простую проверку (без unsafe WinAPI)
-        let output = Command::new("tasklist")
+        let out = Command::new("tasklist")
             .args(["/FI", &format!("PID eq {}", pid), "/NH", "/FO", "CSV"])
             .creation_flags(CREATE_NO_WINDOW)
             .output();
-        if let Ok(o) = output {
-            let out = String::from_utf8_lossy(&o.stdout);
-            return out.contains(&pid.to_string());
+        if let Ok(o) = out {
+            return String::from_utf8_lossy(&o.stdout).contains(&pid.to_string());
         }
-        true // если не можем проверить — считаем живым
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = pid;
         true
     }
+    #[cfg(not(target_os = "windows"))]
+    { let _ = pid; true }
 }
 
-// ── Core directory & extraction ───────────────────────────────────────────────
+// ── Директории ────────────────────────────────────────────────────────────────
 
-fn get_core_dir() -> Option<PathBuf> {
+fn get_fmailsender_dir() -> Option<PathBuf> {
     let app_data = std::env::var("LOCALAPPDATA").ok()?;
-    let dir = PathBuf::from(app_data)
-        .join("FMailSender")
-        .join("core");
+    let dir = PathBuf::from(app_data).join("FMailSender");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
 }
 
-/// Директория для PyInstaller runtime_tmpdir.
-/// Используем LOCALAPPDATA\FMailSender\pytemp вместо %TEMP%.
-/// AV доверяет LOCALAPPDATA, кеш персистентен (не чистится дисковыми утилитами).
-fn get_pytemp_dir() -> Option<PathBuf> {
-    let app_data = std::env::var("LOCALAPPDATA").ok()?;
-    let dir = PathBuf::from(app_data)
-        .join("FMailSender")
-        .join("pytemp");
-    std::fs::create_dir_all(&dir).ok()?;
-    Some(dir)
+fn get_core_exe_path() -> Option<PathBuf> {
+    let base = get_fmailsender_dir()?;
+    Some(base.join("fmail-core").join("fmail-core.exe"))
+}
+
+fn get_hash_file_path() -> Option<PathBuf> {
+    let base = get_fmailsender_dir()?;
+    Some(base.join(".core_hash"))
 }
 
 fn get_startup_log_path() -> Option<PathBuf> {
-    let app_data = std::env::var("LOCALAPPDATA").ok()?;
-    Some(PathBuf::from(app_data).join("FMailSender").join(STARTUP_LOG))
+    let base = get_fmailsender_dir()?;
+    Some(base.join(STARTUP_LOG))
 }
 
 fn read_startup_log() -> Option<String> {
     let path = get_startup_log_path()?;
-    if path.exists() {
-        std::fs::read_to_string(path).ok()
-    } else {
-        None
-    }
+    if path.exists() { std::fs::read_to_string(path).ok() } else { None }
 }
 
-/// Compute a simple FNV-1a 64-bit hash of a byte slice (no extra crates).
 fn fnv64(data: &[u8]) -> u64 {
     let mut h: u64 = 14695981039346656037u64;
     for &b in data {
@@ -227,56 +201,125 @@ fn fnv64(data: &[u8]) -> u64 {
     h
 }
 
-fn extract_core(handle: &AppHandle) -> Option<PathBuf> {
-    let dir  = get_core_dir()?;
-    let path = dir.join("fmail-core.exe");
+// ── Извлечение и проверка ядра ────────────────────────────────────────────────
 
-    emit(handle, "extracting", "Извлечение ядра приложения...", 0);
+/// Распаковывает fmail-core.zip → LOCALAPPDATA\FMailSender\fmail-core\
+/// Только если хеш изменился (или первый запуск).
+/// Использует PowerShell Expand-Archive — не требует внешних зависимостей.
+fn extract_core(handle: &AppHandle) -> Option<PathBuf> {
+    let base     = get_fmailsender_dir()?;
+    let core_exe = get_core_exe_path()?;
+    let hash_file = get_hash_file_path()?;
 
     #[cfg(target_os = "windows")]
     {
-        let embedded_hash = fnv64(CORE_BYTES);
+        let zip_hash  = fnv64(CORE_ZIP);
+        let hash_str  = format!("{:016x}", zip_hash);
 
-        let needs_replace = if path.exists() {
-            let on_disk = std::fs::read(&path).unwrap_or_default();
-            fnv64(&on_disk) != embedded_hash
-        } else {
-            true
+        // Проверяем: уже распакован с тем же хешом?
+        let already_ok = core_exe.exists() && {
+            std::fs::read_to_string(&hash_file)
+                .map(|s| s.trim() == hash_str)
+                .unwrap_or(false)
         };
 
-        if needs_replace {
-            emit(handle, "extracting", "Обновление ядра (новая версия)...", 0);
-            let tmp_path = dir.join("fmail-core.tmp");
-            {
-                let mut f = match std::fs::File::create(&tmp_path) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        emit(handle, "failed",
-                             format!("Ошибка создания файла ядра: {}. Запустите от имени администратора.", e), 0);
+        if already_ok {
+            // Быстрый путь — всё уже на месте
+            emit(handle, "extracting", "Ядро готово", 0);
+            return Some(core_exe);
+        }
+
+        // Первый запуск или обновление версии
+        emit(handle, "extracting",
+             "Первый запуск: установка Python ядра в %LOCALAPPDATA%\\FMailSender\\ \
+              (30–60 сек, только один раз)...", 0);
+
+        // Записываем ZIP во временный файл
+        let zip_path = base.join("fmail-core-install.zip");
+        {
+            match std::fs::File::create(&zip_path) {
+                Ok(mut f) => {
+                    if f.write_all(CORE_ZIP).is_err() || f.flush().is_err() {
+                        emit(handle, "failed", "Ошибка записи установочного файла.", 0);
                         return None;
                     }
-                };
-                if f.write_all(CORE_BYTES).is_err() || f.flush().is_err() {
-                    emit(handle, "failed", "Ошибка записи ядра на диск.", 0);
+                }
+                Err(e) => {
+                    emit(handle, "failed",
+                         format!("Нет доступа к %LOCALAPPDATA%\\FMailSender\\: {}. \
+                                  Запустите от имени администратора.", e), 0);
                     return None;
                 }
             }
-            if std::fs::rename(&tmp_path, &path).is_err() {
-                let _ = std::fs::copy(&tmp_path, &path);
-                let _ = std::fs::remove_file(&tmp_path);
+        }
+
+        // Удаляем старую версию ядра (если есть)
+        let core_dir = base.join("fmail-core");
+        if core_dir.exists() {
+            emit(handle, "extracting", "Обновление ядра до новой версии...", 0);
+            if std::fs::remove_dir_all(&core_dir).is_err() {
+                // Если не удалось удалить (заблокирован процесс) — пробуем переименовать
+                let _ = std::fs::rename(&core_dir, base.join("fmail-core-old"));
             }
         }
+
+        emit(handle, "extracting", "Распаковка Python ядра (это займёт ~30 сек)...", 0);
+
+        // Expand-Archive через PowerShell
+        let base_str = base.to_string_lossy();
+        let zip_str  = zip_path.to_string_lossy();
+        let ps_cmd   = format!(
+            "Expand-Archive -LiteralPath '{zip}' -DestinationPath '{dest}' -Force; \
+             Remove-Item -LiteralPath '{zip}' -Force -ErrorAction SilentlyContinue",
+            zip  = zip_str.replace("'", "''"),
+            dest = base_str.replace("'", "''"),
+        );
+
+        let status = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+
+        // Очищаем временный zip в любом случае
+        let _ = std::fs::remove_file(&zip_path);
+
+        match status {
+            Ok(s) if s.success() => {}
+            Ok(s) => {
+                emit(handle, "failed",
+                     format!("Ошибка распаковки (код {}). \
+                              Проверьте свободное место на диске (нужно ~150 МБ).",
+                              s.code().unwrap_or(-1)), 0);
+                return None;
+            }
+            Err(e) => {
+                emit(handle, "failed",
+                     format!("PowerShell недоступен: {}. \
+                              Убедитесь, что PowerShell не заблокирован.", e), 0);
+                return None;
+            }
+        }
+
+        if !core_exe.exists() {
+            emit(handle, "failed",
+                 "Распаковка завершена, но fmail-core\\fmail-core.exe не найден. \
+                  Возможно, антивирус удалил файл — добавьте папку \
+                  %LOCALAPPDATA%\\FMailSender в исключения.", 0);
+            return None;
+        }
+
+        // Сохраняем хеш — следующий запуск пропустит распаковку
+        let _ = std::fs::write(&hash_file, &hash_str);
+        emit(handle, "extracting", "Python ядро установлено. Запуск...", 0);
     }
 
     #[cfg(not(target_os = "windows"))]
-    {
-        return None;
-    }
+    { return None; }
 
-    Some(path)
+    Some(core_exe)
 }
 
-// ── Process management ────────────────────────────────────────────────────────
+// ── Управление процессом ──────────────────────────────────────────────────────
 
 fn kill_existing_core() {
     #[cfg(target_os = "windows")]
@@ -298,21 +341,11 @@ fn kill_existing_core() {
     }
 }
 
-fn spawn_core(exe: &PathBuf, log_path: &Option<PathBuf>, pytemp: &Option<PathBuf>) -> Option<Child> {
+fn spawn_core(exe: &PathBuf, log_path: &Option<PathBuf>) -> Option<Child> {
     let mut cmd = Command::new(exe);
 
-    // КЛЮЧЕВОЙ ФИК: переопределяем TEMP/TMP для PyInstaller onefile.
-    // PyInstaller использует TEMP для распаковки (_MEI<hash>/).
-    // В LOCALAPPDATA/FMailSender/pytemp:
-    //   1. AV сканирует менее агрессивно (trusted location)
-    //   2. Кеш персистентен между перезапусками (не чистится автоматически)
-    //   3. Тёплый старт: ~0 сек (файлы уже там, тот же хеш)
-    if let Some(ref pt) = pytemp {
-        let pt_str = pt.to_string_lossy().into_owned();
-        cmd.env("TEMP", &pt_str);
-        cmd.env("TMP", &pt_str);
-        cmd.env("TMPDIR", &pt_str);
-    }
+    // onedir НЕ требует TEMP/TMP override — нет runtime extraction.
+    // fmail-core.exe просто запускает Python из файлов рядом с собой.
 
     if let Some(ref lp) = log_path {
         if let Ok(log_file) = std::fs::File::create(lp) {
@@ -339,72 +372,41 @@ fn spawn_core(exe: &PathBuf, log_path: &Option<PathBuf>, pytemp: &Option<PathBuf
 fn spawn_with_retry(
     exe: &PathBuf,
     log_path: &Option<PathBuf>,
-    pytemp: &Option<PathBuf>,
     handle: &AppHandle,
 ) -> Option<Child> {
     for attempt in 1..=SPAWN_MAX_RETRIES {
-        emit(
-            handle, "spawning",
-            format!("Запуск ядра (попытка {}/{})...", attempt, SPAWN_MAX_RETRIES),
-            attempt,
-        );
+        emit(handle, "spawning",
+             format!("Запуск FastAPI сервера (попытка {}/{})...", attempt, SPAWN_MAX_RETRIES),
+             attempt);
 
-        match spawn_core(exe, log_path, pytemp) {
+        match spawn_core(exe, log_path) {
             Some(mut child) => {
-                // Ждём SPAWN_ALIVE_CHECK_S секунд.
-                // PyInstaller onefile: первый запуск = ~10-15с распаковки в LOCALAPPDATA.
-                // Если процесс живёт через SPAWN_ALIVE_CHECK_S сек — считаем запуск успешным.
                 thread::sleep(Duration::from_secs(SPAWN_ALIVE_CHECK_S));
                 match child.try_wait() {
-                    Ok(None) => {
-                        return Some(child); // Процесс жив — переходим к ожиданию порта
-                    }
+                    Ok(None) => return Some(child),
                     Ok(Some(status)) => {
-                        let code_str = status.code()
-                            .map(|c| c.to_string())
-                            .unwrap_or_else(|| "?".into());
-
+                        let code = status.code().map(|c| c.to_string()).unwrap_or("?".into());
                         let log_hint = read_startup_log()
-                            .and_then(|l| l.lines().filter(|x| !x.trim().is_empty()).last().map(|s| s.to_string()))
+                            .and_then(|l| l.lines().filter(|x| !x.trim().is_empty())
+                                           .last().map(|s| s.to_string()))
                             .unwrap_or_default();
-
-                        let hint = if log_hint.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" | Лог: {}", &log_hint[..log_hint.len().min(200)])
-                        };
-
-                        emit(
-                            handle, "killed",
-                            format!(
-                                "Ядро завершилось (код {}){}{}",
-                                code_str, hint,
-                                if attempt < SPAWN_MAX_RETRIES { ", повтор..." } else { "" }
-                            ),
-                            attempt,
-                        );
+                        let hint = if log_hint.is_empty() { String::new() }
+                                   else { format!(" | {}", &log_hint[..log_hint.len().min(300)]) };
+                        emit(handle, "killed",
+                             format!("Ядро завершилось (код {}){}{}",
+                                 code, hint,
+                                 if attempt < SPAWN_MAX_RETRIES { ", повтор..." } else { "" }),
+                             attempt);
                     }
-                    Err(e) => {
-                        emit(
-                            handle, "killed",
-                            format!("Ошибка проверки процесса: {}", e),
-                            attempt,
-                        );
-                    }
+                    Err(e) => emit(handle, "killed", format!("Ошибка проверки: {}", e), attempt),
                 }
             }
             None => {
-                emit(
-                    handle, "killed",
-                    format!(
-                        "Не удалось запустить ядро (попытка {}). Добавьте FMailSender в исключения антивируса.",
-                        attempt
-                    ),
-                    attempt,
-                );
+                emit(handle, "killed",
+                     format!("Не удалось запустить fmail-core.exe (попытка {})", attempt),
+                     attempt);
             }
         }
-
         if attempt < SPAWN_MAX_RETRIES {
             thread::sleep(Duration::from_secs(SPAWN_RETRY_DELAY_S));
         }
@@ -429,40 +431,29 @@ fn restart_core(handle: AppHandle, state: tauri::State<'_, CoreHandle>) {
     thread::spawn(move || {
         {
             let mut lock = state.lock().unwrap();
-            if let Some(mut child) = lock.take() {
-                let _ = child.kill();
-            }
+            if let Some(mut child) = lock.take() { let _ = child.kill(); }
         }
         kill_existing_core();
 
         let Some(exe) = extract_core(&handle) else {
-            emit(&handle, "failed", "Не удалось извлечь ядро при перезапуске.", 0);
+            emit(&handle, "failed", "Не удалось найти ядро при перезапуске.", 0);
             return;
         };
 
         let log_path = get_startup_log_path();
-        let pytemp   = get_pytemp_dir();
-
-        let Some(child) = spawn_with_retry(&exe, &log_path, &pytemp, &handle) else {
+        let Some(child) = spawn_with_retry(&exe, &log_path, &handle) else {
             let log_hint = read_startup_log()
                 .and_then(|l| l.lines().filter(|x| !x.trim().is_empty()).last().map(|s| s.to_string()))
                 .unwrap_or_default();
-            emit(
-                &handle, "failed",
-                format!(
-                    "Ядро не запускается. {}{}",
-                    if log_hint.is_empty() { String::new() } else { format!("Ошибка: {}", log_hint) },
-                    "\nПроверьте исключения антивируса или добавьте папку %LOCALAPPDATA%\\FMailSender в белый список."
-                ),
-                0,
-            );
+            emit(&handle, "failed",
+                 format!("Ядро не запускается при перезапуске.{}",
+                     if log_hint.is_empty() { String::new() } else { format!(" Лог: {}", log_hint) }),
+                 0);
             return;
         };
 
         let pid = child.id();
         *state.lock().unwrap() = Some(child);
-
-        emit(&handle, "running", "Ожидание ответа ядра...", 0);
 
         if wait_for_port(Duration::from_secs(PORT_WAIT_SECS), &handle, Some(pid)) {
             emit(&handle, "ready", "Ядро готово к работе", 0);
@@ -470,18 +461,10 @@ fn restart_core(handle: AppHandle, state: tauri::State<'_, CoreHandle>) {
             let log_hint = read_startup_log()
                 .and_then(|l| l.lines().filter(|x| !x.trim().is_empty()).last().map(|s| s.to_string()))
                 .unwrap_or_default();
-            emit(
-                &handle, "failed",
-                format!(
-                    "Ядро не ответило. {}",
-                    if log_hint.is_empty() {
-                        format!("Добавьте папку %LOCALAPPDATA%\\FMailSender в исключения антивируса.")
-                    } else {
-                        format!("Лог: {}", log_hint)
-                    }
-                ),
-                0,
-            );
+            emit(&handle, "failed",
+                 format!("Ядро не ответило.{}",
+                     if log_hint.is_empty() { String::new() } else { format!(" Лог: {}", log_hint) }),
+                 0);
         }
     });
 }
@@ -505,91 +488,62 @@ pub fn run() {
                 // ── 1. Убиваем старые процессы ─────────────────────────────────
                 kill_existing_core();
 
-                // ── 2. Создаём pytemp заранее (LOCALAPPDATA/FMailSender/pytemp)
-                //    PyInstaller будет извлекать файлы туда, а не в %TEMP%
-                let pytemp = get_pytemp_dir();
-                if pytemp.is_none() {
-                    emit(&handle, "av_wait", "Подготовка рабочей директории...", 0);
-                }
-
-                // ── 3. Извлекаем ядро из embedded bytes ────────────────────────
+                // ── 2. Извлекаем/проверяем ядро ────────────────────────────────
+                // При первом запуске: распаковывает ZIP → LOCALAPPDATA\FMailSender\
+                // При повторных: хеш совпадает → пропускает распаковку (instant)
                 let Some(exe) = extract_core(&handle) else {
-                    emit(
-                        &handle, "failed",
-                        "Критическая ошибка: не удалось создать директорию ядра. \
-                         Запустите приложение от имени администратора.",
-                        0,
-                    );
+                    // extract_core уже отправил emit("failed", ...)
                     return;
                 };
 
-                // ── 4. Запускаем с повторными попытками ───────────────────────
+                // ── 3. Запускаем с повторными попытками ───────────────────────
                 let log_path = get_startup_log_path();
-                let Some(child) = spawn_with_retry(&exe, &log_path, &pytemp, &handle) else {
+                let Some(child) = spawn_with_retry(&exe, &log_path, &handle) else {
                     let log_body  = read_startup_log().unwrap_or_default();
                     let last_line = log_body.lines()
                         .filter(|l| !l.trim().is_empty())
-                        .last()
-                        .unwrap_or("")
-                        .to_string();
+                        .last().unwrap_or("").to_string();
 
-                    emit(
-                        &handle, "failed",
-                        format!(
-                            "Ядро не запускается после {} попыток.\n\
-                             Решение: добавьте папку %LOCALAPPDATA%\\FMailSender в \
-                             исключения антивируса (Windows Defender / Kaspersky / ESET).\
-                             {}",
-                            SPAWN_MAX_RETRIES,
-                            if last_line.is_empty() {
-                                String::new()
-                            } else {
-                                format!("\n\nТехническая ошибка: {}", last_line)
-                            }
-                        ),
-                        0,
-                    );
+                    emit(&handle, "failed",
+                         format!(
+                             "Ядро не запускается после {} попыток.\n\
+                              Путь ядра: %LOCALAPPDATA%\\FMailSender\\fmail-core\\fmail-core.exe\n\
+                              Если антивирус удалил файлы — добавьте папку \
+                              %LOCALAPPDATA%\\FMailSender в исключения и нажмите «Перезапустить».{}",
+                             SPAWN_MAX_RETRIES,
+                             if last_line.is_empty() { String::new() }
+                             else { format!("\n\nОшибка: {}", last_line) }
+                         ), 0);
                     return;
                 };
 
                 let pid = child.id();
                 *state.lock().unwrap() = Some(child);
 
-                emit(&handle, "running",
-                     "Ядро запущено, ожидание FastAPI сервера...", 0);
+                emit(&handle, "running", "FastAPI сервер запускается...", 0);
 
-                // ── 5. Ждём открытия порта ─────────────────────────────────────
+                // ── 4. Ждём открытия порта ─────────────────────────────────────
                 if !wait_for_port(Duration::from_secs(PORT_WAIT_SECS), &handle, Some(pid)) {
                     let log_body  = read_startup_log().unwrap_or_default();
                     let last_line = log_body.lines()
                         .filter(|l| !l.trim().is_empty())
-                        .last()
-                        .unwrap_or("")
-                        .to_string();
+                        .last().unwrap_or("").to_string();
 
-                    emit(
-                        &handle, "failed",
-                        format!(
-                            "Ядро не ответило за {} секунд.\n\
-                             Возможные причины:\n\
-                             • Антивирус блокирует — добавьте %LOCALAPPDATA%\\FMailSender в исключения\n\
-                             • Порт {} занят другим процессом\n\
-                             • Нехватка памяти (требуется 512+ МБ)\
-                             {}",
-                            PORT_WAIT_SECS,
-                            CORE_PORT,
-                            if last_line.is_empty() {
-                                String::new()
-                            } else {
-                                format!("\n\nЛог: {}", last_line)
-                            }
-                        ),
-                        0,
-                    );
+                    emit(&handle, "failed",
+                         format!(
+                             "Сервер не ответил за {} сек.\n\
+                              Возможные причины:\n\
+                              • Порт {} занят другим приложением\n\
+                              • Антивирус удалил файлы ядра (добавьте %LOCALAPPDATA%\\FMailSender в исключения)\n\
+                              • Нехватка памяти (требуется 256+ МБ){}",
+                             PORT_WAIT_SECS, CORE_PORT,
+                             if last_line.is_empty() { String::new() }
+                             else { format!("\n\nЛог: {}", last_line) }
+                         ), 0);
                     return;
                 }
 
-                // ── 6. Готово ──────────────────────────────────────────────────
+                // ── 5. Готово ──────────────────────────────────────────────────
                 emit(&handle, "ready", "FMailSender готов к работе", 0);
             });
 
