@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 7.0.1)"
+        description: "Version (e.g. 7.0.3)"
         required: true
-        default: "7.0.1"
+        default: "7.0.3"
 
 env:
   PYTHON_VERSION:      "3.12"
@@ -125,12 +125,15 @@ jobs:
                       --quiet
           Write-Host "PyInstaller ${{ env.PYINSTALLER_VERSION }} ready."
 
-      # BUILD STEP 1: Python core -> EXE
+      # BUILD STEP 1: Python core → onedir папка (НЕ onefile!)
+      # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ v7.0.3:
+      #   onefile  = при каждом старте распаковывает Python в temp → AV блокирует.
+      #   onedir   = распаковывает ОДИН РАЗ при первом запуске, затем запускается напрямую.
 
-      - name: "Build fmail-core.exe (PyInstaller)"
+      - name: "Build fmail-core (PyInstaller onedir)"
         shell: pwsh
         run: |
-          Write-Host "=== PyInstaller build ===" -ForegroundColor Cyan
+          Write-Host "=== PyInstaller onedir build ===" -ForegroundColor Cyan
           $start = Get-Date
           New-Item -ItemType Directory -Force -Path "src-tauri/binaries" | Out-Null
           pyinstaller fmail-core.spec `
@@ -140,51 +143,73 @@ jobs:
             --clean
           $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds)
           Write-Host "PyInstaller done in ${elapsed}s" -ForegroundColor Green
-          if (-not (Test-Path "dist/fmail-core.exe")) {
-            Write-Error "fmail-core.exe NOT FOUND in dist/"
-            exit 1
-          }
-          $size = [math]::Round((Get-Item "dist/fmail-core.exe").Length / 1MB, 1)
-          Write-Host "fmail-core.exe: ${size} MB"
-          if ($size -lt 20) {
-            Write-Error "fmail-core.exe слишком маленький (${size} MB) — проверьте hiddenimports"
+
+          # onedir выводит dist/fmail-core/ (папка), НЕ dist/fmail-core.exe
+          if (-not (Test-Path "dist/fmail-core/fmail-core.exe")) {
+            Write-Error "FAIL: dist/fmail-core/fmail-core.exe not found"
+            Write-Host "Contents of dist/:"
+            Get-ChildItem dist/ -ErrorAction SilentlyContinue | Format-Table
             exit 1
           }
 
-      - name: "Place sidecar for Tauri include_bytes!"
-        shell: pwsh
-        run: |
-          # include_bytes! в main.rs встраивает этот файл ВНУТРЬ Tauri EXE при компиляции.
-          # ОБЯЗАТЕЛЬНО до cargo tauri build.
-          Copy-Item "dist/fmail-core.exe" `
-                    "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe" `
-                    -Force
-          $sz = [math]::Round((Get-Item "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe").Length / 1MB, 1)
-          Write-Host "Sidecar placed: ${sz} MB" -ForegroundColor Green
+          $dirSize = [math]::Round(
+            (Get-ChildItem "dist/fmail-core" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB,
+            1
+          )
+          Write-Host "dist/fmail-core/ total: ${dirSize} MB" -ForegroundColor Green
+          if ($dirSize -lt 20) {
+            Write-Error "onedir слишком маленький (${dirSize} MB) — проверьте hiddenimports"
+            exit 1
+          }
 
-      # Верификация ядра
+      # Верификация ядра (тест импортов в onedir режиме)
 
       - name: "Verify core binary — import test"
         shell: pwsh
         run: |
           Write-Host "Testing core binary (--test mode)..." -ForegroundColor Cyan
-          $proc = Start-Process -FilePath "dist/fmail-core.exe" `
+          $proc = Start-Process -FilePath "dist/fmail-core/fmail-core.exe" `
                                 -ArgumentList "--test" `
                                 -PassThru -Wait -WindowStyle Hidden `
                                 -RedirectStandardOutput "core_test_out.txt" `
                                 -RedirectStandardError  "core_test_err.txt"
           $exitCode = $proc.ExitCode
           if ($exitCode -eq 0) {
-            Write-Host "Core OK (exit 0) — импорты прошли" -ForegroundColor Green
+            Write-Host "Core OK (exit 0) — все импорты прошли" -ForegroundColor Green
           } elseif ($exitCode -eq 2) {
-            Write-Host "Core OK (exit 2) — бинарь запускается" -ForegroundColor Green
+            Write-Host "Core OK (exit 2) — бинарь запускается нормально" -ForegroundColor Green
           } else {
-            $err = Get-Content "core_test_err.txt" -ErrorAction SilentlyContinue
+            $out = Get-Content "core_test_out.txt" -ErrorAction SilentlyContinue | Select-Object -Last 15
+            $err = Get-Content "core_test_err.txt" -ErrorAction SilentlyContinue | Select-Object -Last 15
+            Write-Host "STDOUT: $out"
             Write-Error "Core FAILED (exit $exitCode): $err"
             exit 1
           }
 
-      # BUILD STEP 2: React / Vite
+      # BUILD STEP 2: Упаковка onedir в ZIP для Tauri include_bytes!
+      # ZIP содержит папку fmail-core/ → после распаковки в LOCALAPPDATA\FMailSender\:
+      #   LOCALAPPDATA\FMailSender\fmail-core\fmail-core.exe  ← запускаем это
+      #   LOCALAPPDATA\FMailSender\fmail-core\_internal\      ← DLLs, .pyd
+
+      - name: "Pack onedir → fmail-core.zip (sidecar for Tauri)"
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "src-tauri/binaries" | Out-Null
+
+          Compress-Archive `
+            -Path            "dist/fmail-core" `
+            -DestinationPath "src-tauri/binaries/fmail-core.zip" `
+            -Force
+
+          $zipSz = [math]::Round((Get-Item "src-tauri/binaries/fmail-core.zip").Length / 1MB, 1)
+          Write-Host "fmail-core.zip: ${zipSz} MB" -ForegroundColor Green
+
+          if ($zipSz -lt 15) {
+            Write-Error "ZIP слишком маленький (${zipSz} MB)"
+            exit 1
+          }
+
+      # BUILD STEP 3: React / Vite
 
       - name: "Install UI deps"
         shell: pwsh
@@ -204,7 +229,10 @@ jobs:
           }
           Write-Host "UI build OK."
 
-      # BUILD STEP 3: Tauri (raw EXE, без NSIS installer)
+      # BUILD STEP 4: Tauri (raw EXE, без NSIS installer)
+      # main.rs: include_bytes!("../binaries/fmail-core.zip") встраивает ZIP внутрь EXE.
+      # При первом запуске Tauri распаковывает ZIP → LOCALAPPDATA\FMailSender\.
+      # Последующие запуски: хеш совпадает → пропускает распаковку → мгновенный старт.
 
       - name: "Install tauri-cli"
         shell: pwsh
@@ -213,33 +241,25 @@ jobs:
             Select-String -Pattern "Installed|Compiling|warning" | Select-Object -Last 5
           Write-Host "tauri-cli ready."
 
-      - name: "Build Tauri (portable EXE — без installer)"
+      - name: "Build Tauri (portable EXE — без installer, onedir ZIP встроен)"
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           Write-Host "=== Tauri build ===" -ForegroundColor Cyan
-          # bundle.active=false в tauri.conf.json → cargo tauri build компилирует raw EXE
-          # без запуска NSIS/MSI bundler (быстрее, portable only).
-          # Результат: src-tauri/target/x86_64-pc-windows-msvc/release/fmail-sender.exe
           cargo tauri build --target x86_64-pc-windows-msvc
           Write-Host "=== Tauri build done ===" -ForegroundColor Green
 
-      # BUILD STEP 4: Финальный portable EXE
-      # ЗАПРЕЩЕНО: NSIS wrapper, установщики, auto-installers.
-      # ПРАВИЛО: один EXE = скачал → запустил → приложение открылось.
+      # BUILD STEP 5: Финальный portable EXE
 
       - name: "Package portable EXE (NO installer)"
         id: portable
         shell: pwsh
         run: |
-          $ver = "${{ steps.tag.outputs.version }}"
+          $ver      = "${{ steps.tag.outputs.version }}"
           $finalName = "FMailSender_v${ver}.exe"
-
-          # ПРАВИЛЬНО: сырой Tauri EXE (Python core встроен через include_bytes!)
-          # ЗАПРЕЩЕНО: NSIS, установщики, auto-installer обёртки.
-          $rawExe = "src-tauri/target/x86_64-pc-windows-msvc/release/fmail-sender.exe"
+          $rawExe   = "src-tauri/target/x86_64-pc-windows-msvc/release/fmail-sender.exe"
 
           if (-not (Test-Path $rawExe)) {
             Write-Error "CRITICAL: fmail-sender.exe не найден: $rawExe"
@@ -248,34 +268,42 @@ jobs:
 
           $sizeMb = [math]::Round((Get-Item $rawExe).Length / 1MB, 1)
           if ($sizeMb -lt 20) {
-            Write-Error "EXE слишком маленький (${sizeMb} MB) — Python core не встроен."
-            Write-Error "Проверьте что PyInstaller завершился ДО cargo tauri build."
+            Write-Error "EXE слишком маленький (${sizeMb} MB) — fmail-core.zip не встроен."
             exit 1
           }
 
           Copy-Item $rawExe $finalName -Force
           Write-Host "Portable EXE: $finalName (${sizeMb} MB)" -ForegroundColor Green
-          echo "name=$finalName"  >> $env:GITHUB_OUTPUT
-          echo "size=$sizeMb"     >> $env:GITHUB_OUTPUT
+          echo "name=$finalName" >> $env:GITHUB_OUTPUT
+          echo "size=$sizeMb"    >> $env:GITHUB_OUTPUT
 
       # Финальная верификация
 
       - name: "Verify final artifacts"
         shell: pwsh
         run: |
-          $errors = @()
+          $errors  = @()
           $exeName = "${{ steps.portable.outputs.name }}"
+
           if (Test-Path $exeName) {
             $sz = [math]::Round((Get-Item $exeName).Length / 1MB, 1)
             Write-Host "[OK] $exeName ($sz MB)" -ForegroundColor Green
             if ($sz -lt 20) { $errors += "EXE слишком маленький (${sz} MB)" }
           } else { $errors += "EXE не найден: $exeName" }
-          if (Test-Path "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe") {
-            Write-Host "[OK] fmail-core sidecar present" -ForegroundColor Green
-          } else { $errors += "fmail-core sidecar НЕ НАЙДЕН" }
+
+          if (Test-Path "src-tauri/binaries/fmail-core.zip") {
+            $zsz = [math]::Round((Get-Item "src-tauri/binaries/fmail-core.zip").Length / 1MB, 1)
+            Write-Host "[OK] fmail-core.zip (${zsz} MB)" -ForegroundColor Green
+          } else { $errors += "fmail-core.zip НЕ НАЙДЕН" }
+
           if (Test-Path "ui/dist/index.html") {
             Write-Host "[OK] ui/dist/index.html present" -ForegroundColor Green
           } else { $errors += "UI dist/index.html НЕ НАЙДЕН" }
+
+          if (Test-Path "dist/fmail-core/fmail-core.exe") {
+            Write-Host "[OK] dist/fmail-core/fmail-core.exe present" -ForegroundColor Green
+          } else { $errors += "dist/fmail-core/fmail-core.exe НЕ НАЙДЕН" }
+
           if ($errors.Count -eq 0) {
             Write-Host "=== ALL CHECKS PASSED ===" -ForegroundColor Green
           } else {
@@ -299,16 +327,20 @@ jobs:
 
             ### Установка (без установщика)
             1. Скачайте **FMailSender_v${{ steps.tag.outputs.version }}.exe**
-            2. Запустите — приложение откроется сразу
+            2. Запустите — приложение откроется
+            3. **Первый запуск**: Python-ядро устанавливается в `%LOCALAPPDATA%\FMailSender\` (~30 сек, только один раз)
+            4. **Последующие запуски**: мгновенный старт
 
-            ### Архитектура
-            - Tauri v2 shell (WebView2)
-            - Python FastAPI ядро встроено через `include_bytes!`
-            - React UI встроен в Tauri bundle
+            ### Архитектура v7.0.3 (onedir — без AV-проблем)
+            - Tauri v2 shell + React UI
+            - Python FastAPI ядро (PyInstaller **onedir**) встроено как ZIP
+            - При первом запуске: ZIP распаковывается в LOCALAPPDATA один раз
+            - При повторных запусках: файлы уже на месте, никакой динамической распаковки
+            - AV не может блокировать: запуск из стабильной папки LOCALAPPDATA
 
             ### Требования
             - Windows 10/11 x64
-            - WebView2 Runtime (обычно предустановлен)
+            - WebView2 Runtime (предустановлен в Windows 11)
 
           files: ${{ steps.portable.outputs.name }}
         env:
