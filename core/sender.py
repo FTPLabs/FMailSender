@@ -73,8 +73,9 @@ except ImportError:
                   account.access_token = info.access_token
                   account.oauth_token  = info.access_token
                   return info.access_token
-          except Exception:
-              pass
+          except Exception as _oauth_err:
+              import logging as _log
+              _log.getLogger("sender").debug("OAuth2 token refresh failed for %s: %s", getattr(account, 'email', '?'), _oauth_err)
       return _at
   def _is_ms_domain(email: str) -> bool:
       return email.split("@")[-1].lower() in {
@@ -351,7 +352,9 @@ def _resolve_via_mx(domain: str) -> "Optional[dict]":
 
       # 4) НЕ используем mx_host напрямую — вернём None, tier-4 даст smtp.<domain>
       return None
-  except Exception:
+  except Exception as _mx_err:
+      import logging as _log
+      _log.getLogger("sender").debug("SMTP config lookup error for domain: %s", _mx_err)
       return None
 
 
@@ -994,7 +997,9 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
                         return False, f"Неверный логин/пароль {_prov}: {_d2[:120]}"
                     except _smtplib.SMTPNotSupportedError:
                         continue  # try next port
-                    except Exception:
+                    except Exception as _port_err:
+                        import logging as _log
+                        _log.getLogger("sender").debug("Port attempt failed: %s", _port_err)
                         continue  # connection error on this port, try next
                 # All direct attempts also got SMTPNotSupportedError → GMX SMTP disabled
                 return False, (
