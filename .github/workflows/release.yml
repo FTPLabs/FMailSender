@@ -1,400 +1,376 @@
 name: "FMailSender Release"
 
-on:
-  push:
-    tags:
-      - "v*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version (e.g. 7.0.0)"
-        required: true
-        default: "7.0.0"
+  on:
+    push:
+      tags:
+        - "v*"
+    workflow_dispatch:
+      inputs:
+        version:
+          description: "Version (e.g. 7.0.1)"
+          required: true
+          default: "7.0.1"
 
-env:
-  # v7.0.0: вернулись с Nuitka → PyInstaller 6.21
-  # Причина: Nuitka 60+ мин, PyInstaller 2-4 мин, результат эквивалентен
-  PYTHON_VERSION:      "3.12"
-  PYINSTALLER_VERSION: "6.21.0"
-  NODE_VERSION:        "22"
+  env:
+    PYTHON_VERSION:      "3.12"
+    PYINSTALLER_VERSION: "6.21.0"
+    NODE_VERSION:        "22"
 
-jobs:
-  build:
-    name: "Build & Release"
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    timeout-minutes: 60   # было 180 с Nuitka — теперь достаточно 60
+  jobs:
+    build:
+      name: "Build & Release"
+      runs-on: windows-latest
+      permissions:
+        contents: write
+      timeout-minutes: 60
 
-    steps:
+      steps:
 
-      - name: "Repo PUBLIC — build window open"
-        shell: bash
-        env:
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-        run: |
-          if [ -n "${PAT_TOKEN}" ]; then
-            curl -s -X PATCH \
-              -H "Authorization: Bearer ${PAT_TOKEN}" \
-              -H "Content-Type: application/json" \
-              "https://api.github.com/repos/FTPLabs/FMailSender" \
-              -d '{"private":false}' | grep -o '"private":[a-z]*' || true
-            echo "Repo: PUBLIC"
-          else
-            echo "PAT_TOKEN not set — assuming repo is already public"
-          fi
+        - name: "Repo PUBLIC — build window open"
+          shell: bash
+          env:
+            PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          run: |
+            if [ -n "${PAT_TOKEN}" ]; then
+              curl -s -X PATCH \
+                -H "Authorization: Bearer ${PAT_TOKEN}" \
+                -H "Content-Type: application/json" \
+                "https://api.github.com/repos/FTPLabs/FMailSender" \
+                -d '{"private":false}' | grep -o '"private":[a-z]*' || true
+              echo "Repo: PUBLIC"
+            else
+              echo "PAT_TOKEN not set — assuming repo is already public"
+            fi
 
-      - name: "Checkout"
-        uses: actions/checkout@v4
+        - name: "Checkout"
+          uses: actions/checkout@v4
 
-      - name: "Node.js ${{ env.NODE_VERSION }}"
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
+        - name: "Node.js ${{ env.NODE_VERSION }}"
+          uses: actions/setup-node@v4
+          with:
+            node-version: ${{ env.NODE_VERSION }}
 
-      - name: "pnpm"
-        uses: pnpm/action-setup@v4
-        with:
-          version: latest
-          run_install: false
+        - name: "pnpm"
+          uses: pnpm/action-setup@v4
+          with:
+            version: latest
+            run_install: false
 
-      - name: "Python ${{ env.PYTHON_VERSION }}"
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
+        - name: "Python ${{ env.PYTHON_VERSION }}"
+          uses: actions/setup-python@v5
+          with:
+            python-version: ${{ env.PYTHON_VERSION }}
+            cache: "pip"
 
-      - name: "Rust stable (x86_64-pc-windows-msvc)"
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
+        - name: "Rust stable (x86_64-pc-windows-msvc)"
+          uses: dtolnay/rust-toolchain@stable
+          with:
+            targets: x86_64-pc-windows-msvc
 
-      - name: "Rust cache"
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
+        - name: "Rust cache"
+          uses: Swatinem/rust-cache@v2
+          with:
+            workspaces: src-tauri -> target
 
-      # ── Версия ───────────────────────────────────────────────────────────────
+        # ── Версия ───────────────────────────────────────────────────────────────
 
-      - name: "Resolve version"
-        id: tag
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            TAG="${{ github.ref_name }}"
-            VERSION="${TAG#v}"
-          fi
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "tag=v${VERSION}"    >> $GITHUB_OUTPUT
-          echo "name=FMailSender v${VERSION}" >> $GITHUB_OUTPUT
-          echo "Build: FMailSender v${VERSION}"
+        - name: "Resolve version"
+          id: tag
+          shell: bash
+          run: |
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              VERSION="${{ github.event.inputs.version }}"
+            else
+              TAG="${{ github.ref_name }}"
+              VERSION="${TAG#v}"
+            fi
+            echo "version=${VERSION}" >> $GITHUB_OUTPUT
+            echo "tag=v${VERSION}"    >> $GITHUB_OUTPUT
+            echo "name=FMailSender v${VERSION}" >> $GITHUB_OUTPUT
+            echo "Build: FMailSender v${VERSION}"
 
-      - name: "Sync version across all files"
-        shell: pwsh
-        run: |
-          $ver = "${{ steps.tag.outputs.version }}"
+        - name: "Sync version across all files"
+          shell: pwsh
+          run: |
+            $ver = "${{ steps.tag.outputs.version }}"
 
-          # tauri.conf.json
-          $conf = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
-          $conf.version = $ver
-          $conf | ConvertTo-Json -Depth 10 | Set-Content "src-tauri/tauri.conf.json" -Encoding UTF8
+            # tauri.conf.json
+            $conf = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
+            $conf.version = $ver
+            $conf | ConvertTo-Json -Depth 10 | Set-Content "src-tauri/tauri.conf.json" -Encoding UTF8
 
-          # Cargo.toml
-          $cargo = Get-Content "src-tauri/Cargo.toml"
-          $patched = $false
-          $cargo = $cargo | ForEach-Object {
-            if (-not $patched -and $_ -match 'version\s*=\s*"') {
-              $patched = $true; "version = `"$ver`""
-            } else { $_ }
-          }
-          $cargo | Set-Content "src-tauri/Cargo.toml" -Encoding UTF8
+            # Cargo.toml
+            $cargo = Get-Content "src-tauri/Cargo.toml"
+            $patched = $false
+            $cargo = $cargo | ForEach-Object {
+              if (-not $patched -and $_ -match 'version\s*=\s*"') {
+                $patched = $true; "version = `"$ver`""
+              } else { $_ }
+            }
+            $cargo | Set-Content "src-tauri/Cargo.toml" -Encoding UTF8
 
-          # Python + frontend version files
-          Set-Content "core/_version.py"  -Encoding UTF8 "APP_VERSION = `"$ver`""
-          Set-Content "ui/src/version.ts" -Encoding UTF8 "export const FRONTEND_VERSION = `"$ver`""
+            # Python + frontend version files
+            Set-Content "core/_version.py"  -Encoding UTF8 "APP_VERSION = `"$ver`""
+            Set-Content "ui/src/version.ts" -Encoding UTF8 "export const FRONTEND_VERSION = `"$ver`""
 
-          Write-Host "Version synced: $ver"
+            Write-Host "Version synced: $ver"
 
-      # ── Python deps ───────────────────────────────────────────────────────────
+        # ── Python deps ───────────────────────────────────────────────────────────
 
-      - name: "Install Python runtime deps"
-        shell: pwsh
-        run: |
-          pip install --upgrade pip wheel --quiet
-          pip install -r requirements.txt --quiet
-          Write-Host "Python deps installed."
+        - name: "Install Python runtime deps"
+          shell: pwsh
+          run: |
+            pip install --upgrade pip wheel --quiet
+            pip install -r requirements.txt --quiet
+            Write-Host "Python deps installed."
 
-      - name: "Install PyInstaller ${{ env.PYINSTALLER_VERSION }}"
-        shell: pwsh
-        run: |
-          # PyInstaller 6.21 — 2-4 min builds vs Nuitka 60+ min
-          # pyinstaller-hooks-contrib provides better hooks for uvicorn/fastapi
-          pip install "pyinstaller==${{ env.PYINSTALLER_VERSION }}" `
-                      "pyinstaller-hooks-contrib>=2024.11" `
-                      --quiet
-          Write-Host "PyInstaller ${{ env.PYINSTALLER_VERSION }} ready."
+        - name: "Install PyInstaller ${{ env.PYINSTALLER_VERSION }}"
+          shell: pwsh
+          run: |
+            pip install "pyinstaller==${{ env.PYINSTALLER_VERSION }}" `
+                        "pyinstaller-hooks-contrib>=2024.11" `
+                        --quiet
+            Write-Host "PyInstaller ${{ env.PYINSTALLER_VERSION }} ready."
 
-      # ── BUILD STEP 1: Python core → EXE ──────────────────────────────────────
+        # ── BUILD STEP 1: Python core → EXE ──────────────────────────────────────
 
-      - name: "Build fmail-core.exe (PyInstaller)"
-        shell: pwsh
-        run: |
-          Write-Host "=== PyInstaller build started ===" -ForegroundColor Cyan
-          $start = Get-Date
+        - name: "Build fmail-core.exe (PyInstaller)"
+          shell: pwsh
+          run: |
+            Write-Host "=== PyInstaller build started ===" -ForegroundColor Cyan
+            $start = Get-Date
 
-          # Убедимся что output dir существует
-          New-Item -ItemType Directory -Force -Path "src-tauri/binaries" | Out-Null
+            New-Item -ItemType Directory -Force -Path "src-tauri/binaries" | Out-Null
 
-          # Запуск PyInstaller с максимальной отладкой при ошибке
-          pyinstaller fmail-core.spec `
-            --noconfirm `
-            --distpath dist `
-            --workpath build_workdir `
-            --clean
+            pyinstaller fmail-core.spec `
+              --noconfirm `
+              --distpath dist `
+              --workpath build_workdir `
+              --clean
 
-          $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds)
-          Write-Host "=== PyInstaller done in ${elapsed}s ===" -ForegroundColor Green
+            $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds)
+            Write-Host "=== PyInstaller done in ${elapsed}s ===" -ForegroundColor Green
 
-          if (-not (Test-Path "dist/fmail-core.exe")) {
-            Write-Error "fmail-core.exe NOT FOUND in dist/. Check PyInstaller output above."
-            exit 1
-          }
+            if (-not (Test-Path "dist/fmail-core.exe")) {
+              Write-Error "fmail-core.exe NOT FOUND in dist/. Check PyInstaller output above."
+              exit 1
+            }
 
-          $size = [math]::Round((Get-Item "dist/fmail-core.exe").Length / 1MB, 1)
-          Write-Host "fmail-core.exe: ${size} MB"
+            $size = [math]::Round((Get-Item "dist/fmail-core.exe").Length / 1MB, 1)
+            Write-Host "fmail-core.exe: ${size} MB"
+            if ($size -lt 20) {
+              Write-Error "fmail-core.exe слишком маленький (${size} MB) — проверьте hiddenimports в fmail-core.spec"
+              exit 1
+            }
 
-      - name: "Rename sidecar for Tauri"
-        shell: pwsh
-        run: |
-          # Tauri ищет sidecar по имени: fmail-core-x86_64-pc-windows-msvc.exe
-          Copy-Item "dist/fmail-core.exe" `
-                    "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe" `
-                    -Force
-          Write-Host "Sidecar placed in src-tauri/binaries/"
+        - name: "Place sidecar for Tauri include_bytes!"
+          shell: pwsh
+          run: |
+            # include_bytes! в main.rs встраивает этот файл ВНУТРЬ Tauri EXE при компиляции.
+            # Файл должен существовать ДО cargo tauri build.
+            Copy-Item "dist/fmail-core.exe" `
+                      "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe" `
+                      -Force
+            $sz = [math]::Round((Get-Item "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe").Length / 1MB, 1)
+            Write-Host "Sidecar placed: ${sz} MB" -ForegroundColor Green
 
-      # ── Верификация ядра (Build-time) ─────────────────────────────────────────
+        # ── Верификация ядра (Build-time) ─────────────────────────────────────────
 
-      - name: "Verify core binary — startup test"
-        shell: pwsh
-        run: |
-          Write-Host "Testing core binary startup..." -ForegroundColor Cyan
+        - name: "Verify core binary — import test"
+          shell: pwsh
+          run: |
+            Write-Host "Testing core binary (--test mode)..." -ForegroundColor Cyan
 
-          # Запускаем core с --test флагом (быстрая проверка импортов без uvicorn)
-          $proc = Start-Process -FilePath "dist/fmail-core.exe" `
-                                -ArgumentList "--test" `
-                                -PassThru -Wait -WindowStyle Hidden `
-                                -RedirectStandardOutput "core_test_out.txt" `
-                                -RedirectStandardError  "core_test_err.txt"
+            $proc = Start-Process -FilePath "dist/fmail-core.exe" `
+                                  -ArgumentList "--test" `
+                                  -PassThru -Wait -WindowStyle Hidden `
+                                  -RedirectStandardOutput "core_test_out.txt" `
+                                  -RedirectStandardError  "core_test_err.txt"
 
-          $exitCode = $proc.ExitCode
-
-          # exit 0 = OK, exit 2 = --test не поддерживается (тоже OK — значит импорты прошли)
-          if ($exitCode -eq 0 -or $exitCode -eq 2) {
-            Write-Host "Core binary OK (exit $exitCode)" -ForegroundColor Green
-          } else {
+            $exitCode = $proc.ExitCode
+            $out = Get-Content "core_test_out.txt" -ErrorAction SilentlyContinue
             $err = Get-Content "core_test_err.txt" -ErrorAction SilentlyContinue
-            Write-Error "Core binary failed (exit $exitCode):`n$err"
-            exit 1
-          }
 
-      # ── BUILD STEP 2: React / Vite ────────────────────────────────────────────
-
-      - name: "Install UI deps"
-        shell: pwsh
-        working-directory: ui
-        run: |
-          npm install
-          Write-Host "UI deps installed."
-
-      - name: "Build UI (Vite)"
-        shell: pwsh
-        working-directory: ui
-        run: |
-          npm run build
-          if (-not (Test-Path "dist/index.html")) {
-            Write-Error "UI build failed: dist/index.html not found"
-            exit 1
-          }
-          Write-Host "UI build OK."
-
-      # ── BUILD STEP 3: Tauri ───────────────────────────────────────────────────
-
-      - name: "Install tauri-cli"
-        shell: pwsh
-        run: |
-          cargo install tauri-cli --version "^2" --locked --quiet 2>&1 | `
-            Select-String -Pattern "Installed|Compiling|warning" | Select-Object -Last 5
-          Write-Host "tauri-cli ready."
-
-      - name: "Build Tauri (NSIS installer + portable)"
-        shell: pwsh
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          Write-Host "=== Tauri build started ===" -ForegroundColor Cyan
-          cargo tauri build --target x86_64-pc-windows-msvc
-          Write-Host "=== Tauri build done ===" -ForegroundColor Green
-
-      # ── BUILD STEP 4: Portable EXE ────────────────────────────────────────────
-
-      - name: "Build portable EXE"
-        id: portable
-        shell: pwsh
-        run: |
-          $ver = "${{ steps.tag.outputs.version }}"
-          $portableName = "FMailSender_v${ver}_portable.exe"
-
-          # NSIS portable build (если portable.nsi существует)
-          if (Test-Path "portable.nsi") {
-            # Устанавливаем NSIS
-            choco install nsis --no-progress --quiet -y 2>&1 | Out-Null
-
-            # Pathfix: NSIS ищет EXE
-            $installerExe = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" |
-              Where-Object { $_.Name -notlike "*-setup.exe" -or $_.Name -like "*.exe" } |
-              Select-Object -First 1
-
-            if ($installerExe) {
-              $nsisDefs = @(
-                "/DAPP_VERSION=${ver}",
-                "/DINSTALLER_EXE=$($installerExe.FullName)"
-              )
-              & "C:\Program Files (x86)\NSIS\makensis.exe" @nsisDefs portable.nsi
-              $global:LASTEXITCODE = 0  # portable.nsi is LEGACY; NSIS error is expected, fallback handles it
-
-              if (Test-Path $portableName) {
-                Write-Host "Portable EXE built: $portableName"
-              } else {
-                # Fallback: использовать installer как portable
-                Copy-Item $installerExe.FullName $portableName
-                Write-Host "Using installer as portable fallback"
-              }
+            if ($exitCode -eq 0) {
+              Write-Host "Core binary OK (exit 0) — все импорты прошли" -ForegroundColor Green
+            } elseif ($exitCode -eq 2) {
+              Write-Host "Core binary OK (exit 2) — --test не поддерживается, но бинарь запускается" -ForegroundColor Green
             } else {
-              # Fallback: ищем любой setup exe
-              $fallback = Get-ChildItem "src-tauri/target/**/*.exe" -Recurse |
-                Where-Object { $_.Name -like "*setup*" -or $_.Name -like "FMail*" } |
-                Select-Object -First 1
-              if ($fallback) {
-                Copy-Item $fallback.FullName $portableName
-              }
+              Write-Host "STDOUT: $out"
+              Write-Host "STDERR: $err"
+              Write-Error "Core binary FAILED (exit $exitCode)"
+              exit 1
             }
-          } else {
-            # Нет NSIS скрипта — берём установщик напрямую
-            $installer = Get-ChildItem "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" |
-              Select-Object -First 1
-            if ($installer) {
-              Copy-Item $installer.FullName $portableName
+
+        # ── BUILD STEP 2: React / Vite ────────────────────────────────────────────
+
+        - name: "Install UI deps"
+          shell: pwsh
+          working-directory: ui
+          run: |
+            npm install
+            Write-Host "UI deps installed."
+
+        - name: "Build UI (Vite)"
+          shell: pwsh
+          working-directory: ui
+          run: |
+            npm run build
+            if (-not (Test-Path "dist/index.html")) {
+              Write-Error "UI build failed: dist/index.html not found"
+              exit 1
             }
-          }
+            Write-Host "UI build OK."
 
-          if (-not (Test-Path $portableName)) {
-            Write-Error "Portable EXE не найден"
-            exit 1
-          }
+        # ── BUILD STEP 3: Tauri (без NSIS installer — только raw EXE) ─────────────
 
-          $sizeMb = [math]::Round((Get-Item $portableName).Length / 1MB, 1)
-          Write-Host "Portable: $portableName ($sizeMb MB)"
+        - name: "Install tauri-cli"
+          shell: pwsh
+          run: |
+            cargo install tauri-cli --version "^2" --locked --quiet 2>&1 | `
+              Select-String -Pattern "Installed|Compiling|warning" | Select-Object -Last 5
+            Write-Host "tauri-cli ready."
 
-          echo "name=$portableName" >> $env:GITHUB_OUTPUT
-          echo "size=$sizeMb"       >> $env:GITHUB_OUTPUT
+        - name: "Build Tauri (portable EXE — без installer)"
+          shell: pwsh
+          env:
+            TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          run: |
+            Write-Host "=== Tauri build started ===" -ForegroundColor Cyan
+            # --bundles none: компилируем только raw EXE, без NSIS installer.
+            # Результат: src-tauri/target/x86_64-pc-windows-msvc/release/fmail-sender.exe
+            # Python core встроен внутрь через include_bytes! в main.rs.
+            cargo tauri build --target x86_64-pc-windows-msvc --bundles none
+            Write-Host "=== Tauri build done ===" -ForegroundColor Green
 
-      # ── POST-BUILD VERIFICATION ────────────────────────────────────────────────
+        # ── BUILD STEP 4: Финальный portable EXE ─────────────────────────────────
 
-      - name: "Verify build artifacts"
-        shell: pwsh
-        run: |
-          Write-Host "=== Build Verification ===" -ForegroundColor Yellow
+        - name: "Package portable EXE"
+          id: portable
+          shell: pwsh
+          run: |
+            $ver = "${{ steps.tag.outputs.version }}"
+            $finalName = "FMailSender_v${ver}.exe"
 
-          $errors = @()
+            # ПРАВИЛЬНО: берём сырой Tauri EXE (Python core встроен через include_bytes!)
+            # НЕ NSIS installer — NSIS создаёт обёртку-установщик, нарушает требование portable.
+            $rawExe = "src-tauri/target/x86_64-pc-windows-msvc/release/fmail-sender.exe"
 
-          # 1. Portable EXE
-          $portable = "${{ steps.portable.outputs.name }}"
-          if (Test-Path $portable) {
-            $sz = [math]::Round((Get-Item $portable).Length / 1MB, 1)
-            Write-Host "[OK] Portable EXE: $portable ($sz MB)" -ForegroundColor Green
-            if ($sz -lt 20) { $errors += "Portable EXE слишком маленький ($sz MB) — возможно неполный" }
-          } else {
-            $errors += "Portable EXE не найден: $portable"
-          }
-
-          # 2. Core binary в Tauri binaries
-          if (Test-Path "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe") {
-            Write-Host "[OK] fmail-core sidecar present" -ForegroundColor Green
-          } else {
-            $errors += "fmail-core sidecar НЕ НАЙДЕН в src-tauri/binaries/"
-          }
-
-          # 3. UI dist
-          if (Test-Path "ui/dist/index.html") {
-            Write-Host "[OK] UI dist/index.html present" -ForegroundColor Green
-          } else {
-            $errors += "UI dist/index.html НЕ НАЙДЕН"
-          }
-
-          # 4. Размер portable не завышен (признак ошибки upx или лишних файлов)
-          if ($errors.Count -eq 0) {
-            Write-Host "=== ALL CHECKS PASSED ===" -ForegroundColor Green
-          } else {
-            foreach ($e in $errors) {
-              Write-Host "[FAIL] $e" -ForegroundColor Red
+            if (-not (Test-Path $rawExe)) {
+              Write-Error "CRITICAL: fmail-sender.exe не найден: $rawExe"
+              Write-Error "Убедитесь, что шаг 'Build Tauri' выполнился успешно"
+              exit 1
             }
-            Write-Error "Build verification failed!"
-            exit 1
-          }
 
-      # ── RELEASE ───────────────────────────────────────────────────────────────
+            $sizeMb = [math]::Round((Get-Item $rawExe).Length / 1MB, 1)
 
-      - name: "GitHub Release"
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: ${{ steps.tag.outputs.name }}
-          prerelease: false
-          generate_release_notes: false
-          files: |
-            ${{ steps.portable.outputs.name }}
-          body: |
-            ## ${{ steps.tag.outputs.name }}
+            # Проверка: EXE должен быть > 20 MB (Python core встроен)
+            if ($sizeMb -lt 20) {
+              Write-Error "fmail-sender.exe слишком маленький (${sizeMb} MB)"
+              Write-Error "Возможно include_bytes! не включил Python core."
+              Write-Error "Проверьте что PyInstaller ЗАВЕРШИЛСЯ УСПЕШНО до cargo tauri build."
+              exit 1
+            }
 
-            | Файл | Размер | Описание |
-            |------|--------|----------|
-            | `${{ steps.portable.outputs.name }}` | ${{ steps.portable.outputs.size }} МБ | **Portable EXE — скачай и запусти** |
+            Copy-Item $rawExe $finalName -Force
+            Write-Host "Portable EXE готов: $finalName (${sizeMb} MB)" -ForegroundColor Green
 
-            ### 🚀 v${{ steps.tag.outputs.version }}
+            echo "name=$finalName"  >> $env:GITHUB_OUTPUT
+            echo "size=$sizeMb"     >> $env:GITHUB_OUTPUT
 
-            - **Быстрая сборка**: PyInstaller 6.21 (2-4 мин) вместо Nuitka (60+ мин)
-            - **Надёжный запуск**: улучшен PyInstaller spec — все hidden imports для FastAPI/uvicorn
-            - **Безопасность**: HWID привязывается при первом запуске, синхронизация с Telegram-ботом
-            - **Защита от подмены**: отпечаток приложения проверяется при активации
-            - **Диагностика**: startup.log в %LOCALAPPDATA%\FMailSender для отладки
+        # ── Финальная верификация ──────────────────────────────────────────────────
 
-            ### Запуск
-            1. Скачайте `${{ steps.portable.outputs.name }}`
-            2. Запустите — ядро встроено, установщик не нужен
-            3. При первом запуске введите лицензионный ключ
+        - name: "Verify final artifacts"
+          shell: pwsh
+          run: |
+            Write-Host "=== Final Verification ===" -ForegroundColor Yellow
+            $errors = @()
 
-            **Требования:** Windows 10 x64 (build 1803+) или Windows 11
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            # 1. Финальный EXE
+            $exeName = "${{ steps.portable.outputs.name }}"
+            if (Test-Path $exeName) {
+              $sz = [math]::Round((Get-Item $exeName).Length / 1MB, 1)
+              Write-Host "[OK] $exeName ($sz MB)" -ForegroundColor Green
+              if ($sz -lt 20) { $errors += "EXE слишком маленький ($sz MB) — Python core не встроен?" }
+            } else {
+              $errors += "EXE не найден: $exeName"
+            }
 
-      # SECURITY: This step has if:always() to ensure repo returns to private
-      # even on failure. PAT_TOKEN must be set in repo secrets.
-      - name: "Repo PRIVATE — build window closed"
-        if: always()
-        shell: bash
-        env:
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-        run: |
-          if [ -n "${PAT_TOKEN}" ]; then
-            curl -s -X PATCH \
-              -H "Authorization: Bearer ${PAT_TOKEN}" \
-              -H "Content-Type: application/json" \
-              "https://api.github.com/repos/FTPLabs/FMailSender" \
-              -d '{"private":true}' | grep -o '"private":[a-z]*' || true
-            echo "Repo: PRIVATE"
-          else
-            echo "PAT_TOKEN not set — repo remains public."
-          fi
+            # 2. Sidecar binary
+            if (Test-Path "src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe") {
+              Write-Host "[OK] fmail-core sidecar present" -ForegroundColor Green
+            } else {
+              $errors += "fmail-core sidecar НЕ НАЙДЕН"
+            }
+
+            # 3. UI dist
+            if (Test-Path "ui/dist/index.html") {
+              Write-Host "[OK] ui/dist/index.html present" -ForegroundColor Green
+            } else {
+              $errors += "UI dist/index.html НЕ НАЙДЕН"
+            }
+
+            if ($errors.Count -eq 0) {
+              Write-Host "=== ALL CHECKS PASSED ===" -ForegroundColor Green
+            } else {
+              $errors | ForEach-Object { Write-Host "[FAIL] $_" -ForegroundColor Red }
+              Write-Error "Verification failed!"
+              exit 1
+            }
+
+        # ── GitHub Release ────────────────────────────────────────────────────────
+
+        - name: "GitHub Release"
+          uses: softprops/action-gh-release@v2
+          with:
+            tag_name:   ${{ steps.tag.outputs.tag }}
+            name:       "${{ steps.tag.outputs.name }}"
+            draft:      false
+            prerelease: false
+            generate_release_notes: false
+            body: |
+              ## FMailSender ${{ steps.tag.outputs.name }}
+
+              ### Установка
+              1. Скачайте **FMailSender_v${{ steps.tag.outputs.version }}.exe**
+              2. Запустите — приложение откроется сразу, без установщика
+
+              ### Состав
+              - Tauri v2 shell (WebView2)
+              - Python FastAPI ядро (встроено внутрь EXE через `include_bytes!`)
+              - React UI
+
+              ### Требования
+              - Windows 10/11 x64
+              - WebView2 Runtime (обычно уже установлен)
+
+            files: |
+              ${{ steps.portable.outputs.name }}
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        # ── VPS Deploy (лицензионный сервер fmail.shop) ───────────────────────────
+
+        - name: "Deploy to VPS (fmail.shop)"
+          uses: appleboy/ssh-action@v1.0.3
+          with:
+            host:     ${{ secrets.VPS_HOST }}
+            username: ${{ secrets.VPS_USER }}
+            password: ${{ secrets.VPS_PASS }}
+            port:     22
+            timeout:  120s
+            script: |
+              set -e
+              cd /opt/fmailsender
+              git fetch origin main --quiet
+              git reset --hard origin/main --quiet
+              echo "Code: $(git log --oneline -1)"
+              # Перезапускаем сервис если изменился
+              if systemctl is-active --quiet fmailsender; then
+                systemctl restart fmailsender
+                echo "Service restarted."
+              else
+                echo "Service not running — skipping restart (not critical for desktop build)"
+              fi
+  
