@@ -1,19 +1,23 @@
 /**
  * StartupOverlay — loading screen + license activation.
  *
- * v6.9.2 fixes:
- *   - Retry button shows after 60s regardless of coreStage (was: only if stage='failed')
- *   - "Defender может сканировать..." hint shown after 30s
- *   - av_wait stage message handled explicitly
- *   - Progress bar calculation improved for long Nuitka first-run extraction
+ * v7.0.2 fixes:
+ *   - Failed state: немедленно показываем полную панель ошибки при coreStage='failed',
+ *     не ждём 60 сек. Чёткий текст ошибки + большая кнопка перезапуска.
+ *   - isTimeout порог: 300с (соответствует PORT_WAIT_SECS в main.rs v7.0.2).
+ *   - Убран Nuitka hint (теперь используется PyInstaller + LOCALAPPDATA/pytemp кеш).
+ *   - Hint для AV: "добавьте %LOCALAPPDATA%\FMailSender в исключения".
+ *   - Retry кнопка видна сразу при failed (не через 60с).
  */
 import { useEffect, useRef, useState } from 'react'
 import { useStatus } from '../contexts/StatusContext'
 import { getBaseUrl } from '../api'
 import { FRONTEND_VERSION } from '../version'
 
-// After this many seconds on first load, show retry button
+// После этого времени показываем кнопку перезапуска (независимо от стадии)
 const RETRY_AFTER_SECS = 60
+// Подсказка про AV — через 20 сек
+const DEFENDER_HINT_SECS = 20
 
 interface CoreStatus {
   stage:   string
@@ -21,7 +25,6 @@ interface CoreStatus {
   attempt: number
 }
 
-// Safe Tauri event listener — works in Tauri runtime, no-ops in browser
 async function listenCoreStatus(
   cb: (payload: CoreStatus) => void
 ): Promise<(() => void) | null> {
@@ -37,7 +40,6 @@ async function listenCoreStatus(
   }
 }
 
-// Safe Tauri invoke — works in Tauri runtime, no-ops in browser
 async function invokeTauri(cmd: string): Promise<void> {
   try {
     const tauri = (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ as
@@ -92,7 +94,6 @@ export default function StartupOverlay() {
   useEffect(() => { onlineRef.current    = online    }, [online])
   useEffect(() => { licenseOkRef.current = licenseOk }, [licenseOk])
 
-  // ── Listen to Tauri core://status events ──────────────────────────────────
   useEffect(() => {
     let unlisten: (() => void) | null = null
     listenCoreStatus((payload) => {
@@ -102,7 +103,6 @@ export default function StartupOverlay() {
     return () => { unlisten?.() }
   }, [])
 
-  // ── Step 1: fetch license the moment backend comes online ─────────────────
   useEffect(() => {
     if (!online) return
     fetch(`${getBaseUrl()}/api/health`)
@@ -123,7 +123,6 @@ export default function StartupOverlay() {
       .catch(() => { setLicenseOk(false); setLicenseMsg('Не удалось проверить лицензию.') })
   }, [online])
 
-  // ── Step 2: poll /api/license/poll to catch background result ────────────
   useEffect(() => {
     if (!online || licenseOk === null) return
     const iv = setInterval(async () => {
@@ -141,27 +140,36 @@ export default function StartupOverlay() {
     return () => clearInterval(iv)
   }, [online, licenseOk])
 
-  // Re-show overlay when license becomes invalid mid-session
   useEffect(() => {
     if (licenseOk === false) { setVisible(true); setFadeOut(false) }
   }, [licenseOk])
 
-  // Timer — runs regardless of online state
+  // Таймер — работает всегда
   useEffect(() => {
     if (!visible) return
     const timer = setInterval(() => {
       const sec = (Date.now() - startedAt.current) / 1000
+      // Если ядро упало — останавливаем прогресс-бар на текущем значении
+      if (coreStage === 'failed') return
       setElapsed(sec)
       if (!onlineRef.current) {
-        // Smooth progress up to 90% over 180s (matches PORT_WAIT_SECS)
-        const target = Math.min(sec / 180, 1) * 90
+        const target = Math.min(sec / 300, 1) * 90  // PORT_WAIT_SECS=300
         setProgress(p => p + (target - p) * 0.12)
       }
     }, 100)
     return () => clearInterval(timer)
+  }, [visible, coreStage])
+
+  // Отдельный счётчик elapsed для отображения — всегда растёт
+  const [displayElapsed, setDisplayElapsed] = useState(0)
+  useEffect(() => {
+    if (!visible) return
+    const t = setInterval(() => {
+      setDisplayElapsed(Math.round((Date.now() - startedAt.current) / 1000))
+    }, 1000)
+    return () => clearInterval(t)
   }, [visible])
 
-  // Dismiss loading overlay when license confirmed valid
   useEffect(() => {
     if (!online || !visible || licenseOk === null || licenseOk === false) return
     setProgress(100)
@@ -193,11 +201,13 @@ export default function StartupOverlay() {
 
   async function handleRestartCore() {
     setRestarting(true)
-    setCoreMsg('Перезапуск Python ядра...')
-    await invokeTauri('restart_core')
+    setCoreStage('')
+    setCoreMsg('')
     startedAt.current = Date.now()
+    setDisplayElapsed(0)
     setElapsed(0)
     setProgress(0)
+    await invokeTauri('restart_core')
     setTimeout(() => setRestarting(false), 3000)
   }
 
@@ -266,45 +276,43 @@ export default function StartupOverlay() {
   }
 
   // ── Loading screen ────────────────────────────────────────────────────────
-  const elapsedRound = Math.round(elapsed)
-  const isTimeout    = elapsed > 200 && !online   // matches PORT_WAIT_SECS
-  // FIX v6.9.2: Show retry button after 60s regardless of coreStage.
-  // Previously: required coreStage==='failed' — which never happened during AV scan/retry loops.
-  const showRetry    = elapsed > RETRY_AFTER_SECS && !online
+  const isFailed = coreStage === 'failed'
+  // Показываем кнопку перезапуска: немедленно при failed, или через 60 сек
+  const showRetry = isFailed || (displayElapsed > RETRY_AFTER_SECS && !online)
+  // Подсказка AV через 20 сек
+  const showDefenderHint = displayElapsed > DEFENDER_HINT_SECS && !online && !isFailed
 
-  // Stage-to-hint mapping for user-friendly messages
   const stageHint: Record<string, string> = {
-    extracting: 'Распаковка Python ядра...',
+    extracting: 'Извлечение ядра приложения...',
     av_wait:    'Запуск Python ядра...',
     spawning:   'Запуск Python ядра...',
-    killed:     'Windows Defender проверяет файлы...',
+    killed:     'Ядро перезапускается...',
     running:    'Ожидание ответа ядра...',
     ready:      'Готово',
-    failed:     coreMsg || 'Не удалось запустить Python ядро.',
+    failed:     'Ошибка запуска ядра',
   }
 
-  const fallbackMsg = elapsed < 3  ? 'Инициализация...'
-                    : elapsed < 10 ? 'Запуск Python ядра...'
-                    : elapsed < 20 ? 'Загрузка компонентов...'
-                    : elapsed < 35 ? 'Старт FastAPI сервера...'
-                    : elapsed < 60 ? 'Запуск сервисов...'
-                    : elapsed < 90 ? 'Почти готово...'
-                    :                'Ожидание ядра...'
+  const fallbackMsg = displayElapsed < 3  ? 'Инициализация...'
+                    : displayElapsed < 10 ? 'Запуск Python ядра...'
+                    : displayElapsed < 20 ? 'Загрузка модулей...'
+                    : displayElapsed < 40 ? 'Старт FastAPI сервера...'
+                    : displayElapsed < 70 ? 'Ожидание сервера...'
+                    : displayElapsed < 120 ? 'AV проверяет файлы...'
+                    :                        'Ожидание ядра...'
 
-  const displayMsg   = online
+  const displayMsg = online
     ? (licenseOk === null ? 'Проверка лицензии...' : 'Готово')
+    : isFailed
+    ? 'Ядро не запустилось'
     : (coreStage && stageHint[coreStage]) || coreMsg || fallbackMsg
 
-  const dots = !online ? '.'.repeat(Math.floor(elapsed * 2) % 4) : ''
+  const dots = (!online && !isFailed) ? '.'.repeat(Math.floor(displayElapsed * 2) % 4) : ''
 
-  const msgColor = coreStage === 'failed'  ? '#ef4444'
+  const msgColor = isFailed                ? '#ef4444'
                  : coreStage === 'ready'   ? '#10b981'
                  : online                  ? '#10b981'
-                 : isTimeout               ? 'rgba(239,68,68,0.85)'
+                 : displayElapsed > 300    ? 'rgba(239,68,68,0.85)'
                  : '#6666aa'
-
-  // Hint for Windows Defender delay — shown after 30s if still not online
-  const showDefenderHint = elapsed > 30 && !online && coreStage !== 'failed'
 
   return (
     <div
@@ -323,7 +331,7 @@ export default function StartupOverlay() {
           <div className="h-full rounded-full"
             style={{
               width: `${Math.round(progress)}%`,
-              background: 'linear-gradient(90deg, #8b5cf6, #06b6d4)',
+              background: isFailed ? '#ef4444' : 'linear-gradient(90deg, #8b5cf6, #06b6d4)',
               transition: online ? 'width 0.3s ease-out' : 'width 0.2s linear',
             }}
           />
@@ -331,46 +339,60 @@ export default function StartupOverlay() {
         <div className="text-center text-xs min-h-[1rem]" style={{ color: msgColor }}>
           <span>{displayMsg}{dots}</span>
         </div>
-        {!online && elapsedRound > 5 && (
+        {!online && displayElapsed > 5 && !isFailed && (
           <div className="text-center text-[0.68rem]" style={{ color: '#383860' }}>
-            {elapsedRound} сек
+            {displayElapsed} сек
           </div>
         )}
       </div>
 
-      {/* Windows Defender hint — shown after 30s */}
+      {/* AV hint — через 20 сек */}
       {showDefenderHint && (
         <div className="mt-4 max-w-xs px-4 text-center">
           <p className="text-[0.7rem] leading-relaxed" style={{ color: '#3a3a6a' }}>
-            Windows Defender может проверять файлы при первом запуске.
-            Обычно занимает 30–90 сек.
+            Антивирус проверяет файлы ядра при первом запуске (20–90 сек).
+            Добавьте папку <code style={{ color: '#5a5a8a' }}>%LOCALAPPDATA%\FMailSender</code> в исключения.
           </p>
         </div>
       )}
 
-      {/* Retry button — shown after 60s regardless of stage (v6.9.2 fix) */}
-      {showRetry && (
-        <div className="mt-5 flex flex-col items-center gap-3 max-w-xs px-4">
-          {coreStage === 'failed' && (
-            <p className="text-center text-xs leading-relaxed"
-              style={{ color: 'rgba(239,68,68,0.8)' }}>
+      {/* Панель ошибки — показывается немедленно при failed */}
+      {isFailed && (
+        <div className="mt-5 max-w-sm px-4 w-full">
+          <div className="rounded-xl p-4" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.22)' }}>
+            <p className="text-[0.78rem] leading-relaxed mb-3" style={{ color: 'rgba(252,165,165,0.9)' }}>
               {coreMsg || 'Не удалось запустить Python ядро.'}
             </p>
-          )}
+            <p className="text-[0.7rem] leading-relaxed" style={{ color: '#5a5a8a' }}>
+              Добавьте <code>%LOCALAPPDATA%\FMailSender</code> в исключения антивируса и нажмите «Перезапустить».
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Кнопка перезапуска */}
+      {showRetry && (
+        <div className="mt-4 flex flex-col items-center gap-2">
           <button
             onClick={handleRestartCore}
             disabled={restarting}
-            className="rounded-xl px-5 py-2 text-xs font-semibold"
+            className="rounded-xl px-6 py-2.5 text-sm font-semibold"
             style={{
-              background: restarting ? 'rgba(124,58,237,0.22)' : 'rgba(124,58,237,0.35)',
+              background: restarting ? 'rgba(124,58,237,0.22)' : isFailed ? 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)' : 'rgba(124,58,237,0.35)',
               border: '1px solid rgba(139,92,246,0.45)',
               color: restarting ? 'rgba(232,232,255,0.4)' : '#e8e8ff',
               cursor: restarting ? 'not-allowed' : 'pointer',
               transition: 'all 0.15s',
+              boxShadow: isFailed && !restarting ? '0 0 18px rgba(124,58,237,0.3)' : 'none',
             }}
           >
             {restarting ? 'Перезапуск...' : '↺ Перезапустить ядро'}
           </button>
+          {!isFailed && !restarting && (
+            <p className="text-[0.65rem]" style={{ color: '#2a2a4a' }}>
+              Запуск занимает 15–60 сек (первый раз дольше)
+            </p>
+          )}
         </div>
       )}
 
