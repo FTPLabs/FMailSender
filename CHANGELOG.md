@@ -1,3 +1,42 @@
+## [7.0.3] — 2026-07-05
+
+### Fixed — Архитектурное исправление: PyInstaller ONEDIR вместо onefile
+
+- **КОРНЕВАЯ ПРИЧИНА**: PyInstaller **onefile** при КАЖДОМ запуске распаковывает
+  Python-среду в `%TEMP%\PYINSTALLER_<hash>\`. AV перехватывает запись исполняемых файлов
+  в temp и блокирует/убивает процесс. Перенаправление TEMP→LOCALAPPDATA в v7.0.2
+  не решает проблему: AV ловит сам момент записи, независимо от папки.
+
+- **РЕШЕНИЕ — переход на PyInstaller ONEDIR** (`fmail-core.spec`, `main.rs`):
+  - `fmail-core.spec`: добавлен `COLLECT()`, убран `runtime_tmpdir`, `exclude_binaries=True`
+  - CI собирает `dist/fmail-core/` (папка с EXE + DLLs), зипует → `fmail-core.zip`
+  - Tauri встраивает ZIP через `include_bytes!("../binaries/fmail-core.zip")`
+  - При **первом запуске**: PowerShell `Expand-Archive` распаковывает ZIP
+    → `%LOCALAPPDATA%\FMailSender\fmail-core\` (один раз ~30 сек)
+  - При **последующих запусках**: хеш ZIP совпадает → распаковка пропускается,
+    `fmail-core.exe` запускается напрямую из уже существующих файлов
+  - **Никакой динамической распаковки при старте** → AV не может мешать
+
+- **Новый flow `extract_core`** (`src-tauri/src/main.rs`):
+  - FNV64 хеш встроенного ZIP → сравнение с `.core_hash`
+  - Совпадает: сразу возвращает путь к EXE (мгновенно)
+  - Не совпадает: пишет ZIP на диск → `Expand-Archive` → сохраняет хеш
+
+- **`spawn_core` упрощён**: убраны `TEMP`/`TMP`/`TMPDIR` overrides (не нужны в onedir)
+
+- **CI обновлён** (`.github/workflows/release.yml`):
+  - Шаг "Build": проверяет `dist/fmail-core/fmail-core.exe` (не `dist/fmail-core.exe`)
+  - Новый шаг "Pack onedir": `Compress-Archive dist/fmail-core → fmail-core.zip`
+  - Шаг "Verify": удалена проверка `fmail-core-x86_64-pc-windows-msvc.exe`, добавлена `fmail-core.zip`
+  - Шаг "Verify core binary": использует `dist/fmail-core/fmail-core.exe`
+
+- **PORT_WAIT_SECS**: 300 → 120 (onedir не делает extraction при старте → uvicorn поднимается быстрее)
+- **SPAWN_ALIVE_CHECK_S**: 15 → 8 (нет ожидания распаковки при старте)
+
+- **Синхронизация версий**: все 4 файла → 7.0.3.
+
+---
+
 ## [7.0.2] — 2026-07-05
 
 ### Fixed — Ядро теперь запускается надёжно
