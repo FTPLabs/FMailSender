@@ -205,14 +205,14 @@ jobs:
         shell: pwsh
         working-directory: ui
         run: |
-          pnpm install --frozen-lockfile --prefer-offline
+          npm install
           Write-Host "UI deps installed."
 
       - name: "Build UI (Vite)"
         shell: pwsh
         working-directory: ui
         run: |
-          pnpm run build
+          npm run build
           if (-not (Test-Path "dist/index.html")) {
             Write-Error "UI build failed: dist/index.html not found"
             exit 1

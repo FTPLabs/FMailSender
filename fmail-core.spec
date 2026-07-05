@@ -254,7 +254,6 @@ ALL_HIDDEN = (
     ]
 )
 
-block_cipher = None
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
 a = Analysis(
@@ -306,7 +305,6 @@ a = Analysis(
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
     # PyInstaller 6.x: оптимизация байткода
     optimize=2,
@@ -323,7 +321,7 @@ a.datas = [
     ])
 ]
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 # ── EXE (onefile) ─────────────────────────────────────────────────────────────
 # onefile: Tauri встраивает один .exe через include_bytes!

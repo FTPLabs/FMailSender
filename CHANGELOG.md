@@ -1,3 +1,17 @@
+## [7.0.0] — 2026-07-05
+
+### Fixed
+
+- **CI-FIX** `release.yml` шаг "Install UI deps": `pnpm install --frozen-lockfile` → `npm install` (нет `pnpm-lock.yaml` в `ui/`).
+
+- **SPEC-FIX** `fmail-core.spec`: убраны `cipher=block_cipher` из `Analysis()` и `PYZ()`, удалена переменная `block_cipher = None` — PyInstaller 6.x не принимает `cipher=`.
+
+- **VER-SYNC** все версионные файлы на 7.0.0: `core/_version.py`, `ui/src/version.ts`, `src-tauri/Cargo.toml`, `tauri.conf.json`. Пустые строки вызывали version mismatch в StartupOverlay.
+
+- **VPS-SYNC** сервер `31.76.100.190` обновлён до main (v7.0.0), сервис перезапущен.
+
+---
+
 ## [6.9.7] — 2026-07-03
 
 ### Fixed
