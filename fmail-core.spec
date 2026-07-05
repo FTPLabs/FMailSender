@@ -1,19 +1,28 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-FMailSender — PyInstaller 6.21 spec  (FAST BUILD: 2-4 min)
-============================================================
-ПЕРЕХОД С NUITKA → PYINSTALLER 6.21
+FMailSender — PyInstaller 6.21 spec  (ONEDIR mode — без AV-проблем)
+====================================================================
 
-Проблема:  Nuitka 2.6.x компилирует Python → C → EXE,  60+ мин на GitHub Actions.
-Решение:   PyInstaller 6.21 только упаковывает байткод — 2-4 мин.
-           PyInstaller 6.x «Parallel Metadata Scanning» — ещё быстрее.
+v7.0.3: ПЕРЕХОД НА ONEDIR (папка вместо одного файла)
 
-Запуск (из корня репо):
-  pyinstaller fmail-core.spec --noconfirm --distpath src-tauri/binaries
+ПРОБЛЕМА onefile: при каждом запуске PyInstaller распаковывает Python-среду
+в %TEMP%\PYINSTALLER_<hash>\ — AV сканирует temp и блокирует/замедляет процесс.
+Даже кеш по хешу не помогает: AV пересчитывает по расписанию.
 
-После сборки Tauri ожидает sidecar по имени:
-  src-tauri/binaries/fmail-core-x86_64-pc-windows-msvc.exe
-CI-шаг «Rename sidecar» делает это автоматически.
+РЕШЕНИЕ onedir: Python-среда распаковывается ОДИН РАЗ при первом запуске
+в %LOCALAPPDATA%\FMailSender\fmail-core\ через Tauri. После этого fmail-core.exe
+запускается НАПРЯМУЮ из уже существующих файлов — никакой распаковки при старте.
+AV сканирует файлы один раз, затем доверяет им как обычным приложениям.
+
+Структура dist/fmail-core/:
+  fmail-core.exe        ← запускаемый файл
+  _internal/            ← Python dll, .pyd, данные (PyInstaller 6.x)
+    python312.dll
+    *.pyd
+    ...
+
+CI зипует папку dist/fmail-core/ → src-tauri/binaries/fmail-core.zip
+Tauri встраивает ZIP через include_bytes! и распаковывает при первом запуске.
 """
 import sys
 from pathlib import Path
@@ -21,10 +30,6 @@ from pathlib import Path
 ROOT = Path(SPECPATH)
 
 # ── Hidden imports ────────────────────────────────────────────────────────────
-# PyInstaller не находит динамические импорты uvicorn / anyio / fastapi.
-# Без них сервер крашится с ModuleNotFoundError — главная причина
-# «ядро не запускается» при Nuitka/PyInstaller без явных хинтов.
-
 UVICORN_HIDDEN = [
     "uvicorn",
     "uvicorn.logging",
@@ -132,8 +137,6 @@ AIOSMTPLIB_HIDDEN = [
     "aiosmtplib.compat",
 ]
 
-# CRITICAL FIX: python-multipart required for FastAPI form endpoints
-# Without this, any form-data endpoint raises ModuleNotFoundError in frozen build
 MULTIPART_HIDDEN = [
     "multipart",
     "multipart.multipart",
@@ -261,52 +264,34 @@ a = Analysis(
     pathex=[str(ROOT)],
     binaries=[],
     datas=[
-        # HTML email шаблоны
         (str(ROOT / "templates"), "templates"),
-        # i18n строки (если есть)
         *(([(str(ROOT / "i18n"), "i18n")] if (ROOT / "i18n").exists() else [])),
     ],
     hiddenimports=ALL_HIDDEN,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # PyInstaller onefile: шаблоны доступны через sys._MEIPASS
-    # Сервер должен использовать get_resource_path() из utils.py
-    # КРИТИЧНО: исключить тяжёлые пакеты, которых нет в требованиях
-    # Это главная причина долгих сборок — PyInstaller сканирует всё подряд
     excludes=[
-        # GUI фреймворки
         "tkinter", "tkinter.ttk", "_tkinter",
         "PyQt5", "PyQt6", "PySide2", "PySide6",
         "wx", "gi", "GTK",
-        # Data Science (не используется в mailer)
         "matplotlib", "numpy", "pandas", "scipy", "sklearn",
         "tensorflow", "torch", "keras",
         "PIL", "Pillow",
-        # Jupyter / IPython
         "IPython", "jupyter", "notebook", "nbformat",
         "ipykernel", "ipywidgets",
-        # Cloud SDKs
         "boto3", "botocore", "s3transfer",
         "google.cloud", "google.api_core",
         "azure", "azure.core",
-        # Test infrastructure
-        "pytest", "unittest",
-        "_pytest",
-        # Build tools (distutils НЕЛЬЗЯ исключать — PyInstaller 6.x сам его алиасит)
+        "pytest", "unittest", "_pytest",
         "setuptools._vendor", "pkg_resources._vendor",
         "docutils", "sphinx",
-        # Unused DB
         "sqlalchemy", "alembic", "django", "flask",
-        # Unused heavy deps
-        "lxml",
-        "openpyxl",
-        "xlrd", "xlwt",
+        "lxml", "openpyxl", "xlrd", "xlwt",
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     noarchive=False,
-    # PyInstaller 6.x: оптимизация байткода
     optimize=2,
 )
 
@@ -323,32 +308,42 @@ a.datas = [
 
 pyz = PYZ(a.pure, a.zipped_data)
 
-# ── EXE (onefile) ─────────────────────────────────────────────────────────────
-# onefile: Tauri встраивает один .exe через include_bytes!
-# PyInstaller onefile при запуске распаковывается в %TEMP%\..._MEIXXXXX
-# Но только при первом запуске с данным хешом. Warm start — мгновенный.
+# ── EXE (onedir — НЕТ runtime_tmpdir, НЕТ self-extracting) ───────────────────
+# КЛЮЧЕВОЕ ОТЛИЧИЕ от onefile:
+#   - exclude_binaries=True → binaries/datas идут в COLLECT, не в EXE
+#   - Нет runtime_tmpdir — файлы не распаковываются при запуске
+#   - fmail-core.exe просто запускает Python из уже существующих файлов рядом
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
+    [],                   # ONEDIR: binaries/datas НЕ встраиваются в EXE
+    exclude_binaries=True,  # ONEDIR маркер — обязательно для COLLECT
     name="fmail-core",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,          # UPX выключен: -40% времени сборки, меньше AV ложных срабатываний
-    upx_exclude=[],
-    runtime_tmpdir=None,  # Стандартный %TEMP% — PyInstaller кеширует по хешу автоматически
-    console=True,          # console=True: stderr/stdout видны в логах Tauri
+    upx=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # version info
     version=None,
     uac_admin=False,
     uac_uiaccess=False,
+)
+
+# ── COLLECT (onedir — создаёт папку dist/fmail-core/) ─────────────────────────
+# Собирает всё вместе: EXE + DLLs + .pyd + данные → dist/fmail-core/
+# CI зипует эту папку → embed в Tauri EXE через include_bytes!
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="fmail-core",
 )
