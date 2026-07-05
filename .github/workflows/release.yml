@@ -220,10 +220,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           Write-Host "=== Tauri build ===" -ForegroundColor Cyan
-          # --bundles none: только raw EXE, без NSIS installer.
-          # Python core встроен через include_bytes! в main.rs.
+          # bundle.active=false в tauri.conf.json → cargo tauri build компилирует raw EXE
+          # без запуска NSIS/MSI bundler (быстрее, portable only).
           # Результат: src-tauri/target/x86_64-pc-windows-msvc/release/fmail-sender.exe
-          cargo tauri build --target x86_64-pc-windows-msvc --bundles none
+          cargo tauri build --target x86_64-pc-windows-msvc
           Write-Host "=== Tauri build done ===" -ForegroundColor Green
 
       # BUILD STEP 4: Финальный portable EXE
