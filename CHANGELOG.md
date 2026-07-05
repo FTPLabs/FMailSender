@@ -1,3 +1,42 @@
+## [7.0.2] — 2026-07-05
+
+### Fixed — Ядро теперь запускается надёжно
+
+- **КЛЮЧЕВОЙ ФИК — TEMP → LOCALAPPDATA для PyInstaller** (`src-tauri/src/main.rs`):
+  При запуске `fmail-core.exe` Tauri теперь переопределяет переменные окружения `TEMP`, `TMP`, `TMPDIR`
+  → `%LOCALAPPDATA%\FMailSender\pytemp`. PyInstaller onefile извлекает Python-окружение туда,
+  а не в `%TEMP%`. Результат:
+  - AV (Windows Defender / Kaspersky / ESET) доверяет `LOCALAPPDATA` больше чем `TEMP`
+  - Кеш персистентен (не удаляется автоматически между перезапусками)
+  - Тёплый старт: < 5 сек (файлы уже там, тот же хеш → пропуск распаковки)
+
+- **ALIVE MONITOR** (`src-tauri/src/main.rs`): `wait_for_port` теперь проверяет живость
+  процесса каждые 10 сек. Если ядро упало после `SPAWN_ALIVE_CHECK_S` — немедленно
+  возвращает `false` (раньше ждал все 180 сек впустую).
+
+- **SPAWN_ALIVE_CHECK_S 3 → 15** (`src-tauri/src/main.rs`): PyInstaller onefile при
+  первом запуске распаковывает ~10–15 сек. При 3 сек alive-check процесс считался
+  "живым" ещё до завершения распаковки. Теперь 15 сек гарантирует корректную проверку.
+
+- **PORT_WAIT_SECS 180 → 300** (`src-tauri/src/main.rs`): 5 мин запас для агрессивных
+  AV-сканеров. Тёплый старт не затронут (порт открывается за 3–8 сек).
+
+- **SPAWN_MAX_RETRIES 8 → 5** (`src-tauri/src/main.rs`): меньше бесполезных попыток,
+  быстрее переход к сообщению об ошибке.
+
+- **StartupOverlay — мгновенный failed UI** (`ui/src/components/StartupOverlay.tsx`):
+  При `coreStage='failed'` — сразу показывается красная панель с полным текстом ошибки
+  и большая кнопка «↺ Перезапустить ядро». Больше не надо ждать 60 сек.
+
+- **StartupOverlay — AV hint обновлён** (`ui/src/components/StartupOverlay.tsx`):
+  Подсказка теперь указывает конкретный путь `%LOCALAPPDATA%\FMailSender` для
+  добавления в исключения антивируса.
+
+- **Синхронизация версий**: `core/_version.py`, `ui/src/version.ts`,
+  `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` → 7.0.2.
+
+---
+
 ## [7.0.0] — 2026-07-05
 
 ### Fixed
