@@ -315,29 +315,29 @@ jobs:
           Write-Host "App size: ${appSz} MB"
 
 
-        - name: "Pre-compile Python bytecode — eliminates 300-500s AV startup delay"
-          shell: pwsh
-          run: |
-            # ROOT CAUSE FIX v7.1.4:
-            # --no-compile caused Python to compile 400+ .py files on user machine.
-            # AV scans each .py during compilation → 300-500 seconds first startup.
-            # Pre-compiled .pyc: Python loads bytecode directly → 20-60s startup.
-            Write-Host "=== Pre-compiling Python bytecode ===" -ForegroundColor Cyan
+      - name: "Pre-compile Python bytecode — eliminates 300-500s AV startup delay"
+        shell: pwsh
+        run: |
+          # ROOT CAUSE FIX v7.1.4:
+          # --no-compile caused Python to compile 400+ .py files on user machine.
+          # AV scans each .py during compilation → 300-500 seconds first startup.
+          # Pre-compiled .pyc: Python loads bytecode directly → 20-60s startup.
+          Write-Host "=== Pre-compiling Python bytecode ===" -ForegroundColor Cyan
 
-            # site-packages: fastapi, uvicorn, pydantic v2, cryptography, requests...
-            $sp = "build_embed/pyenv/Lib/site-packages"
-            python -m compileall $sp -q -j 0 2>&1 | Out-Null
+          # site-packages: fastapi, uvicorn, pydantic v2, cryptography, requests...
+          $sp = "build_embed/pyenv/Lib/site-packages"
+          python -m compileall $sp -q -j 0 2>&1 | Out-Null
 
-            # app/: main.py, core/, templates/
-            python -m compileall "build_embed/app" -q -j 0 2>&1 | Out-Null
+          # app/: main.py, core/, templates/
+          python -m compileall "build_embed/app" -q -j 0 2>&1 | Out-Null
 
-            $n = (Get-ChildItem "build_embed" -Recurse -Filter "*.pyc" -ErrorAction SilentlyContinue).Count
-            Write-Host "Pre-compiled: $n .pyc files" -ForegroundColor Green
-            if ($n -lt 200) {
-              Write-Host "WARNING: Only $n .pyc — compileall may have issues" -ForegroundColor Yellow
-            }
+          $n = (Get-ChildItem "build_embed" -Recurse -Filter "*.pyc" -ErrorAction SilentlyContinue).Count
+          Write-Host "Pre-compiled: $n .pyc files" -ForegroundColor Green
+          if ($n -lt 200) {
+            Write-Host "WARNING: Only $n .pyc — compileall may have issues" -ForegroundColor Yellow
+          }
 
-          - name: "Verify application imports with Embedded Python"
+      - name: "Verify application imports with Embedded Python"
         shell: pwsh
         run: |
           Write-Host "=== Import verification ===" -ForegroundColor Cyan

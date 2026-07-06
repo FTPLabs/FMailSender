@@ -33,7 +33,7 @@ import json
 import threading
 import time
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,15 +48,22 @@ from core.storage import (
 from core.proxy import ProxyManager, parse_proxy, validate_proxy
 from core._version import APP_VERSION
 
-# sender.py types used for actual campaign execution
-from core.sender import (
-    Recipient as _get_sender().Recipient,
-    CampaignConfig as _get_sender().CampaignConfig,
-    _get_sender().EmailTemplate,
-    _get_sender().SendingEngine,
-    _get_sender().get_smtp_config_for_domain,
-    _get_sender().test_smtp_connection,
-)
+# ── Lazy import of core.sender ────────────────────────────────────────────────
+# core.sender (2000+ строк): импортирует aiosmtplib, dnspython, dkim, oauth2.
+# Загрузка при старте добавляет 5-15 с и увеличивает AV-поверхность сканирования.
+# _get_sender() откладывает импорт до первого SMTP-теста или старта кампании.
+import types as _types
+
+_sender_module: Optional[_types.ModuleType] = None
+
+
+def _get_sender() -> _types.ModuleType:
+    """Возвращает модуль core.sender, загружая его лениво при первом вызове."""
+    global _sender_module
+    if _sender_module is None:
+        from core import sender as _s  # noqa: PLC0415
+        _sender_module = _s
+    return _sender_module
 
 # ── Global mutable state ──────────────────────────────────────────────────────
 _accounts: list[SmtpAccount]  = []
@@ -64,7 +71,7 @@ _proxies:  list[str]          = []
 _recipients: list[Recipient]  = []
 _campaign_cfg: CampaignConfig = CampaignConfig()
 _campaign_status: CampaignStatus = CampaignStatus()
-_engine: Optional[_get_sender().SendingEngine] = None
+_engine: Optional[Any] = None   # type at runtime: core.sender.SendingEngine
 _engine_thread: Optional[threading.Thread] = None
 
 # Run token: incremented on every start/stop so stale thread callbacks are ignored.

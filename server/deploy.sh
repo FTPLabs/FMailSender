@@ -49,6 +49,23 @@ else
     exit 1
 fi
 
+# HTTP health check — убеждаемся что API действительно отвечает, а не только systemd "active"
+HTTP_OK=0
+for i in 1 2 3 4 5; do
+    if curl -sf --max-time 5 http://127.0.0.1:8000/v1/verify > /dev/null 2>&1; then
+        echo "✅ HTTP /v1/verify: OK"
+        HTTP_OK=1
+        break
+    fi
+    echo "  ⏳ Health check attempt ${i}/5..."
+    sleep 3
+done
+if [ "${HTTP_OK}" -eq 0 ]; then
+    echo "❌ HTTP health check не прошёл — API не отвечает после 5 попыток"
+    journalctl -u "${SERVICE}" -n 20 --no-pager
+    exit 1
+fi
+
 # Проверяем nginx
 NGINX_STATUS=$(systemctl is-active nginx 2>/dev/null || echo "unknown")
 if [ "${NGINX_STATUS}" != "active" ]; then
