@@ -1,4 +1,41 @@
-## [7.0.3] — 2026-07-05
+## [7.1.3] — 2026-07-06
+
+    ### Fixed — Надёжный старт ядра и синхронизация версий
+
+    - **BOOT-FIX-1 — Таймаут 130 секунд устранён** (`src-tauri/src/main.rs`):
+    `PORT_WAIT_SECS` увеличен с 90 до **150 секунд**. Первый запуск: ZIP extraction (30–60 сек) +
+    AV сканирование site-packages (20–60 сек) + uvicorn import (5–15 сек) = суммарно >90 сек.
+    150 сек надёжно покрывает все сценарии без ухудшения тёплого старта (порт: 3–8 сек).
+
+    - **BOOT-FIX-2 — Нестабильный alive-check** (`src-tauri/src/main.rs`):
+    `SPAWN_ALIVE_CHECK_S` увеличен с 6 до **10 секунд**. Embedded Python при первом чтении
+    site-packages (fastapi/uvicorn) тратит 5–8 сек — alive-check через 6 сек мог дать false-negative.
+
+    - **VER-FIX-1 — Бесконечный reload (КРИТИЧЕСКИЙ)** (`ui/src/version.ts`):
+    `FRONTEND_VERSION` исправлен **"7.0.2" → "7.1.3"**. StartupOverlay делает
+    `window.location.reload()` при несовпадении FRONTEND_VERSION ≠ APP_VERSION.
+    Рассинхрон 7.0.2 ≠ 7.1.2 вызывал бесконечный reload при каждом запуске.
+
+    - **VER-FIX-2 — Синхронизация всех версий на 7.1.3**:
+    `core/_version.py`, `ui/src/version.ts`, `src-tauri/tauri.conf.json`,
+    `src-tauri/Cargo.toml` синхронизированы на **7.1.3**.
+
+    - **PTH-FIX — _pth path separator inconsistency** (`src-tauri/src/main.rs`):
+    Runtime check в `extract_core()` теперь проверяет оба разделителя
+    (`Lib\\site-packages` и `Lib/site-packages`), предотвращая дублирование записей в _pth.
+
+    - **CLEAN-1 — Удалён мёртвый код PyInstaller** (`main.py`):
+    Убран блок `sys._MEIPASS` (недостижим в Embedded CPython архитектуре).
+
+    - **UI-FIX — StartupOverlay таймер синхронизирован** (`ui/src/components/StartupOverlay.tsx`):
+    Прогресс `sec/300`→`sec/150`, красный порог `>300`→`>150`, AV hint "20–90"→"20–150 сек".
+
+    - **CI-FIX — release.yml default version** (`.github/workflows/release.yml`):
+    workflow_dispatch default: "7.1.0" → "7.1.3".
+
+    ---
+
+    ## [7.0.3] — 2026-07-05
 
 ### Fixed — Архитектурное исправление: PyInstaller ONEDIR вместо onefile
 

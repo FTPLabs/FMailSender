@@ -13,7 +13,17 @@ _Нет открытых проблем._
 
 ## ✅ ЗАКРЫТЫЕ ПРОБЛЕМЫ
 
-### BOOT-1 — Бесконечная загрузка при запуске
+### BOOT-2 — PORT_WAIT_SECS=90 вызывал ложный timeout (130 сек)
+    **Файлы:** `src-tauri/src/main.rs`, `ui/src/components/StartupOverlay.tsx`
+    **Решение v7.1.3:** PORT_WAIT_SECS 90→150, SPAWN_ALIVE_CHECK_S 6→10.
+    **Статус:** ✅ ЗАКРЫТА (v7.1.3, 2026-07-06)
+
+    ### VER-2 — FRONTEND_VERSION="7.0.2" вызывал бесконечный reload (КРИТИЧЕСКИЙ)
+    **Файлы:** `ui/src/version.ts`
+    **Решение v7.1.3:** Все версии синхронизированы на 7.1.3.
+    **Статус:** ✅ ЗАКРЫТА (v7.1.3, 2026-07-06)
+
+    ### BOOT-1 — Бесконечная загрузка при запуске
 **Файлы:** `core/license.py`, `src-tauri/src/main.rs`, `ui/src/components/StartupOverlay.tsx`, `.github/workflows/release.yml`
 **Описание:** Приложение показывало бесконечный экран загрузки и не запускалось.
 Три взаимосвязанные причины:

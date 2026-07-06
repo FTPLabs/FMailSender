@@ -81,11 +81,6 @@ def main() -> None:
     from core._version import APP_VERSION
     logger.info("FMailSender core v%s starting...", APP_VERSION)
 
-    # PyInstaller onefile: устанавливаем рабочую директорию в _MEIPASS
-    # чтобы относительные пути к templates/ и i18n/ работали
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        os.chdir(sys._MEIPASS)
-        logger.debug("Working dir set to: %s", sys._MEIPASS)
 
     try:
         # Импортируем приложение (FastAPI)

@@ -1,4 +1,4 @@
-// FMailSender Tauri shell v7.1.0
+// FMailSender Tauri shell v7.1.3
 //
 // АРХИТЕКТУРА v7.1.0: Embedded CPython (официальный python.exe от PSF)
 // ======================================================================
@@ -57,9 +57,9 @@ const CORE_HOST_PRIMARY:  &str = "127.0.0.1";
 const CORE_HOST_FALLBACK: &str = "localhost";
 
 // Embedded CPython запускает uvicorn за 3-8 сек (нет никакой распаковки при старте)
-const PORT_WAIT_SECS:      u64 = 90;
+const PORT_WAIT_SECS:      u64 = 150;
 const SPAWN_MAX_RETRIES:   u32 = 3;
-const SPAWN_ALIVE_CHECK_S: u64 = 6;
+const SPAWN_ALIVE_CHECK_S: u64 = 10;
 const SPAWN_RETRY_DELAY_S: u64 = 2;
 
 const STARTUP_LOG: &str = "startup.log";
@@ -313,7 +313,7 @@ fn extract_core(handle: &AppHandle) -> Option<()> {
         if pth_path.exists() {
             // Добавляем Lib/site-packages в путь поиска
             let existing = std::fs::read_to_string(&pth_path).unwrap_or_default();
-            if !existing.contains("Lib\\site-packages") {
+            if !existing.contains("Lib\\site-packages") && !existing.contains("Lib/site-packages") {
                 let updated = format!("{}\nLib\\site-packages\nimport site\n", existing.trim_end());
                 let _ = std::fs::write(&pth_path, updated);
             }
