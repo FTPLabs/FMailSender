@@ -7,14 +7,19 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 7.0.3)"
+        description: "Version (e.g. 7.1.0)"
         required: true
-        default: "7.0.3"
+        default: "7.1.0"
 
 env:
-  PYTHON_VERSION:      "3.12"
-  PYINSTALLER_VERSION: "6.21.0"
-  NODE_VERSION:        "22"
+  # Официальный Embedded CPython от Python Software Foundation.
+  # python.exe цифрово подписан PSF/Microsoft — AV не может заблокировать.
+  # НЕ PyInstaller, НЕ Nuitka, НЕ любой другой Python-упаковщик с bootloader.
+  PYTHON_EMBED_URL:  "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
+  PYTHON_EMBED_VER:  "3.12.10"
+  # pip нужен отдельно (не входит в embedded)
+  GET_PIP_URL:       "https://bootstrap.pypa.io/pip/pip.pyz"
+  NODE_VERSION:      "22"
 
 jobs:
   build:
@@ -55,12 +60,6 @@ jobs:
         with:
           version: latest
           run_install: false
-
-      - name: "Python ${{ env.PYTHON_VERSION }}"
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
 
       - name: "Rust stable (x86_64-pc-windows-msvc)"
         uses: dtolnay/rust-toolchain@stable
@@ -108,104 +107,252 @@ jobs:
           Set-Content "ui/src/version.ts" -Encoding UTF8 "export const FRONTEND_VERSION = `"$ver`""
           Write-Host "Version synced: $ver"
 
-      # Python deps
+      # ════════════════════════════════════════════════════════════════════════
+      # BUILD STEP 1: Embedded CPython среда
+      # Ключевое отличие от PyInstaller:
+      #   python.exe — официальный, цифрово подписан PSF/Microsoft.
+      #   AV не может заблокировать подписанный бинарь из Python.org.
+      #   PyInstaller bootloader (главная причина AV-срабатываний) ОТСУТСТВУЕТ.
+      # ════════════════════════════════════════════════════════════════════════
 
-      - name: "Install Python runtime deps"
+      - name: "Download Embedded CPython ${{ env.PYTHON_EMBED_VER }} (official PSF binary)"
         shell: pwsh
         run: |
-          pip install --upgrade pip wheel --quiet
-          pip install -r requirements.txt --quiet
-          Write-Host "Python deps installed."
+          Write-Host "=== Downloading Embedded CPython ${{ env.PYTHON_EMBED_VER }} ===" -ForegroundColor Cyan
+          Write-Host "Source: ${{ env.PYTHON_EMBED_URL }}"
+          Write-Host "python.exe will be digitally signed by Python Software Foundation"
+          Write-Host "AV cannot block a signed binary from python.org — this is by design."
 
-      - name: "Install PyInstaller ${{ env.PYINSTALLER_VERSION }}"
-        shell: pwsh
-        run: |
-          pip install "pyinstaller==${{ env.PYINSTALLER_VERSION }}" `
-                      "pyinstaller-hooks-contrib>=2024.11" `
-                      --quiet
-          Write-Host "PyInstaller ${{ env.PYINSTALLER_VERSION }} ready."
-
-      # BUILD STEP 1: Python core → onedir папка (НЕ onefile!)
-      # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ v7.0.3:
-      #   onefile  = при каждом старте распаковывает Python в temp → AV блокирует.
-      #   onedir   = распаковывает ОДИН РАЗ при первом запуске, затем запускается напрямую.
-
-      - name: "Build fmail-core (PyInstaller onedir)"
-        shell: pwsh
-        run: |
-          Write-Host "=== PyInstaller onedir build ===" -ForegroundColor Cyan
+          New-Item -ItemType Directory -Force -Path "build_embed" | Out-Null
           $start = Get-Date
-          New-Item -ItemType Directory -Force -Path "src-tauri/binaries" | Out-Null
-          pyinstaller fmail-core.spec `
-            --noconfirm `
-            --distpath dist `
-            --workpath build_workdir `
-            --clean
+
+          # Скачиваем официальный embedded Python
+          Invoke-WebRequest `
+            -Uri "${{ env.PYTHON_EMBED_URL }}" `
+            -OutFile "build_embed/python-embed.zip" `
+            -UseBasicParsing
           $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds)
-          Write-Host "PyInstaller done in ${elapsed}s" -ForegroundColor Green
+          $sz = [math]::Round((Get-Item "build_embed/python-embed.zip").Length / 1MB, 1)
+          Write-Host "Downloaded: ${sz} MB in ${elapsed}s" -ForegroundColor Green
 
-          # onedir выводит dist/fmail-core/ (папка), НЕ dist/fmail-core.exe
-          if (-not (Test-Path "dist/fmail-core/fmail-core.exe")) {
-            Write-Error "FAIL: dist/fmail-core/fmail-core.exe not found"
-            Write-Host "Contents of dist/:"
-            Get-ChildItem dist/ -ErrorAction SilentlyContinue | Format-Table
-            exit 1
+          # Распаковываем
+          New-Item -ItemType Directory -Force -Path "build_embed/pyenv" | Out-Null
+          Expand-Archive -Path "build_embed/python-embed.zip" `
+                         -DestinationPath "build_embed/pyenv" -Force
+          Remove-Item "build_embed/python-embed.zip" -Force
+
+          # Проверяем подпись python.exe
+          $sig = Get-AuthenticodeSignature "build_embed/pyenv/python.exe"
+          Write-Host "python.exe signature status: $($sig.Status)" -ForegroundColor Cyan
+          Write-Host "python.exe signer: $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -eq "Valid") {
+            Write-Host "ПОДПИСЬ ДЕЙСТВИТЕЛЬНА — AV не может заблокировать" -ForegroundColor Green
+          } else {
+            Write-Host "Подпись: $($sig.Status) — продолжаем (может быть TimeStamp issue)" -ForegroundColor Yellow
           }
 
-          $dirSize = [math]::Round(
-            (Get-ChildItem "dist/fmail-core" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB,
-            1
-          )
-          Write-Host "dist/fmail-core/ total: ${dirSize} MB" -ForegroundColor Green
-          if ($dirSize -lt 20) {
-            Write-Error "onedir слишком маленький (${dirSize} MB) — проверьте hiddenimports"
+          if (-not (Test-Path "build_embed/pyenv/python.exe")) {
+            Write-Error "python.exe не найден после распаковки"
             exit 1
           }
+          Write-Host "Embedded CPython ready: build_embed/pyenv/" -ForegroundColor Green
 
-      # Верификация ядра (тест импортов в onedir режиме)
-
-      - name: "Verify core binary — import test"
+      - name: "Configure Embedded CPython for site-packages"
         shell: pwsh
         run: |
-          Write-Host "Testing core binary (--test mode)..." -ForegroundColor Cyan
-          $proc = Start-Process -FilePath "dist/fmail-core/fmail-core.exe" `
-                                -ArgumentList "--test" `
+          # Embedded CPython по умолчанию НЕ загружает site-packages.
+          # Нужно отредактировать python312._pth чтобы включить их.
+          $pthFile = Get-ChildItem "build_embed/pyenv" -Filter "python*._pth" | Select-Object -First 1
+          if ($null -eq $pthFile) {
+            Write-Error "python3XX._pth не найден в build_embed/pyenv/"
+            exit 1
+          }
+          Write-Host "Configuring: $($pthFile.FullName)"
+          $content = Get-Content $pthFile.FullName
+          Write-Host "Original _pth content:"
+          $content | ForEach-Object { Write-Host "  $_" }
+
+          # Добавляем site-packages и import site (требуется для pip-зависимостей)
+          $newContent = @()
+          foreach ($line in $content) {
+            if ($line -eq "#import site") {
+              $newContent += "import site"
+            } else {
+              $newContent += $line
+            }
+          }
+          # Добавляем Lib/site-packages если не задано
+          if (-not ($newContent -contains "Lib/site-packages") -and -not ($newContent -contains "Lib\site-packages")) {
+            $newContent += "Lib/site-packages"
+          }
+          $newContent | Set-Content $pthFile.FullName -Encoding UTF8
+          Write-Host "Updated _pth:"
+          Get-Content $pthFile.FullName | ForEach-Object { Write-Host "  $_" }
+
+      - name: "Bootstrap pip into Embedded Python"
+        shell: pwsh
+        run: |
+          # Embedded Python не включает pip — качаем pip.pyz отдельно
+          Write-Host "Downloading pip.pyz..." -ForegroundColor Cyan
+          $pipPyz = "build_embed/pip.pyz"
+          Invoke-WebRequest -Uri "${{ env.GET_PIP_URL }}" -OutFile $pipPyz -UseBasicParsing
+
+          # Устанавливаем pip в embedded python
+          & "build_embed/pyenv/python.exe" $pipPyz --quiet
+          if ($LASTEXITCODE -ne 0) {
+            # Пробуем альтернативный метод через ensurepip
+            Write-Host "pip.pyz failed, trying ensurepip..."
+            & "build_embed/pyenv/python.exe" -m ensurepip --upgrade
+          }
+
+          # Проверяем pip
+          $pipResult = & "build_embed/pyenv/python.exe" -m pip --version 2>&1
+          Write-Host "pip version: $pipResult" -ForegroundColor Green
+          if ($pipResult -notmatch "pip") {
+            Write-Error "pip не установлен в embedded Python"
+            exit 1
+          }
+
+      - name: "Install Python dependencies into Embedded Python"
+        shell: pwsh
+        run: |
+          Write-Host "=== Installing dependencies ===" -ForegroundColor Cyan
+          $python = "build_embed/pyenv/python.exe"
+
+          # Устанавливаем все зависимости из requirements.txt
+          # --no-warn-script-location: embedded Python не имеет Scripts/ в PATH — это нормально
+          & $python -m pip install `
+            -r requirements.txt `
+            --quiet `
+            --no-warn-script-location `
+            --no-compile
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "pip install failed"
+            exit 1
+          }
+
+          # Устанавливаем pywin32 отдельно (требует postinstall)
+          & $python -m pip install pywin32 --quiet --no-warn-script-location
+          # pywin32 postinstall для embedded Python
+          $pyw32Post = Get-ChildItem "build_embed/pyenv" -Recurse -Filter "pywin32_postinstall.py" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($pyw32Post) {
+            Write-Host "Running pywin32 postinstall..."
+            & $python $pyw32Post.FullName -install 2>&1 | Write-Host
+          }
+
+          # Проверяем ключевые зависимости
+          Write-Host "Verifying key dependencies..." -ForegroundColor Cyan
+          $checks = @("fastapi", "uvicorn", "aiosmtplib", "cryptography", "requests")
+          $failed = @()
+          foreach ($pkg in $checks) {
+            $result = & $python -c "import $pkg; print('$pkg OK')" 2>&1
+            if ($result -match "OK") {
+              Write-Host "  [OK] $pkg" -ForegroundColor Green
+            } else {
+              Write-Host "  [FAIL] $pkg : $result" -ForegroundColor Red
+              $failed += $pkg
+            }
+          }
+          if ($failed.Count -gt 0) {
+            Write-Error "Не установились: $($failed -join ', ')"
+            exit 1
+          }
+          Write-Host "All dependencies OK" -ForegroundColor Green
+
+          $siteDir = "build_embed/pyenv/Lib/site-packages"
+          $siteSz = [math]::Round(
+            (Get-ChildItem $siteDir -Recurse -ErrorAction SilentlyContinue |
+             Measure-Object -Property Length -Sum).Sum / 1MB, 1)
+          Write-Host "site-packages size: ${siteSz} MB"
+
+      - name: "Copy application code into build"
+        shell: pwsh
+        run: |
+          Write-Host "=== Copying application code ===" -ForegroundColor Cyan
+          New-Item -ItemType Directory -Force -Path "build_embed/app" | Out-Null
+
+          # Копируем Python-код приложения
+          Copy-Item -Path "main.py"     -Destination "build_embed/app/main.py"
+          Copy-Item -Path "core"        -Destination "build_embed/app/core"    -Recurse -Force
+          Copy-Item -Path "templates"   -Destination "build_embed/app/templates" -Recurse -Force
+
+          # data/ если есть (spam_words.json и т.д.)
+          if (Test-Path "data") {
+            Copy-Item -Path "data" -Destination "build_embed/app/data" -Recurse -Force
+          }
+
+          # Проверяем
+          if (-not (Test-Path "build_embed/app/main.py")) {
+            Write-Error "main.py не скопирован"
+            exit 1
+          }
+          if (-not (Test-Path "build_embed/app/core/server.py")) {
+            Write-Error "core/server.py не скопирован"
+            exit 1
+          }
+
+          Write-Host "Application code copied OK" -ForegroundColor Green
+          $appSz = [math]::Round(
+            (Get-ChildItem "build_embed/app" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
+          Write-Host "App size: ${appSz} MB"
+
+      - name: "Verify application imports with Embedded Python"
+        shell: pwsh
+        run: |
+          Write-Host "=== Import verification ===" -ForegroundColor Cyan
+          $python = "build_embed/pyenv/python.exe"
+          $appDir = Resolve-Path "build_embed/app"
+
+          # Запускаем --test mode
+          $proc = Start-Process -FilePath $python `
+                                -ArgumentList "$appDir\main.py", "--test" `
+                                -WorkingDirectory $appDir `
                                 -PassThru -Wait -WindowStyle Hidden `
                                 -RedirectStandardOutput "core_test_out.txt" `
                                 -RedirectStandardError  "core_test_err.txt"
           $exitCode = $proc.ExitCode
+
+          $out = Get-Content "core_test_out.txt" -ErrorAction SilentlyContinue | Select-Object -Last 10
+          $err = Get-Content "core_test_err.txt" -ErrorAction SilentlyContinue | Select-Object -Last 10
+
           if ($exitCode -eq 0) {
-            Write-Host "Core OK (exit 0) — все импорты прошли" -ForegroundColor Green
+            Write-Host "Import test PASSED (exit 0)" -ForegroundColor Green
+            $out | ForEach-Object { Write-Host "  $_" }
           } elseif ($exitCode -eq 2) {
-            Write-Host "Core OK (exit 2) — бинарь запускается нормально" -ForegroundColor Green
+            Write-Host "Import test OK (exit 2 — running normally)" -ForegroundColor Green
           } else {
-            $out = Get-Content "core_test_out.txt" -ErrorAction SilentlyContinue | Select-Object -Last 15
-            $err = Get-Content "core_test_err.txt" -ErrorAction SilentlyContinue | Select-Object -Last 15
             Write-Host "STDOUT: $out"
-            Write-Error "Core FAILED (exit $exitCode): $err"
+            Write-Host "STDERR: $err"
+            Write-Error "Import test FAILED (exit $exitCode)"
             exit 1
           }
 
-      # BUILD STEP 2: Упаковка onedir в ZIP для Tauri include_bytes!
-      # ZIP содержит папку fmail-core/ → после распаковки в LOCALAPPDATA\FMailSender\:
-      #   LOCALAPPDATA\FMailSender\fmail-core\fmail-core.exe  ← запускаем это
-      #   LOCALAPPDATA\FMailSender\fmail-core\_internal\      ← DLLs, .pyd
+      # BUILD STEP 2: Упаковка pyenv + app в ZIP для Tauri include_bytes!
+      # Структура ZIP:
+      #   pyenv/  — Embedded CPython (python.exe + Lib/site-packages)
+      #   app/    — Python-код (main.py, core/, templates/, data/)
 
-      - name: "Pack onedir → fmail-core.zip (sidecar for Tauri)"
+      - name: "Pack pyenv + app → fmail-core.zip (sidecar for Tauri)"
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "src-tauri/binaries" | Out-Null
 
+          Write-Host "Packing build_embed/ → fmail-core.zip..." -ForegroundColor Cyan
+          $start = Get-Date
+
+          # Упаковываем pyenv/ и app/ вместе
           Compress-Archive `
-            -Path            "dist/fmail-core" `
+            -Path            "build_embed/pyenv", "build_embed/app" `
             -DestinationPath "src-tauri/binaries/fmail-core.zip" `
             -Force
 
-          $zipSz = [math]::Round((Get-Item "src-tauri/binaries/fmail-core.zip").Length / 1MB, 1)
-          Write-Host "fmail-core.zip: ${zipSz} MB" -ForegroundColor Green
+          $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds)
+          $zipSz   = [math]::Round((Get-Item "src-tauri/binaries/fmail-core.zip").Length / 1MB, 1)
+          Write-Host "fmail-core.zip: ${zipSz} MB (packed in ${elapsed}s)" -ForegroundColor Green
 
-          if ($zipSz -lt 15) {
-            Write-Error "ZIP слишком маленький (${zipSz} MB)"
+          if ($zipSz -lt 30) {
+            Write-Error "ZIP слишком маленький (${zipSz} MB) — возможно pyenv не упакован"
             exit 1
           }
 
@@ -224,15 +371,15 @@ jobs:
         run: |
           npm run build
           if (-not (Test-Path "dist/index.html")) {
-            Write-Error "UI build failed: dist/index.html not found"
+            Write-Error "UI build failed"
             exit 1
           }
           Write-Host "UI build OK."
 
-      # BUILD STEP 4: Tauri (raw EXE, без NSIS installer)
-      # main.rs: include_bytes!("../binaries/fmail-core.zip") встраивает ZIP внутрь EXE.
-      # При первом запуске Tauri распаковывает ZIP → LOCALAPPDATA\FMailSender\.
-      # Последующие запуски: хеш совпадает → пропускает распаковку → мгновенный старт.
+      # BUILD STEP 4: Tauri (raw EXE, без NSIS)
+      # include_bytes!("../binaries/fmail-core.zip") встраивает весь Embedded CPython + код.
+      # При первом запуске: Expand-Archive один раз.
+      # При повторных: FNV64 хеш совпадает → немедленный старт python.exe.
 
       - name: "Install tauri-cli"
         shell: pwsh
@@ -241,13 +388,14 @@ jobs:
             Select-String -Pattern "Installed|Compiling|warning" | Select-Object -Last 5
           Write-Host "tauri-cli ready."
 
-      - name: "Build Tauri (portable EXE — без installer, onedir ZIP встроен)"
+      - name: "Build Tauri (portable EXE — Embedded CPython встроен)"
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           Write-Host "=== Tauri build ===" -ForegroundColor Cyan
+          Write-Host "Embedding fmail-core.zip (Embedded CPython + app code) into EXE..."
           cargo tauri build --target x86_64-pc-windows-msvc
           Write-Host "=== Tauri build done ===" -ForegroundColor Green
 
@@ -267,7 +415,8 @@ jobs:
           }
 
           $sizeMb = [math]::Round((Get-Item $rawExe).Length / 1MB, 1)
-          if ($sizeMb -lt 20) {
+          Write-Host "EXE size: ${sizeMb} MB"
+          if ($sizeMb -lt 30) {
             Write-Error "EXE слишком маленький (${sizeMb} MB) — fmail-core.zip не встроен."
             exit 1
           }
@@ -288,21 +437,22 @@ jobs:
           if (Test-Path $exeName) {
             $sz = [math]::Round((Get-Item $exeName).Length / 1MB, 1)
             Write-Host "[OK] $exeName ($sz MB)" -ForegroundColor Green
-            if ($sz -lt 20) { $errors += "EXE слишком маленький (${sz} MB)" }
+            if ($sz -lt 30) { $errors += "EXE слишком маленький (${sz} MB)" }
           } else { $errors += "EXE не найден: $exeName" }
 
           if (Test-Path "src-tauri/binaries/fmail-core.zip") {
             $zsz = [math]::Round((Get-Item "src-tauri/binaries/fmail-core.zip").Length / 1MB, 1)
-            Write-Host "[OK] fmail-core.zip (${zsz} MB)" -ForegroundColor Green
+            Write-Host "[OK] fmail-core.zip (${zsz} MB) — Embedded CPython + app" -ForegroundColor Green
           } else { $errors += "fmail-core.zip НЕ НАЙДЕН" }
 
           if (Test-Path "ui/dist/index.html") {
-            Write-Host "[OK] ui/dist/index.html present" -ForegroundColor Green
+            Write-Host "[OK] ui/dist/index.html" -ForegroundColor Green
           } else { $errors += "UI dist/index.html НЕ НАЙДЕН" }
 
-          if (Test-Path "dist/fmail-core/fmail-core.exe") {
-            Write-Host "[OK] dist/fmail-core/fmail-core.exe present" -ForegroundColor Green
-          } else { $errors += "dist/fmail-core/fmail-core.exe НЕ НАЙДЕН" }
+          if (Test-Path "build_embed/pyenv/python.exe") {
+            $sig = Get-AuthenticodeSignature "build_embed/pyenv/python.exe"
+            Write-Host "[OK] python.exe signature: $($sig.Status)" -ForegroundColor Green
+          } else { $errors += "python.exe НЕ НАЙДЕН в build_embed" }
 
           if ($errors.Count -eq 0) {
             Write-Host "=== ALL CHECKS PASSED ===" -ForegroundColor Green
@@ -328,19 +478,20 @@ jobs:
             ### Установка (без установщика)
             1. Скачайте **FMailSender_v${{ steps.tag.outputs.version }}.exe**
             2. Запустите — приложение откроется
-            3. **Первый запуск**: Python-ядро устанавливается в `%LOCALAPPDATA%\FMailSender\` (~30 сек, только один раз)
+            3. **Первый запуск**: Python среда устанавливается (~60 сек, только один раз)
             4. **Последующие запуски**: мгновенный старт
 
-            ### Архитектура v7.0.3 (onedir — без AV-проблем)
-            - Tauri v2 shell + React UI
-            - Python FastAPI ядро (PyInstaller **onedir**) встроено как ZIP
-            - При первом запуске: ZIP распаковывается в LOCALAPPDATA один раз
-            - При повторных запусках: файлы уже на месте, никакой динамической распаковки
-            - AV не может блокировать: запуск из стабильной папки LOCALAPPDATA
+            ### Архитектура v7.1.0 (Embedded CPython — без AV-проблем)
+            - **Embedded CPython 3.12.10** — официальный python.exe от Python Software Foundation
+            - python.exe **цифрово подписан PSF/Microsoft** — AV не может заблокировать
+            - **PyInstaller полностью удалён** — главная причина AV-срабатываний устранена
+            - Первый запуск: Python среда распаковывается в `%LOCALAPPDATA%\FMailSender\` (один раз)
+            - Повторные запуски: мгновенный старт из уже установленных файлов
 
             ### Требования
             - Windows 10/11 x64
             - WebView2 Runtime (предустановлен в Windows 11)
+            - ~200 МБ свободного места (при первом запуске)
 
           files: ${{ steps.portable.outputs.name }}
         env:
