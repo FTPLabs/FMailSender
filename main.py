@@ -104,7 +104,7 @@ def main() -> None:
     except ImportError as exc:
         logger.critical(
             "Import error — возможно, отсутствует зависимость: %s\n"
-            "Это PyInstaller-сборка? Проверьте hiddenimports в fmail-core.spec.",
+            "Проверьте зависимости: убедитесь что все пакеты из requirements.txt присутствуют в pyenv/Lib/site-packages.",
             exc,
             exc_info=True,
         )
