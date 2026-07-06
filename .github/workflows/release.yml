@@ -161,6 +161,9 @@ jobs:
         run: |
           # Embedded CPython по умолчанию НЕ загружает site-packages.
           # Нужно отредактировать python312._pth чтобы включить их.
+          # ТАКЖЕ: добавляем ../app в sys.path чтобы 'from core.server import app' работало.
+          # _pth пути — относительно папки python.exe (build_embed/pyenv/),
+          # поэтому ../app = build_embed/app/
           $pthFile = Get-ChildItem "build_embed/pyenv" -Filter "python*._pth" | Select-Object -First 1
           if ($null -eq $pthFile) {
             Write-Error "python3XX._pth не найден в build_embed/pyenv/"
@@ -183,6 +186,11 @@ jobs:
           # Добавляем Lib/site-packages если не задано
           if (-not ($newContent -contains "Lib/site-packages") -and -not ($newContent -contains "Lib\site-packages")) {
             $newContent += "Lib/site-packages"
+          }
+          # КЛЮЧЕВОЕ: добавляем ../app — путь к коду приложения (main.py, core/, templates/)
+          # Без этого Embedded Python не найдёт 'core' при запуске main.py
+          if (-not ($newContent -contains "../app")) {
+            $newContent += "../app"
           }
           $newContent | Set-Content $pthFile.FullName -Encoding UTF8
           Write-Host "Updated _pth:"
