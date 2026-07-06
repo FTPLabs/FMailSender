@@ -1,3 +1,28 @@
+## [7.1.5] — 2026-07-06
+
+### Fixed — CI/CD и синхронизация метаданных
+
+- **FIX CI-1 — appleboy/ssh-action обновлён до v1.2.5** (`.github/workflows/release.yml`):
+  Устранены известные проблемы v1.0.3 с обработкой сигналов и timeout handling.
+
+- **FIX CI-2 — pip install добавлен в deploy step** (`.github/workflows/release.yml`):
+  После `git reset --hard origin/main` теперь выполняется
+  `pip3 install -q -r server/requirements.txt`.
+  Без этого обновление зависимостей сервера не применялось на VPS.
+
+- **FIX CI-3 — HTTP health check в deploy step** (`.github/workflows/release.yml`):
+  После `systemctl restart fmailsender` добавлена проверка `/health` (5 попыток × 3 сек).
+  Workflow теперь завершается с ошибкой если API не отвечает, а не молча продолжает.
+
+- **FIX META-1 — Комментарий версии в main.rs** (`src-tauri/src/main.rs:1`):
+  Строка `// FMailSender Tauri shell v7.1.3` исправлена на `v7.1.4`.
+
+- **FIX META-2 — ui/package.json синхронизирован** (`ui/package.json`):
+  `"version": "6.0.0"` → `"7.1.4"`. Sync version шаг в release.yml
+  не обновлял ui/package.json (только Cargo.toml, tauri.conf.json, _version.py, version.ts).
+
+---
+
 ## [7.1.4] — 2026-07-06
 
     ### Fixed — Устранена причина 300-500 секундного запуска

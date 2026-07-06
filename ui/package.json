@@ -1,6 +1,6 @@
 {
   "name": "fmailsender-ui",
-  "version": "6.0.0",
+  "version": "7.1.4",
   "private": true,
   "type": "module",
   "scripts": {

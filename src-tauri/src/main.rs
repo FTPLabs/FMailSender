@@ -1,4 +1,4 @@
-// FMailSender Tauri shell v7.1.3
+// FMailSender Tauri shell v7.1.4
 //
 // АРХИТЕКТУРА v7.1.0: Embedded CPython (официальный python.exe от PSF)
 // ======================================================================

@@ -104,6 +104,8 @@ jobs:
           $cargo | Set-Content "src-tauri/Cargo.toml" -Encoding UTF8
           Set-Content "core/_version.py"  -Encoding UTF8 "APP_VERSION = `"$ver`""
           Set-Content "ui/src/version.ts" -Encoding UTF8 "export const FRONTEND_VERSION = `"$ver`""
+          # FIX META-2: sync ui/package.json version (was missing from sync step)
+          (Get-Content "ui/package.json" -Raw) -replace '"version": "[^"]*"', ('"version": "' + $ver + '"') | Set-Content "ui/package.json" -Encoding UTF8
           Write-Host "Version synced: $ver"
 
       # ════════════════════════════════════════════════════════════════════════
@@ -547,7 +549,7 @@ jobs:
       contents: read
     steps:
       - name: "SSH deploy to VPS"
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host:     ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
@@ -560,10 +562,19 @@ jobs:
             git fetch origin main --quiet
             git reset --hard origin/main --quiet
             echo "Code updated: $(git log --oneline -1)"
+            # Install/update Python dependencies
+            pip3 install -q -r server/requirements.txt
             if systemctl is-active --quiet fmailsender; then
               systemctl restart fmailsender
               sleep 3
-              systemctl is-active --quiet fmailsender && echo "Service: ACTIVE" || echo "Service: restarted"
+              systemctl is-active --quiet fmailsender || { echo 'Service FAILED to restart'; journalctl -u fmailsender -n 20 --no-pager; exit 1; }
+              HTTP_OK=0
+              for i in 1 2 3 4 5; do
+                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:8000/health || echo '000')
+                if [ "${HTTP_CODE}" = "200" ]; then echo "✅ HTTP /health: OK"; HTTP_OK=1; break; fi
+                echo "  ⏳ Health check ${i}/5 (HTTP ${HTTP_CODE})..."; sleep 3
+              done
+              [ "${HTTP_OK}" -eq 1 ] || { echo '❌ HTTP /health failed'; journalctl -u fmailsender -n 20 --no-pager; exit 1; }
             else
               echo "Service not running — skipping restart"
             fi
