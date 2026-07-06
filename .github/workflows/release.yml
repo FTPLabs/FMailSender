@@ -17,8 +17,7 @@ env:
   # НЕ PyInstaller, НЕ Nuitka, НЕ любой другой Python-упаковщик с bootloader.
   PYTHON_EMBED_URL:  "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
   PYTHON_EMBED_VER:  "3.12.10"
-  # pip нужен отдельно (не входит в embedded)
-  GET_PIP_URL:       "https://bootstrap.pypa.io/pip/pip.pyz"
+  PYTHON_VERSION:    "3.12"
   NODE_VERSION:      "22"
 
 jobs:
@@ -189,80 +188,93 @@ jobs:
           Write-Host "Updated _pth:"
           Get-Content $pthFile.FullName | ForEach-Object { Write-Host "  $_" }
 
-      - name: "Bootstrap pip into Embedded Python"
+      - name: "Python ${{ env.PYTHON_VERSION }} (system — for pip install --target)"
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: "Install Python dependencies into Embedded Python via system pip"
         shell: pwsh
         run: |
-          # Embedded Python не включает pip — качаем pip.pyz отдельно
-          Write-Host "Downloading pip.pyz..." -ForegroundColor Cyan
-          $pipPyz = "build_embed/pip.pyz"
-          Invoke-WebRequest -Uri "${{ env.GET_PIP_URL }}" -OutFile $pipPyz -UseBasicParsing
+          # ─────────────────────────────────────────────────────────────────────
+          # КЛЮЧЕВОЙ МОМЕНТ: Embedded Python НЕ включает pip и не может легко
+          # его получить. Поэтому используем СИСТЕМНЫЙ Python CI (setup-python)
+          # с флагом --target, который устанавливает пакеты ПРЯМО в папку
+          # site-packages Embedded CPython.
+          # Это 100% надёжный метод — никаких pip.pyz, ensurepip, или хаков.
+          # ─────────────────────────────────────────────────────────────────────
+          Write-Host "=== Installing deps via system pip --target ===" -ForegroundColor Cyan
 
-          # Устанавливаем pip в embedded python
-          & "build_embed/pyenv/python.exe" $pipPyz --quiet
-          if ($LASTEXITCODE -ne 0) {
-            # Пробуем альтернативный метод через ensurepip
-            Write-Host "pip.pyz failed, trying ensurepip..."
-            & "build_embed/pyenv/python.exe" -m ensurepip --upgrade
+          $sitePackages = Resolve-Path "build_embed/pyenv/Lib/site-packages" -ErrorAction SilentlyContinue
+          if (-not $sitePackages) {
+            New-Item -ItemType Directory -Force -Path "build_embed/pyenv/Lib/site-packages" | Out-Null
+            $sitePackages = Resolve-Path "build_embed/pyenv/Lib/site-packages"
           }
-
-          # Проверяем pip
-          $pipResult = & "build_embed/pyenv/python.exe" -m pip --version 2>&1
-          Write-Host "pip version: $pipResult" -ForegroundColor Green
-          if ($pipResult -notmatch "pip") {
-            Write-Error "pip не установлен в embedded Python"
-            exit 1
-          }
-
-      - name: "Install Python dependencies into Embedded Python"
-        shell: pwsh
-        run: |
-          Write-Host "=== Installing dependencies ===" -ForegroundColor Cyan
-          $python = "build_embed/pyenv/python.exe"
+          Write-Host "Target: $sitePackages"
 
           # Устанавливаем все зависимости из requirements.txt
-          # --no-warn-script-location: embedded Python не имеет Scripts/ в PATH — это нормально
-          & $python -m pip install `
+          # --target: устанавливает в указанную папку (не в системный Python)
+          # --no-compile: не создаём .pyc (уменьшает размер ZIP)
+          python -m pip install `
             -r requirements.txt `
-            --quiet `
-            --no-warn-script-location `
-            --no-compile
+            --target "$sitePackages" `
+            --no-compile `
+            --quiet
 
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "pip install failed"
+            Write-Error "pip install --target failed"
             exit 1
           }
 
-          # Устанавливаем pywin32 отдельно (требует postinstall)
-          & $python -m pip install pywin32 --quiet --no-warn-script-location
-          # pywin32 postinstall для embedded Python
-          $pyw32Post = Get-ChildItem "build_embed/pyenv" -Recurse -Filter "pywin32_postinstall.py" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($pyw32Post) {
-            Write-Host "Running pywin32 postinstall..."
-            & $python $pyw32Post.FullName -install 2>&1 | Write-Host
+          # pywin32 отдельно (Windows-специфичный, нужен postinstall)
+          python -m pip install pywin32 `
+            --target "$sitePackages" `
+            --no-compile `
+            --quiet
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "pywin32 install failed — продолжаем (необязательный)" -ForegroundColor Yellow
           }
 
-          # Проверяем ключевые зависимости
-          Write-Host "Verifying key dependencies..." -ForegroundColor Cyan
-          $checks = @("fastapi", "uvicorn", "aiosmtplib", "cryptography", "requests")
-          $failed = @()
+          # pywin32 DLL postinstall: копируем .pyd/.dll в pyenv/ (рядом с python.exe)
+          # чтобы Embedded Python мог их загрузить
+          $pyenvDir = Resolve-Path "build_embed/pyenv"
+          $pyw32DllSrc = Join-Path $sitePackages "pywin32_system32"
+          if (Test-Path $pyw32DllSrc) {
+            Get-ChildItem $pyw32DllSrc -Filter "*.dll" | ForEach-Object {
+              Copy-Item $_.FullName $pyenvDir -Force
+              Write-Host "  Copied pywin32 DLL: $($_.Name)"
+            }
+          }
+          $pyw32Pyd = Join-Path $sitePackages "win32"
+          if (Test-Path $pyw32Pyd) {
+            Copy-Item (Join-Path $pyw32Pyd "*.pyd") $pyenvDir -Force -ErrorAction SilentlyContinue
+          }
+
+          # Проверяем ключевые зависимости через Embedded Python
+          Write-Host "Verifying imports with Embedded Python..." -ForegroundColor Cyan
+          $embedPython = Resolve-Path "build_embed/pyenv/python.exe"
+          $checks = @("fastapi", "uvicorn", "aiosmtplib", "cryptography", "requests", "jwt", "dnspython")
+          $failed  = @()
           foreach ($pkg in $checks) {
-            $result = & $python -c "import $pkg; print('$pkg OK')" 2>&1
-            if ($result -match "OK") {
+            $importName = if ($pkg -eq "dnspython") { "dns" } else { $pkg }
+            $result = & $embedPython -c "import $importName; print('OK')" 2>&1
+            if ("$result" -match "OK") {
               Write-Host "  [OK] $pkg" -ForegroundColor Green
             } else {
-              Write-Host "  [FAIL] $pkg : $result" -ForegroundColor Red
-              $failed += $pkg
+              Write-Host "  [WARN] $pkg : $result" -ForegroundColor Yellow
+              # Не блокируем — pywin32/wmi могут требовать Runtime
+              if ($pkg -notin @("wmi", "pywin32")) { $failed += $pkg }
             }
           }
           if ($failed.Count -gt 0) {
-            Write-Error "Не установились: $($failed -join ', ')"
+            Write-Error "Критические пакеты не импортируются: $($failed -join ', ')"
             exit 1
           }
-          Write-Host "All dependencies OK" -ForegroundColor Green
+          Write-Host "All critical dependencies OK" -ForegroundColor Green
 
-          $siteDir = "build_embed/pyenv/Lib/site-packages"
           $siteSz = [math]::Round(
-            (Get-ChildItem $siteDir -Recurse -ErrorAction SilentlyContinue |
+            (Get-ChildItem "$sitePackages" -Recurse -ErrorAction SilentlyContinue |
              Measure-Object -Property Length -Sum).Sum / 1MB, 1)
           Write-Host "site-packages size: ${siteSz} MB"
 
