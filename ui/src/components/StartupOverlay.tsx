@@ -1,10 +1,10 @@
 /**
  * StartupOverlay — loading screen + license activation.
  *
- * v7.1.3 fixes:
+ * v7.1.4 fixes:
  *   - Failed state: немедленно показываем полную панель ошибки при coreStage='failed',
  *     не ждём 60 сек. Чёткий текст ошибки + большая кнопка перезапуска.
- *   - isTimeout порог: 150с (соответствует PORT_WAIT_SECS в main.rs v7.1.3).
+ *   - isTimeout порог: 300с (соответствует PORT_WAIT_SECS в main.rs v7.1.4).
  *   - Убран Nuitka hint (теперь используется PyInstaller + LOCALAPPDATA/pytemp кеш).
  *   - Hint для AV: "добавьте %LOCALAPPDATA%\FMailSender в исключения".
  *   - Retry кнопка видна сразу при failed (не через 60с).
@@ -153,7 +153,7 @@ export default function StartupOverlay() {
       if (coreStage === 'failed') return
       setElapsed(sec)
       if (!onlineRef.current) {
-        const target = Math.min(sec / 150, 1) * 90  // PORT_WAIT_SECS=150
+        const target = Math.min(sec / 300, 1) * 90  // PORT_WAIT_SECS=300
         setProgress(p => p + (target - p) * 0.12)
       }
     }, 100)
@@ -311,7 +311,7 @@ export default function StartupOverlay() {
   const msgColor = isFailed                ? '#ef4444'
                  : coreStage === 'ready'   ? '#10b981'
                  : online                  ? '#10b981'
-                 : displayElapsed > 150    ? 'rgba(239,68,68,0.85)'
+                 : displayElapsed > 300    ? 'rgba(239,68,68,0.85)'
                  : '#6666aa'
 
   return (
@@ -350,7 +350,7 @@ export default function StartupOverlay() {
       {showDefenderHint && (
         <div className="mt-4 max-w-xs px-4 text-center">
           <p className="text-[0.7rem] leading-relaxed" style={{ color: '#3a3a6a' }}>
-            Антивирус проверяет файлы ядра при первом запуске (20–150 сек).
+            Антивирус проверяет файлы ядра при первом запуске (20–60 сек).
             Добавьте папку <code style={{ color: '#5a5a8a' }}>%LOCALAPPDATA%\FMailSender</code> в исключения.
           </p>
         </div>

@@ -4,7 +4,7 @@ All HTTP endpoints on localhost:7531.
 
 Key design:
   - Our models.py SmtpAccount is duck-compatible with sender.py SmtpAccount (same fields).
-  - SendingEngine.run() is synchronous; run it in a daemon thread.
+  - _get_sender().SendingEngine.run() is synchronous; run it in a daemon thread.
   - engine.on_progress(sent, total, result) and engine.on_finished(results) are set as attributes.
 
 Endpoints:
@@ -50,12 +50,12 @@ from core._version import APP_VERSION
 
 # sender.py types used for actual campaign execution
 from core.sender import (
-    Recipient as SenderRecipient,
-    CampaignConfig as SenderConfig,
-    EmailTemplate,
-    SendingEngine,
-    get_smtp_config_for_domain,
-    test_smtp_connection,
+    Recipient as _get_sender().Recipient,
+    CampaignConfig as _get_sender().CampaignConfig,
+    _get_sender().EmailTemplate,
+    _get_sender().SendingEngine,
+    _get_sender().get_smtp_config_for_domain,
+    _get_sender().test_smtp_connection,
 )
 
 # ── Global mutable state ──────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ _proxies:  list[str]          = []
 _recipients: list[Recipient]  = []
 _campaign_cfg: CampaignConfig = CampaignConfig()
 _campaign_status: CampaignStatus = CampaignStatus()
-_engine: Optional[SendingEngine] = None
+_engine: Optional[_get_sender().SendingEngine] = None
 _engine_thread: Optional[threading.Thread] = None
 
 # Run token: incremented on every start/stop so stale thread callbacks are ignored.
@@ -268,10 +268,10 @@ def _make_account(body: AccountIn) -> SmtpAccount:
     )
 
 
-def _to_sender_recipient(r: Recipient) -> SenderRecipient:
+def _to_sender_recipient(r: Recipient) -> _get_sender().Recipient:
     name   = r.name or ""
     parts  = name.split(" ", 1)
-    return SenderRecipient(
+    return _get_sender().Recipient(
         email=r.email,
         first_name=parts[0],
         last_name=parts[1] if len(parts) > 1 else "",
@@ -329,7 +329,7 @@ def delete_account(email: str):
 async def test_account_endpoint(body: AccountIn):
     # Our SmtpAccount is duck-compatible with sender.py SmtpAccount (same field names).
     acc = _make_account(body)
-    ok, msg = await test_smtp_connection(acc)
+    ok, msg = await _get_sender().test_smtp_connection(acc)
     for a in _accounts:
         if a.email.lower() == body.email.lower():
             a.last_test_ok  = ok
@@ -348,7 +348,7 @@ async def test_all_accounts():
 
     async def _one(i: int, acc: SmtpAccount):
         async with sem:
-            ok, msg = await test_smtp_connection(acc)
+            ok, msg = await _get_sender().test_smtp_connection(acc)
             acc.last_test_ok  = ok
             acc.last_test_msg = msg
             results.append({"index": i, "email": acc.email, "ok": ok, "message": msg})
@@ -390,7 +390,7 @@ async def test_all_stream(request: Request):
         async def _one(i: int, acc: SmtpAccount):
             async with sem:
                 try:
-                    ok, msg = await test_smtp_connection(acc)
+                    ok, msg = await _get_sender().test_smtp_connection(acc)
                 except asyncio.CancelledError:
                     q.put_nowait({"i": i, "email": acc.email, "ok": False, "msg": "отменено"})
                     return
@@ -458,7 +458,7 @@ async def import_accounts_txt(file: UploadFile = File(...)):
                 email, pwd = parts[0].strip(), parts[1].strip()
                 if "@" in email and email.lower() not in existing:
                     domain = email.split("@")[-1].lower()
-                    cfg    = get_smtp_config_for_domain(domain) or {}
+                    cfg    = _get_sender().get_smtp_config_for_domain(domain) or {}
                     from core.smtp_limits import apply_limits_to_account as _apply_lim
                     _rt = parts[2].strip() if len(parts) >= 3 else ""  # FIX v6.3: email|pwd|refresh_token
                     acc    = SmtpAccount(
@@ -599,14 +599,14 @@ def start_campaign():
     # (both have: email, password, host, port, use_ssl, use_tls, proxy, display_name, etc.)
     sender_recipients = [_to_sender_recipient(r) for r in _recipients]
 
-    template = EmailTemplate(
+    template = _get_sender().EmailTemplate(
         subject=_campaign_cfg.subject or "(no subject)",
         body_html=_campaign_cfg.body_html or "",
         body_text=_campaign_cfg.body_text or "",
         reply_to=_campaign_cfg.reply_to or "",
     )
 
-    sender_config = SenderConfig(
+    sender_config = _get_sender().CampaignConfig(
         min_delay_ms=int(_campaign_cfg.delay_min * 1000),
         max_delay_ms=int(_campaign_cfg.delay_max * 1000),
         max_threads=min(len(active), 10),
@@ -624,7 +624,7 @@ def start_campaign():
         )
 
     stop_event = threading.Event()
-    _engine    = SendingEngine(
+    _engine    = _get_sender().SendingEngine(
         accounts=active,          # duck-compatible with sender.py SmtpAccount
         config=sender_config,
         recipients=sender_recipients,

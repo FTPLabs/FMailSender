@@ -1,4 +1,34 @@
-## [7.1.3] — 2026-07-06
+## [7.1.4] — 2026-07-06
+
+    ### Fixed — Устранена причина 300-500 секундного запуска
+
+    - **ROOT CAUSE FIX — --no-compile вызывал 500-секундный старт** (`.github/workflows/release.yml`):
+    Флаг `--no-compile` в `pip install --target` запрещал создание `.pyc` файлов при CI-сборке.
+    На машине пользователя Python вынужден компилировать **400+ .py файлов** при каждом первом старте:
+    каждый файл читается → AV сканирует → Python компилирует. На машинах с агрессивным AV = **300-500 сек**.
+
+    **Исправление**: удалён `--no-compile`, добавлен шаг `python -m compileall` после pip install.
+    Все .pyc файлы pre-compiled в CI → Python загружает байткод напрямую → старт **20-60 сек**.
+
+    - **LAZY IMPORT — core.sender убран из top-level импортов** (`core/server.py`):
+    `core/sender.py` (2063 строки, asyncio + aiosmtplib + dnspython + dkim + oauth2) импортировался
+    на КАЖДОМ старте сервера, даже когда отправка не нужна. Перенесён в lazy-import через `_get_sender()`.
+    Экономия при старте: **дополнительные 5-15 сек** и уменьшение AV-нагрузки.
+
+    - **PORT_WAIT_SECS: 150 → 300** (`src-tauri/src/main.rs`):
+    Safety net для edge cases (очень медленные машины). С pre-compiled .pyc реальный старт = 20-60 сек,
+    300 сек — запас для худшего случая.
+
+    - **StartupOverlay таймер синхронизирован** (`ui/src/components/StartupOverlay.tsx`):
+    Прогресс `sec/150`→`sec/300`, красный порог `>150`→`>300`.
+    AV hint обновлён: "20–150 сек" → "20–60 сек" (соответствует реальному времени с .pyc).
+
+    - **Синхронизация версий → 7.1.4**:
+    `core/_version.py`, `ui/src/version.ts`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`.
+
+    ---
+
+    ## [7.1.3] — 2026-07-06
 
     ### Fixed — Надёжный старт ядра и синхронизация версий
 

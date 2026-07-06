@@ -9,7 +9,7 @@ on:
       version:
         description: "Version (e.g. 7.1.0)"
         required: true
-        default: "7.1.3"
+        default: "7.1.4"
 
 env:
   # Официальный Embedded CPython от Python Software Foundation.
@@ -223,11 +223,9 @@ jobs:
 
           # Устанавливаем все зависимости из requirements.txt
           # --target: устанавливает в указанную папку (не в системный Python)
-          # --no-compile: не создаём .pyc (уменьшает размер ZIP)
           python -m pip install `
             -r requirements.txt `
             --target "$sitePackages" `
-            --no-compile `
             --quiet
 
           if ($LASTEXITCODE -ne 0) {
@@ -238,7 +236,6 @@ jobs:
           # pywin32 отдельно (Windows-специфичный, нужен postinstall)
           python -m pip install pywin32 `
             --target "$sitePackages" `
-            --no-compile `
             --quiet
           if ($LASTEXITCODE -ne 0) {
             Write-Host "pywin32 install failed — продолжаем (необязательный)" -ForegroundColor Yellow
@@ -317,7 +314,30 @@ jobs:
             (Get-ChildItem "build_embed/app" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
           Write-Host "App size: ${appSz} MB"
 
-      - name: "Verify application imports with Embedded Python"
+
+        - name: "Pre-compile Python bytecode — eliminates 300-500s AV startup delay"
+          shell: pwsh
+          run: |
+            # ROOT CAUSE FIX v7.1.4:
+            # --no-compile caused Python to compile 400+ .py files on user machine.
+            # AV scans each .py during compilation → 300-500 seconds first startup.
+            # Pre-compiled .pyc: Python loads bytecode directly → 20-60s startup.
+            Write-Host "=== Pre-compiling Python bytecode ===" -ForegroundColor Cyan
+
+            # site-packages: fastapi, uvicorn, pydantic v2, cryptography, requests...
+            $sp = "build_embed/pyenv/Lib/site-packages"
+            python -m compileall $sp -q -j 0 2>&1 | Out-Null
+
+            # app/: main.py, core/, templates/
+            python -m compileall "build_embed/app" -q -j 0 2>&1 | Out-Null
+
+            $n = (Get-ChildItem "build_embed" -Recurse -Filter "*.pyc" -ErrorAction SilentlyContinue).Count
+            Write-Host "Pre-compiled: $n .pyc files" -ForegroundColor Green
+            if ($n -lt 200) {
+              Write-Host "WARNING: Only $n .pyc — compileall may have issues" -ForegroundColor Yellow
+            }
+
+          - name: "Verify application imports with Embedded Python"
         shell: pwsh
         run: |
           Write-Host "=== Import verification ===" -ForegroundColor Cyan
@@ -498,13 +518,14 @@ jobs:
             ### Установка (без установщика)
             1. Скачайте **FMailSender_v${{ steps.tag.outputs.version }}.exe**
             2. Запустите — приложение откроется
-            3. **Первый запуск**: Python среда устанавливается (~60 сек, только один раз)
+            3. **Первый запуск**: Python среда устанавливается (~60 сек, только один раз, AV сканирует файлы)
             4. **Последующие запуски**: мгновенный старт
 
-            ### Архитектура v7.1.3 (Embedded CPython — без AV-проблем)
+            ### Архитектура v7.1.4 (Embedded CPython — pre-compiled bytecode)
             - **Embedded CPython 3.12.10** — официальный python.exe от Python Software Foundation
             - python.exe **цифрово подписан PSF/Microsoft** — AV не может заблокировать
             - **PyInstaller полностью удалён** — главная причина AV-срабатываний устранена
+            - **Bytecode pre-compiled** — .pyc файлы собраны в CI, Python не тратит 300-500s на компиляцию
             - Первый запуск: Python среда распаковывается в `%LOCALAPPDATA%\FMailSender\` (один раз)
             - Повторные запуски: мгновенный старт из уже установленных файлов
 

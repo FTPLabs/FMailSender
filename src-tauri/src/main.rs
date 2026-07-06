@@ -56,8 +56,8 @@ const CORE_PORT:          u16  = 7531;
 const CORE_HOST_PRIMARY:  &str = "127.0.0.1";
 const CORE_HOST_FALLBACK: &str = "localhost";
 
-// Embedded CPython запускает uvicorn за 3-8 сек (нет никакой распаковки при старте)
-const PORT_WAIT_SECS:      u64 = 150;
+// Embedded CPython: первый импорт с AV может занять 60-180с (compileall в CI минимизирует). 300с = safety net.
+const PORT_WAIT_SECS:      u64 = 300;
 const SPAWN_MAX_RETRIES:   u32 = 3;
 const SPAWN_ALIVE_CHECK_S: u64 = 10;
 const SPAWN_RETRY_DELAY_S: u64 = 2;
