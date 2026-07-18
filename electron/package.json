@@ -1,0 +1,53 @@
+{
+  "name": "fmailsender",
+  "version": "7.3.0",
+  "description": "FMailSender — Professional Email Campaign Tool",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist":  "electron-builder --win portable --publish never"
+  },
+  "build": {
+    "appId": "com.ftplabs.fmailsender",
+    "productName": "FMailSender",
+    "copyright": "Copyright © 2024 FTPLabs",
+    "win": {
+      "target": [{ "target": "portable", "arch": ["x64"] }],
+      "icon": "assets/icon.ico",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "portable": {
+      "artifactName": "FMailSender_v${version}.exe"
+    },
+    "directories": {
+      "output":         "dist-electron",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to":   "backend",
+        "filter": ["**/*", "!.git", "!*.md"]
+      },
+      {
+        "from": "../ui/dist",
+        "to":   "ui/dist"
+      }
+    ],
+    "asar": true,
+    "compression": "maximum"
+  },
+  "dependencies": {
+    "electron-squirrel-startup": "^1.0.1"
+  },
+  "devDependencies": {
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8"
+  }
+}

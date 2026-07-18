@@ -1,3 +1,27 @@
+## [7.3.0] — 2026-07-18
+
+### Новое ядро — Electron + Node.js (замена Tauri + Python)
+
+**Корневая причина бесконечной загрузки устранена:**
+Python (FastAPI) стартовал 60-300 секунд внутри EXE (AV сканировал 400+ .py файлов).
+Node.js стартует за ~200 мс — загрузки больше нет.
+
+#### Изменения архитектуры
+- **`backend/`** — новое Node.js ядро (Express + Nodemailer), полная замена `core/` (Python)
+- **`electron/`** — новая оболочка Electron, полная замена `src-tauri/` (Rust/Tauri)
+- **`ui/`** — React/Vite UI без изменений, порт 7531 сохранён
+- **`.github/workflows/release.yml`** — полностью переписан под Electron-сборку (убраны CPython, Rust, Cargo, Tauri шаги)
+
+#### Компоненты Node.js ядра
+- `backend/src/server.js`   — Express HTTP (все API эндпоинты 1:1 с Python)
+- `backend/src/sender.js`   — SMTP движок (nodemailer, SOCKS5/HTTP прокси, rate limiting)
+- `backend/src/storage.js`  — AES-256-GCM шифрование (Node crypto, замена Fernet)
+- `backend/src/proxy.js`    — ProxyManager (round-robin, raw socket check)
+- `backend/src/license.js`  — HWID (Windows Registry) + онлайн-валидация fmail.shop
+- `backend/src/smtp_configs.js` — SMTP пресеты (50+ провайдеров)
+- `electron/main.js`        — BrowserWindow + fork backend process + tray icon
+- `electron/preload.js`     — minimal contextBridge
+
 ## [7.2.0] — 2026-07-18
 
 ### Fixed — Code review & CI/CD fixes

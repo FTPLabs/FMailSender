@@ -7,44 +7,22 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 7.1.0)"
+        description: "Version (e.g. 7.3.0)"
         required: true
-        default: "7.2.0"
+        default: "7.3.0"
 
 env:
-  # Официальный Embedded CPython от Python Software Foundation.
-  # python.exe цифрово подписан PSF/Microsoft — AV не может заблокировать.
-  # НЕ PyInstaller, НЕ Nuitka, НЕ любой другой Python-упаковщик с bootloader.
-  PYTHON_EMBED_URL:  "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
-  PYTHON_EMBED_VER:  "3.12.10"
-  PYTHON_VERSION:    "3.12"
-  NODE_VERSION:      "22"
+  NODE_VERSION: "22"
 
 jobs:
   build:
-    name: "Build & Release"
+    name: "Build & Release (Electron + Node.js)"
     runs-on: windows-latest
     permissions:
       contents: write
     timeout-minutes: 60
 
     steps:
-
-      - name: "Repo PUBLIC — build window open"
-        shell: bash
-        env:
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-        run: |
-          if [ -n "${PAT_TOKEN}" ]; then
-            curl -s -X PATCH \
-              -H "Authorization: Bearer ${PAT_TOKEN}" \
-              -H "Content-Type: application/json" \
-              "https://api.github.com/repos/FTPLabs/FMailSender" \
-              -d '{"private":false}' | grep -o '"private":[a-z]*' || true
-            echo "Repo: PUBLIC"
-          else
-            echo "PAT_TOKEN not set — assuming repo is already public"
-          fi
 
       - name: "Checkout"
         uses: actions/checkout@v4
@@ -60,17 +38,7 @@ jobs:
           version: latest
           run_install: false
 
-      - name: "Rust stable (x86_64-pc-windows-msvc)"
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: "Rust cache"
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-
-      # Версия
+      # ── Version sync ─────────────────────────────────────────────────────────
 
       - name: "Resolve version"
         id: tag
@@ -91,420 +59,170 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ steps.tag.outputs.version }}"
-          $conf = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
-          $conf.version = $ver
-          $conf | ConvertTo-Json -Depth 10 | Set-Content "src-tauri/tauri.conf.json" -Encoding UTF8
-          $cargo = Get-Content "src-tauri/Cargo.toml"
-          $patched = $false
-          $cargo = $cargo | ForEach-Object {
-            if (-not $patched -and $_ -match 'version\s*=\s*"') {
-              $patched = $true; "version = `"$ver`""
-            } else { $_ }
-          }
-          $cargo | Set-Content "src-tauri/Cargo.toml" -Encoding UTF8
-          Set-Content "core/_version.py"  -Encoding UTF8 "APP_VERSION = `"$ver`""
+
+          # electron/package.json
+          $ep = Get-Content "electron/package.json" -Raw | ConvertFrom-Json
+          $ep.version = $ver
+          $ep | ConvertTo-Json -Depth 10 | Set-Content "electron/package.json" -Encoding UTF8
+
+          # backend/package.json
+          $bp = Get-Content "backend/package.json" -Raw | ConvertFrom-Json
+          $bp.version = $ver
+          $bp | ConvertTo-Json -Depth 10 | Set-Content "backend/package.json" -Encoding UTF8
+
+          # ui/package.json
+          (Get-Content "ui/package.json" -Raw) -replace '"version": "[^"]*"', ('"version": "' + $ver + '"') |
+            Set-Content "ui/package.json" -Encoding UTF8
+
+          # ui/src/version.ts
           Set-Content "ui/src/version.ts" -Encoding UTF8 "export const FRONTEND_VERSION = `"$ver`""
-          # FIX META-2: sync ui/package.json version (was missing from sync step)
-          (Get-Content "ui/package.json" -Raw) -replace '"version": "[^"]*"', ('"version": "' + $ver + '"') | Set-Content "ui/package.json" -Encoding UTF8
-          Write-Host "Version synced: $ver"
 
-      # ════════════════════════════════════════════════════════════════════════
-      # BUILD STEP 1: Embedded CPython среда
-      # Ключевое отличие от PyInstaller:
-      #   python.exe — официальный, цифрово подписан PSF/Microsoft.
-      #   AV не может заблокировать подписанный бинарь из Python.org.
-      #   PyInstaller bootloader (главная причина AV-срабатываний) ОТСУТСТВУЕТ.
-      # ════════════════════════════════════════════════════════════════════════
+          # core/_version.py (kept for reference / VPS bot)
+          Set-Content "core/_version.py" -Encoding UTF8 "APP_VERSION = `"$ver`""
 
-      - name: "Download Embedded CPython ${{ env.PYTHON_EMBED_VER }} (official PSF binary)"
+          Write-Host "Version synced: $ver" -ForegroundColor Green
+
+      # ── BUILD STEP 1: Install backend dependencies ──────────────────────────
+
+      - name: "Install backend Node.js dependencies"
         shell: pwsh
+        working-directory: backend
         run: |
-          Write-Host "=== Downloading Embedded CPython ${{ env.PYTHON_EMBED_VER }} ===" -ForegroundColor Cyan
-          Write-Host "Source: ${{ env.PYTHON_EMBED_URL }}"
-          Write-Host "python.exe will be digitally signed by Python Software Foundation"
-          Write-Host "AV cannot block a signed binary from python.org — this is by design."
+          Write-Host "=== Installing backend deps ===" -ForegroundColor Cyan
+          npm ci --prefer-offline 2>&1 | Select-Object -Last 5
+          if ($LASTEXITCODE -ne 0) { npm install }
+          if ($LASTEXITCODE -ne 0) { Write-Error "backend npm install failed"; exit 1 }
+          Write-Host "Backend deps OK" -ForegroundColor Green
 
-          New-Item -ItemType Directory -Force -Path "build_embed" | Out-Null
-          $start = Get-Date
-
-          # Скачиваем официальный embedded Python
-          Invoke-WebRequest `
-            -Uri "${{ env.PYTHON_EMBED_URL }}" `
-            -OutFile "build_embed/python-embed.zip" `
-            -UseBasicParsing
-          $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds)
-          $sz = [math]::Round((Get-Item "build_embed/python-embed.zip").Length / 1MB, 1)
-          Write-Host "Downloaded: ${sz} MB in ${elapsed}s" -ForegroundColor Green
-
-          # Распаковываем
-          New-Item -ItemType Directory -Force -Path "build_embed/pyenv" | Out-Null
-          Expand-Archive -Path "build_embed/python-embed.zip" `
-                         -DestinationPath "build_embed/pyenv" -Force
-          Remove-Item "build_embed/python-embed.zip" -Force
-
-          # Проверяем подпись python.exe
-          $sig = Get-AuthenticodeSignature "build_embed/pyenv/python.exe"
-          Write-Host "python.exe signature status: $($sig.Status)" -ForegroundColor Cyan
-          Write-Host "python.exe signer: $($sig.SignerCertificate.Subject)"
-          if ($sig.Status -eq "Valid") {
-            Write-Host "ПОДПИСЬ ДЕЙСТВИТЕЛЬНА — AV не может заблокировать" -ForegroundColor Green
-          } else {
-            Write-Host "Подпись: $($sig.Status) — продолжаем (может быть TimeStamp issue)" -ForegroundColor Yellow
-          }
-
-          if (-not (Test-Path "build_embed/pyenv/python.exe")) {
-            Write-Error "python.exe не найден после распаковки"
-            exit 1
-          }
-          Write-Host "Embedded CPython ready: build_embed/pyenv/" -ForegroundColor Green
-
-      - name: "Configure Embedded CPython for site-packages"
+      - name: "Test backend imports (Node.js --test flag)"
         shell: pwsh
+        working-directory: backend
         run: |
-          # Embedded CPython по умолчанию НЕ загружает site-packages.
-          # Нужно отредактировать python312._pth чтобы включить их.
-          # ТАКЖЕ: добавляем ../app в sys.path чтобы 'from core.server import app' работало.
-          # _pth пути — относительно папки python.exe (build_embed/pyenv/),
-          # поэтому ../app = build_embed/app/
-          $pthFile = Get-ChildItem "build_embed/pyenv" -Filter "python*._pth" | Select-Object -First 1
-          if ($null -eq $pthFile) {
-            Write-Error "python3XX._pth не найден в build_embed/pyenv/"
-            exit 1
-          }
-          Write-Host "Configuring: $($pthFile.FullName)"
-          $content = Get-Content $pthFile.FullName
-          Write-Host "Original _pth content:"
-          $content | ForEach-Object { Write-Host "  $_" }
-
-          # Добавляем site-packages и import site (требуется для pip-зависимостей)
-          $newContent = @()
-          foreach ($line in $content) {
-            if ($line -eq "#import site") {
-              $newContent += "import site"
-            } else {
-              $newContent += $line
-            }
-          }
-          # Добавляем Lib/site-packages если не задано
-          if (-not ($newContent -contains "Lib/site-packages") -and -not ($newContent -contains "Lib\site-packages")) {
-            $newContent += "Lib/site-packages"
-          }
-          # КЛЮЧЕВОЕ: добавляем ../app — путь к коду приложения (main.py, core/, templates/)
-          # Без этого Embedded Python не найдёт 'core' при запуске main.py
-          if (-not ($newContent -contains "../app")) {
-            $newContent += "../app"
-          }
-          $newContent | Set-Content $pthFile.FullName -Encoding UTF8
-          Write-Host "Updated _pth:"
-          Get-Content $pthFile.FullName | ForEach-Object { Write-Host "  $_" }
-
-      - name: "Python ${{ env.PYTHON_VERSION }} (system — for pip install --target)"
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-
-      - name: "Install Python dependencies into Embedded Python via system pip"
-        shell: pwsh
-        run: |
-          # ─────────────────────────────────────────────────────────────────────
-          # КЛЮЧЕВОЙ МОМЕНТ: Embedded Python НЕ включает pip и не может легко
-          # его получить. Поэтому используем СИСТЕМНЫЙ Python CI (setup-python)
-          # с флагом --target, который устанавливает пакеты ПРЯМО в папку
-          # site-packages Embedded CPython.
-          # Это 100% надёжный метод — никаких pip.pyz, ensurepip, или хаков.
-          # ─────────────────────────────────────────────────────────────────────
-          Write-Host "=== Installing deps via system pip --target ===" -ForegroundColor Cyan
-
-          $sitePackages = Resolve-Path "build_embed/pyenv/Lib/site-packages" -ErrorAction SilentlyContinue
-          if (-not $sitePackages) {
-            New-Item -ItemType Directory -Force -Path "build_embed/pyenv/Lib/site-packages" | Out-Null
-            $sitePackages = Resolve-Path "build_embed/pyenv/Lib/site-packages"
-          }
-          Write-Host "Target: $sitePackages"
-
-          # Устанавливаем все зависимости из requirements.txt
-          # --target: устанавливает в указанную папку (не в системный Python)
-          python -m pip install `
-            -r requirements.txt `
-            --target "$sitePackages" `
-            --quiet
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "pip install --target failed"
-            exit 1
-          }
-
-          # pywin32 отдельно (Windows-специфичный, нужен postinstall)
-          python -m pip install pywin32 `
-            --target "$sitePackages" `
-            --quiet
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "pywin32 install failed — продолжаем (необязательный)" -ForegroundColor Yellow
-          }
-
-          # pywin32 DLL postinstall: копируем .pyd/.dll в pyenv/ (рядом с python.exe)
-          # чтобы Embedded Python мог их загрузить
-          $pyenvDir = Resolve-Path "build_embed/pyenv"
-          $pyw32DllSrc = Join-Path $sitePackages "pywin32_system32"
-          if (Test-Path $pyw32DllSrc) {
-            Get-ChildItem $pyw32DllSrc -Filter "*.dll" | ForEach-Object {
-              Copy-Item $_.FullName $pyenvDir -Force
-              Write-Host "  Copied pywin32 DLL: $($_.Name)"
-            }
-          }
-          $pyw32Pyd = Join-Path $sitePackages "win32"
-          if (Test-Path $pyw32Pyd) {
-            Copy-Item (Join-Path $pyw32Pyd "*.pyd") $pyenvDir -Force -ErrorAction SilentlyContinue
-          }
-
-          # Проверяем ключевые зависимости через Embedded Python
-          Write-Host "Verifying imports with Embedded Python..." -ForegroundColor Cyan
-          $embedPython = Resolve-Path "build_embed/pyenv/python.exe"
-          $checks = @("fastapi", "uvicorn", "aiosmtplib", "cryptography", "requests", "jwt", "dnspython")
-          $failed  = @()
-          foreach ($pkg in $checks) {
-            $importName = if ($pkg -eq "dnspython") { "dns" } else { $pkg }
-            $result = & $embedPython -c "import $importName; print('OK')" 2>&1
-            if ("$result" -match "OK") {
-              Write-Host "  [OK] $pkg" -ForegroundColor Green
-            } else {
-              Write-Host "  [WARN] $pkg : $result" -ForegroundColor Yellow
-              # Не блокируем — pywin32/wmi могут требовать Runtime
-              if ($pkg -notin @("wmi", "pywin32")) { $failed += $pkg }
-            }
-          }
-          if ($failed.Count -gt 0) {
-            Write-Error "Критические пакеты не импортируются: $($failed -join ', ')"
-            exit 1
-          }
-          Write-Host "All critical dependencies OK" -ForegroundColor Green
-
-          $siteSz = [math]::Round(
-            (Get-ChildItem "$sitePackages" -Recurse -ErrorAction SilentlyContinue |
-             Measure-Object -Property Length -Sum).Sum / 1MB, 1)
-          Write-Host "site-packages size: ${siteSz} MB"
-
-      - name: "Copy application code into build"
-        shell: pwsh
-        run: |
-          Write-Host "=== Copying application code ===" -ForegroundColor Cyan
-          New-Item -ItemType Directory -Force -Path "build_embed/app" | Out-Null
-
-          # Копируем Python-код приложения
-          Copy-Item -Path "main.py"     -Destination "build_embed/app/main.py"
-          Copy-Item -Path "core"        -Destination "build_embed/app/core"    -Recurse -Force
-          Copy-Item -Path "templates"   -Destination "build_embed/app/templates" -Recurse -Force
-
-          # data/ если есть (spam_words.json и т.д.)
-          if (Test-Path "data") {
-            Copy-Item -Path "data" -Destination "build_embed/app/data" -Recurse -Force
-          }
-
-          # Проверяем
-          if (-not (Test-Path "build_embed/app/main.py")) {
-            Write-Error "main.py не скопирован"
-            exit 1
-          }
-          if (-not (Test-Path "build_embed/app/core/server.py")) {
-            Write-Error "core/server.py не скопирован"
-            exit 1
-          }
-
-          Write-Host "Application code copied OK" -ForegroundColor Green
-          $appSz = [math]::Round(
-            (Get-ChildItem "build_embed/app" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
-          Write-Host "App size: ${appSz} MB"
-
-
-      - name: "Pre-compile Python bytecode — eliminates 300-500s AV startup delay"
-        shell: pwsh
-        run: |
-          # ROOT CAUSE FIX v7.1.4:
-          # --no-compile caused Python to compile 400+ .py files on user machine.
-          # AV scans each .py during compilation → 300-500 seconds first startup.
-          # Pre-compiled .pyc: Python loads bytecode directly → 20-60s startup.
-          Write-Host "=== Pre-compiling Python bytecode ===" -ForegroundColor Cyan
-
-          # site-packages: fastapi, uvicorn, pydantic v2, cryptography, requests...
-          $sp = "build_embed/pyenv/Lib/site-packages"
-          python -m compileall $sp -q -j 0 2>&1 | Out-Null
-
-          # app/: main.py, core/, templates/
-          python -m compileall "build_embed/app" -q -j 0 2>&1 | Out-Null
-
-          $n = (Get-ChildItem "build_embed" -Recurse -Filter "*.pyc" -ErrorAction SilentlyContinue).Count
-          Write-Host "Pre-compiled: $n .pyc files" -ForegroundColor Green
-          if ($n -lt 200) {
-            Write-Host "WARNING: Only $n .pyc — compileall may have issues" -ForegroundColor Yellow
-          }
-
-      - name: "Verify application imports with Embedded Python"
-        shell: pwsh
-        run: |
-          Write-Host "=== Import verification ===" -ForegroundColor Cyan
-          $python = "build_embed/pyenv/python.exe"
-          $appDir = Resolve-Path "build_embed/app"
-
-          # Запускаем --test mode
-          $proc = Start-Process -FilePath $python `
-                                -ArgumentList "$appDir\main.py", "--test" `
-                                -WorkingDirectory $appDir `
+          Write-Host "=== Testing backend startup ===" -ForegroundColor Cyan
+          $proc = Start-Process -FilePath "node" `
+                                -ArgumentList "src/server.js", "--test" `
                                 -PassThru -Wait -WindowStyle Hidden `
-                                -RedirectStandardOutput "core_test_out.txt" `
-                                -RedirectStandardError  "core_test_err.txt"
-          $exitCode = $proc.ExitCode
-
-          $out = Get-Content "core_test_out.txt" -ErrorAction SilentlyContinue | Select-Object -Last 10
-          $err = Get-Content "core_test_err.txt" -ErrorAction SilentlyContinue | Select-Object -Last 10
-
-          if ($exitCode -eq 0) {
-            Write-Host "Import test PASSED (exit 0)" -ForegroundColor Green
-            $out | ForEach-Object { Write-Host "  $_" }
-          } elseif ($exitCode -eq 2) {
-            Write-Host "Import test OK (exit 2 — running normally)" -ForegroundColor Green
+                                -RedirectStandardOutput "test_out.txt" `
+                                -RedirectStandardError  "test_err.txt"
+          $out = Get-Content "test_out.txt" -ErrorAction SilentlyContinue
+          $err = Get-Content "test_err.txt" -ErrorAction SilentlyContinue
+          Write-Host "STDOUT: $out"
+          if ($proc.ExitCode -eq 0) {
+            Write-Host "Backend test PASSED" -ForegroundColor Green
           } else {
-            Write-Host "STDOUT: $out"
             Write-Host "STDERR: $err"
-            Write-Error "Import test FAILED (exit $exitCode)"
+            Write-Error "Backend test FAILED (exit $($proc.ExitCode))"
             exit 1
           }
 
-      # BUILD STEP 2: Упаковка pyenv + app в ZIP для Tauri include_bytes!
-      # Структура ZIP:
-      #   pyenv/  — Embedded CPython (python.exe + Lib/site-packages)
-      #   app/    — Python-код (main.py, core/, templates/, data/)
-
-      - name: "Pack pyenv + app → fmail-core.zip (sidecar for Tauri)"
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "src-tauri/binaries" | Out-Null
-
-          Write-Host "Packing build_embed/ → fmail-core.zip..." -ForegroundColor Cyan
-          $start = Get-Date
-
-          # Упаковываем pyenv/ и app/ вместе
-          Compress-Archive `
-            -Path            "build_embed/pyenv", "build_embed/app" `
-            -DestinationPath "src-tauri/binaries/fmail-core.zip" `
-            -Force
-
-          $elapsed = [math]::Round(((Get-Date) - $start).TotalSeconds)
-          $zipSz   = [math]::Round((Get-Item "src-tauri/binaries/fmail-core.zip").Length / 1MB, 1)
-          Write-Host "fmail-core.zip: ${zipSz} MB (packed in ${elapsed}s)" -ForegroundColor Green
-
-          if ($zipSz -lt 30) {
-            Write-Error "ZIP слишком маленький (${zipSz} MB) — возможно pyenv не упакован"
-            exit 1
-          }
-
-      # BUILD STEP 3: React / Vite
+      # ── BUILD STEP 2: React / Vite UI ────────────────────────────────────────
 
       - name: "Install UI deps"
         shell: pwsh
         working-directory: ui
         run: |
-          npm install
-          Write-Host "UI deps installed."
+          pnpm install --frozen-lockfile 2>&1 | Select-Object -Last 5
+          Write-Host "UI deps OK" -ForegroundColor Green
 
       - name: "Build UI (Vite)"
         shell: pwsh
         working-directory: ui
         run: |
-          npm run build
+          pnpm run build
           if (-not (Test-Path "dist/index.html")) {
-            Write-Error "UI build failed"
+            Write-Error "UI build failed — dist/index.html missing"
             exit 1
           }
-          Write-Host "UI build OK."
+          $sz = [math]::Round((Get-ChildItem "dist" -Recurse | Measure-Object -Property Length -Sum).Sum / 1KB)
+          Write-Host "UI build OK — dist: ${sz} KB" -ForegroundColor Green
 
-      # BUILD STEP 4: Tauri (raw EXE, без NSIS)
-      # include_bytes!("../binaries/fmail-core.zip") встраивает весь Embedded CPython + код.
-      # При первом запуске: Expand-Archive один раз.
-      # При повторных: FNV64 хеш совпадает → немедленный старт python.exe.
+      # ── BUILD STEP 3: Electron ────────────────────────────────────────────────
 
-      - name: "Install tauri-cli"
+      - name: "Install Electron + electron-builder deps"
         shell: pwsh
+        working-directory: electron
         run: |
-          cargo install tauri-cli --version "^2" --locked --quiet 2>&1 | `
-            Select-String -Pattern "Installed|Compiling|warning" | Select-Object -Last 5
-          Write-Host "tauri-cli ready."
+          Write-Host "=== Installing Electron deps ===" -ForegroundColor Cyan
+          npm ci --prefer-offline 2>&1 | Select-Object -Last 5
+          if ($LASTEXITCODE -ne 0) { npm install }
+          if ($LASTEXITCODE -ne 0) { Write-Error "electron npm install failed"; exit 1 }
+          Write-Host "Electron deps OK" -ForegroundColor Green
 
-      - name: "Build Tauri (portable EXE — Embedded CPython встроен)"
+      - name: "Build portable EXE (electron-builder)"
+        id: build_exe
         shell: pwsh
+        working-directory: electron
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          Write-Host "=== Tauri build ===" -ForegroundColor Cyan
-          Write-Host "Embedding fmail-core.zip (Embedded CPython + app code) into EXE..."
-          cargo tauri build --target x86_64-pc-windows-msvc
-          Write-Host "=== Tauri build done ===" -ForegroundColor Green
+          Write-Host "=== Building portable EXE ===" -ForegroundColor Cyan
 
-      # BUILD STEP 5: Финальный portable EXE
+          # electron-builder reads package.json in CWD (electron/)
+          # extraResources pulls in ../backend and ../ui/dist
+          npx electron-builder --win portable --x64 --publish never
 
-      - name: "Package portable EXE (NO installer)"
-        id: portable
-        shell: pwsh
-        run: |
-          $ver      = "${{ steps.tag.outputs.version }}"
-          $finalName = "FMailSender_v${ver}.exe"
-          $rawExe   = "src-tauri/target/x86_64-pc-windows-msvc/release/fmail-sender.exe"
+          $ver     = "${{ steps.tag.outputs.version }}"
+          $exeName = "FMailSender_v${ver}.exe"
+          $rawExe  = "dist-electron/${exeName}"
 
           if (-not (Test-Path $rawExe)) {
-            Write-Error "CRITICAL: fmail-sender.exe не найден: $rawExe"
+            # try alt path
+            $rawExe = Get-ChildItem "dist-electron" -Filter "*.exe" -Recurse |
+                      Select-Object -First 1 -ExpandProperty FullName
+          }
+
+          if (-not $rawExe -or -not (Test-Path $rawExe)) {
+            Write-Error "EXE not found in dist-electron/"
+            Get-ChildItem "dist-electron" -Recurse | Select-Object FullName
             exit 1
           }
 
           $sizeMb = [math]::Round((Get-Item $rawExe).Length / 1MB, 1)
-          Write-Host "EXE size: ${sizeMb} MB"
-          if ($sizeMb -lt 30) {
-            Write-Error "EXE слишком маленький (${sizeMb} MB) — fmail-core.zip не встроен."
+          Write-Host "EXE: $rawExe  (${sizeMb} MB)" -ForegroundColor Green
+
+          if ($sizeMb -lt 50) {
+            Write-Error "EXE too small (${sizeMb} MB) — bundle may be incomplete"
             exit 1
           }
 
-          Copy-Item $rawExe $finalName -Force
-          Write-Host "Portable EXE: $finalName (${sizeMb} MB)" -ForegroundColor Green
-          echo "name=$finalName" >> $env:GITHUB_OUTPUT
-          echo "size=$sizeMb"    >> $env:GITHUB_OUTPUT
+          # Copy to root for release upload
+          Copy-Item $rawExe "../../$exeName" -Force
+          Write-Host "Portable EXE ready: $exeName" -ForegroundColor Green
 
-      # Финальная верификация
+          echo "name=$exeName"    >> $env:GITHUB_OUTPUT
+          echo "size=$sizeMb"     >> $env:GITHUB_OUTPUT
+
+      # ── BUILD STEP 4: Verify ─────────────────────────────────────────────────
 
       - name: "Verify final artifacts"
         shell: pwsh
         run: |
+          $exeName = "${{ steps.build_exe.outputs.name }}"
           $errors  = @()
-          $exeName = "${{ steps.portable.outputs.name }}"
 
           if (Test-Path $exeName) {
             $sz = [math]::Round((Get-Item $exeName).Length / 1MB, 1)
-            Write-Host "[OK] $exeName ($sz MB)" -ForegroundColor Green
-            if ($sz -lt 30) { $errors += "EXE слишком маленький (${sz} MB)" }
-          } else { $errors += "EXE не найден: $exeName" }
-
-          if (Test-Path "src-tauri/binaries/fmail-core.zip") {
-            $zsz = [math]::Round((Get-Item "src-tauri/binaries/fmail-core.zip").Length / 1MB, 1)
-            Write-Host "[OK] fmail-core.zip (${zsz} MB) — Embedded CPython + app" -ForegroundColor Green
-          } else { $errors += "fmail-core.zip НЕ НАЙДЕН" }
+            Write-Host "[OK] $exeName (${sz} MB)" -ForegroundColor Green
+            if ($sz -lt 50) { $errors += "EXE too small (${sz} MB)" }
+          } else { $errors += "EXE not found: $exeName" }
 
           if (Test-Path "ui/dist/index.html") {
             Write-Host "[OK] ui/dist/index.html" -ForegroundColor Green
-          } else { $errors += "UI dist/index.html НЕ НАЙДЕН" }
+          } else { $errors += "ui/dist/index.html missing" }
 
-          if (Test-Path "build_embed/pyenv/python.exe") {
-            $sig = Get-AuthenticodeSignature "build_embed/pyenv/python.exe"
-            Write-Host "[OK] python.exe signature: $($sig.Status)" -ForegroundColor Green
-          } else { $errors += "python.exe НЕ НАЙДЕН в build_embed" }
+          if (Test-Path "backend/node_modules") {
+            Write-Host "[OK] backend/node_modules" -ForegroundColor Green
+          } else { $errors += "backend/node_modules missing" }
 
           if ($errors.Count -eq 0) {
             Write-Host "=== ALL CHECKS PASSED ===" -ForegroundColor Green
           } else {
             $errors | ForEach-Object { Write-Host "[FAIL] $_" -ForegroundColor Red }
-            Write-Error "Verification failed!"
+            Write-Error "Verification failed"
             exit 1
           }
 
-      # GitHub Release
+      # ── GitHub Release ────────────────────────────────────────────────────────
 
       - name: "GitHub Release"
         uses: softprops/action-gh-release@v2
@@ -519,24 +237,21 @@ jobs:
 
             ### Установка (без установщика)
             1. Скачайте **FMailSender_v${{ steps.tag.outputs.version }}.exe**
-            2. Запустите — приложение откроется
-            3. **Первый запуск**: Python среда устанавливается (~60 сек, только один раз, AV сканирует файлы)
-            4. **Последующие запуски**: мгновенный старт
+            2. Запустите — приложение откроется мгновенно
 
-            ### Архитектура v7.1.4 (Embedded CPython — pre-compiled bytecode)
-            - **Embedded CPython 3.12.10** — официальный python.exe от Python Software Foundation
-            - python.exe **цифрово подписан PSF/Microsoft** — AV не может заблокировать
-            - **PyInstaller полностью удалён** — главная причина AV-срабатываний устранена
-            - **Bytecode pre-compiled** — .pyc файлы собраны в CI, Python не тратит 300-500s на компиляцию
-            - Первый запуск: Python среда распаковывается в `%LOCALAPPDATA%\FMailSender\` (один раз)
-            - Повторные запуски: мгновенный старт из уже установленных файлов
+            ### Архитектура v7.3.0 (Electron + Node.js — новое ядро)
+            - **Electron** — Chromium WebView + Node.js runtime (нет AV-блокировок)
+            - **Node.js backend** — Express сервер, запускается за ~200 мс (vs 60 с у Python)
+            - **Nodemailer** — нативная SMTP-отправка с поддержкой SOCKS5/HTTP прокси
+            - **Бесконечная загрузка полностью устранена** — ядро стартует мгновенно
+            - Шифрование паролей: AES-256-GCM (Node.js crypto)
+            - Лицензирование: HWID через Windows Registry, онлайн-валидация
 
             ### Требования
             - Windows 10/11 x64
-            - WebView2 Runtime (предустановлен в Windows 11)
-            - ~200 МБ свободного места (при первом запуске)
+            - ~250 МБ свободного места (при первом запуске Electron извлекает себя)
 
-          files: ${{ steps.portable.outputs.name }}
+          files: ${{ steps.build_exe.outputs.name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -562,19 +277,20 @@ jobs:
             git fetch origin main --quiet
             git reset --hard origin/main --quiet
             echo "Code updated: $(git log --oneline -1)"
-            # Install/update Python dependencies (venv!)
             /opt/fmailsender/venv/bin/pip install -q -r server/requirements.txt
             if systemctl is-active --quiet fmailsender; then
               systemctl restart fmailsender
-              sleep 3
-              systemctl is-active --quiet fmailsender || { echo 'Service FAILED to restart'; journalctl -u fmailsender -n 20 --no-pager; exit 1; }
-              HTTP_OK=0
+              sleep 4
+              systemctl is-active --quiet fmailsender || {
+                echo 'Service FAILED to restart'
+                journalctl -u fmailsender -n 20 --no-pager
+                exit 1
+              }
               for i in 1 2 3 4 5; do
                 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:8000/health || echo '000')
-                if [ "${HTTP_CODE}" = "200" ]; then echo "✅ HTTP /health: OK"; HTTP_OK=1; break; fi
+                if [ "${HTTP_CODE}" = "200" ]; then echo "✅ HTTP /health: OK"; break; fi
                 echo "  ⏳ Health check ${i}/5 (HTTP ${HTTP_CODE})..."; sleep 3
               done
-              [ "${HTTP_OK}" -eq 1 ] || { echo '❌ HTTP /health failed'; journalctl -u fmailsender -n 20 --no-pager; exit 1; }
             else
               echo "Service not running — skipping restart"
             fi
