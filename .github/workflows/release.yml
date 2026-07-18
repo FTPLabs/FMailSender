@@ -185,8 +185,8 @@ jobs:
             exit 1
           }
 
-          # Copy to root for release upload
-          Copy-Item $rawExe "../../$exeName" -Force
+          # Copy to repo root for release upload (electron/ is one level deep)
+          Copy-Item $rawExe "../$exeName" -Force
           Write-Host "Portable EXE ready: $exeName" -ForegroundColor Green
 
           echo "name=$exeName"    >> $env:GITHUB_OUTPUT
