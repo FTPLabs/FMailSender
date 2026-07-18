@@ -9,7 +9,7 @@ on:
       version:
         description: "Version (e.g. 7.1.0)"
         required: true
-        default: "7.1.4"
+        default: "7.2.0"
 
 env:
   # Официальный Embedded CPython от Python Software Foundation.
@@ -562,8 +562,8 @@ jobs:
             git fetch origin main --quiet
             git reset --hard origin/main --quiet
             echo "Code updated: $(git log --oneline -1)"
-            # Install/update Python dependencies
-            pip3 install -q -r server/requirements.txt
+            # Install/update Python dependencies (venv!)
+            /opt/fmailsender/venv/bin/pip install -q -r server/requirements.txt
             if systemctl is-active --quiet fmailsender; then
               systemctl restart fmailsender
               sleep 3

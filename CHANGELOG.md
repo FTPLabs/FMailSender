@@ -1,3 +1,13 @@
+## [7.2.0] — 2026-07-18
+
+### Fixed — Code review & CI/CD fixes
+
+- **FIX CI-1 — Python 3.11 → 3.12 в ci.yml**: выровнена версия Python с release.yml (3.12).
+- **FIX CI-2 — Node.js 20 → 22 в ci.yml**: выровнена версия Node с release.yml.
+- **FIX DEPLOY-1 — VPS deploy использовал системный pip3 вместо venv**: исправлено на `/opt/fmailsender/venv/bin/pip` — зависимости теперь ставятся в правильный venv который использует сервис.
+- **FIX VER-1 — все 5 version-файлов синхронизированы на 7.2.0**: core/_version.py, ui/src/version.ts, src-tauri/tauri.conf.json, src-tauri/Cargo.toml, ui/package.json.
+- **FIX REL-1 — default version в release.yml**: обновлён с 7.1.4 до 7.2.0.
+
 ## [7.1.5] — 2026-07-06
 
 ### Fixed — CI/CD и синхронизация метаданных
