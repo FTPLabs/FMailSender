@@ -73,7 +73,7 @@ r_port80=$(check_port "HTTP (nginx)" "80" 2>/dev/null | tail -1)
 r_port443=$(check_port "HTTPS (nginx)" "443" 2>/dev/null | tail -1)
 
 [[ $JSON_MODE == 0 ]] && echo ""
-r_local=$(check_http "API local" "https://127.0.0.1:8000/health" 2>/dev/null | tail -1)
+r_local=$(check_http "API local" "http://127.0.0.1:8000/health" 2>/dev/null | tail -1)
 r_https=$(check_http "fmail.shop HTTPS" "https://fmail.shop/health" 2>/dev/null | tail -1)
 r_root=$(check_http "fmail.shop /" "https://fmail.shop/" 2>/dev/null | tail -1)
 
