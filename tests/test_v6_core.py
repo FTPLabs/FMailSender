@@ -3,7 +3,7 @@ T001 — FMailSender v6 Core Integration Tests
 Новая архитектура: Tauri v2 + FastAPI + React
 
 Покрывают:
-- Версия приложения (APP_VERSION starts with 6.)
+- Версия приложения (валидный SemVer)
 - models.py: SmtpAccount, Recipient, CampaignConfig, CampaignStatus
 - storage.py: сериализация/десериализация (без прокси — сессионные данные)
 - proxy.py: парсинг всех форматов, ProxyManager ротация
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
+import re
 import json
 import tempfile
 import threading
@@ -47,10 +48,11 @@ def check(cond: bool, label: str, detail: str = "") -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_version() -> None:
-    print("\n--- Version: v6 check ---")
+    print("\n--- Version: SemVer check ---")
     from core._version import APP_VERSION
-    check(APP_VERSION.startswith("6."), f"APP_VERSION starts with 6. (got: {APP_VERSION})", f"got {APP_VERSION}")
-    check(APP_VERSION.startswith("6."), "APP_VERSION starts with '6.'", f"got {APP_VERSION}")
+    check(bool(re.fullmatch(r"\d+\.\d+\.\d+", APP_VERSION)),
+          f"APP_VERSION is SemVer (got: {APP_VERSION})", f"got {APP_VERSION}")
+    check(APP_VERSION == "7.3.1", "APP_VERSION matches current release", f"got {APP_VERSION}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -215,7 +217,7 @@ def test_sender_duck_compat() -> None:
         "yahoo.com":   ("smtp.mail.yahoo.com", 465),
         "mail.ru":     ("smtp.mail.ru", 465),
         "yandex.ru":   ("smtp.yandex.ru", 465),
-        "gmx.com":     ("smtp.gmx.com", 587),
+        "gmx.com":     ("mail.gmx.net", 587),
         "outlook.com": ("smtp.office365.com", 587),
         "hotmail.com": ("smtp.office365.com", 587),
     }
@@ -359,7 +361,8 @@ def test_architecture_files() -> None:
     new_required = [
         "core/server.py", "core/models.py", "core/sender.py",
         "core/storage.py", "core/proxy.py", "core/_version.py",
-        "main.py", "requirements.txt", "fmail-core.spec", "portable.nsi",
+        "main.py", "requirements.txt",
+        "backend/src/server.js", "electron/main.js", "electron/package.json",
         "src-tauri/src/main.rs", "src-tauri/tauri.conf.json",
         "ui/src/App.tsx", "ui/src/api.ts", "ui/src/theme.ts",
         "ui/src/pages/Dashboard.tsx", "ui/src/pages/Accounts.tsx",
@@ -372,6 +375,7 @@ def test_architecture_files() -> None:
     # Old arch MUST NOT exist
     old_forbidden = [
         "installer/setup.iss",               # InnoSetup v3.4.3
+        "portable.nsi",                       # legacy NSIS packaging
         "installer/create_wizard_bitmaps.py", # Old bitmap generator
     ]
     for f in old_forbidden:

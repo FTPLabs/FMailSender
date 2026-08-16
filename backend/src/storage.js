@@ -88,7 +88,7 @@ function writeJson(file, data) {
 // ── Accounts ──────────────────────────────────────────────────────────────────
 function saveAccounts(accounts) {
   const data = accounts.map(a => {
-    const d = { ...a }
+    const d = { ...a, proxy: '', proxy_list: [] }
     if (d.password)      d.password      = encrypt(d.password)
     if (d.access_token)  d.access_token  = encrypt(d.access_token)
     if (d.refresh_token) d.refresh_token = encrypt(d.refresh_token)
@@ -104,28 +104,23 @@ function loadAccounts() {
     a.password      = decrypt(a.password || '')
     if (a.access_token)  a.access_token  = decrypt(a.access_token)
     if (a.refresh_token) a.refresh_token = decrypt(a.refresh_token)
+    a.proxy = ''
+    a.proxy_list = []
     return a
   })
 }
 
 // ── Proxies ───────────────────────────────────────────────────────────────────
-let _proxyCache = null
+let _proxyCache = []
 
-function saveProxies(proxies) {
-  _proxyCache = [...proxies]
-  writeJson(PROXIES_FILE, proxies)
-}
-
-function loadProxies() {
-  if (_proxyCache) return [..._proxyCache]
-  const data = readJson(PROXIES_FILE, [])
-  _proxyCache = data.filter(Boolean)
-  return [..._proxyCache]
-}
+function saveProxies(proxies) { _proxyCache = [...proxies] }
+function loadProxies()        { return [..._proxyCache] }
 
 // ── Recipients ────────────────────────────────────────────────────────────────
-function saveRecipients(recipients) { writeJson(RECIPIENTS_FILE, recipients) }
-function loadRecipients()           { return readJson(RECIPIENTS_FILE, []) }
+let _recipientCache = []
+
+function saveRecipients(recipients) { _recipientCache = [...recipients] }
+function loadRecipients()           { return [..._recipientCache] }
 
 // ── Campaign config ───────────────────────────────────────────────────────────
 const CAMPAIGN_DEFAULTS = {

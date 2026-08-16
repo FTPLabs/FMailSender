@@ -117,7 +117,6 @@ async function testSmtpConnection(account) {
     connectionTimeout: 15000,
     greetingTimeout:   10000,
     socketTimeout:     20000,
-    tls: { rejectUnauthorized: false },
     ...(agent ? { socketOptions: { agent } } : {}),
   }
 
@@ -197,7 +196,6 @@ class SendingEngine {
       connectionTimeout: 15000,
       greetingTimeout:   10000,
       socketTimeout:     30000,
-      tls: { rejectUnauthorized: false },
       ...(agent ? { socketOptions: { agent } } : {}),
     }
     if (acc.access_token) {
@@ -228,7 +226,7 @@ class SendingEngine {
     const total   = this.recipients.length
     let   sent    = 0
 
-    const maxWorkers = Math.min(this.config.max_threads || 5, this.accounts.length || 1, total)
+    const maxWorkers = Math.min(this.config.max_threads || 4, 4, this.accounts.length || 1, total)
     const queue = [...this.recipients]
 
     const worker = async () => {

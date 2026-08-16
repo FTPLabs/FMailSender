@@ -1,6 +1,6 @@
 'use strict'
 /**
- * FMailSender — Node.js Express Backend v7.3.0
+ * FMailSender — Node.js Express Backend v7.3.1
  * Drop-in replacement for Python FastAPI core/server.py
  * All endpoints identical, port 7531.
  */
@@ -15,7 +15,7 @@ const sender   = require('./sender')
 const license  = require('./license')
 const { getSmtpConfigForDomain } = require('./smtp_configs')
 
-const APP_VERSION = '7.3.0'
+const APP_VERSION = '7.3.1'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 
@@ -216,7 +216,12 @@ app.post('/api/proxies', (req, res) => {
 app.post('/api/proxies/check', async (req, res) => {
   const raw     = req.body.proxies || _proxies
   const toCheck = raw.map(proxy.parseProxy).filter(Boolean)
-  const results = await Promise.all(toCheck.map(proxy.validateProxy))
+  const sem = _semaphore(4)
+  const results = await Promise.all(toCheck.map(async item => {
+    await sem.acquire()
+    try { return await proxy.validateProxy(item) }
+    finally { sem.release() }
+  }))
   res.json({ results, valid: results.filter(r => r.ok).length, smtp_ok: results.filter(r => r.smtp_ok).length, total: toCheck.length })
 })
 
@@ -468,13 +473,12 @@ function _semaphore(n) {
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────
-_init()
-license.startPeriodicCheck(_stopCampaign)
-
 if (TEST_MODE) {
   console.log(`FMailSender Node.js backend v${APP_VERSION} — import test OK`)
   process.exit(0)
 }
+_init()
+license.startPeriodicCheck(_stopCampaign)
 
 const server = http.createServer(app)
 server.listen(PORT, '127.0.0.1', () => {

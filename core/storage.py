@@ -77,6 +77,8 @@ def save_accounts(accounts: list[SmtpAccount]) -> None:
     data = []
     for a in accounts:
         d = a.to_dict()
+        d["proxy"] = ""
+        d["proxy_list"] = []
         d["password"] = _enc(d["password"])
         if d.get("access_token"):
             d["access_token"] = _enc(d["access_token"])
@@ -98,8 +100,8 @@ def load_accounts() -> list[SmtpAccount]:
                 d["access_token"] = _dec(d["access_token"])
             if d.get("refresh_token"):  # FIX SEC-1: decrypt refresh_token
                 d["refresh_token"] = _dec(d["refresh_token"])
-            d["proxy"] = d.get("proxy", "")
-            d["proxy_list"] = d.get("proxy_list", [])  # FIX v6.3: load saved proxy_list
+            d["proxy"] = ""
+            d["proxy_list"] = []
             accounts.append(SmtpAccount.from_dict(d))
         return accounts
     except Exception as exc:
@@ -115,40 +117,24 @@ _proxy_cache: list[str] = []
 def save_proxies(proxies: list[str]) -> None:
     global _proxy_cache
     _proxy_cache = list(proxies)
-    PROXIES_FILE.write_text(json.dumps(proxies, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_proxies() -> list[str]:
-    global _proxy_cache
-    if _proxy_cache:
-        return list(_proxy_cache)
-    if PROXIES_FILE.exists():
-        try:
-            data = json.loads(PROXIES_FILE.read_text(encoding="utf-8"))
-            _proxy_cache = [str(p) for p in data if p]
-        except Exception as exc:
-            logger.error("Failed to load proxies from %s: %s", PROXIES_FILE, exc)
-            _proxy_cache = []
     return list(_proxy_cache)
 
 
 # ── Recipients ───────────────────────────────────────────────────────────────
 
+_recipient_cache: list[Recipient] = []
+
+
 def save_recipients(recipients: list[Recipient]) -> None:
-    RECIPIENTS_FILE.write_text(
-        json.dumps([r.to_dict() for r in recipients], ensure_ascii=False, indent=2),
-        encoding="utf-8"
-    )
+    global _recipient_cache
+    _recipient_cache = list(recipients)
 
 
 def load_recipients() -> list[Recipient]:
-    if not RECIPIENTS_FILE.exists():
-        return []
-    try:
-        return [Recipient.from_dict(d) for d in json.loads(RECIPIENTS_FILE.read_text(encoding="utf-8"))]
-    except Exception as exc:
-        logger.error("Failed to load recipients from %s: %s", RECIPIENTS_FILE, exc)
-        return []
+    return list(_recipient_cache)
 
 
 # ── Campaign config ───────────────────────────────────────────────────────────

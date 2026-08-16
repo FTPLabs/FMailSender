@@ -4,6 +4,6 @@
 const { contextBridge } = require('electron')
 
 contextBridge.exposeInMainWorld('fmailApp', {
-  version: process.env.npm_package_version || '7.3.0',
+  version: process.env.npm_package_version || '7.3.1',
   platform: process.platform,
 })

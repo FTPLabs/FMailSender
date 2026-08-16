@@ -1057,13 +1057,6 @@ def _test_smtp_sync(account: "SmtpAccount") -> tuple[bool, str]:
         return False, msg  # Пароль неверен — дальше пробовать бессмысленно
     _msg1 = msg  # FIX v5.2.3+: сохраняем тип ошибки Step 1
 
-    # ── Шаг 2: та же конфигурация без cert-verify (self-signed SSL) ──────────
-    ok, msg = _attempt(account.host, account.port, account.use_ssl, account.use_tls, verify=False)
-    if ok is True:
-        return True, msg
-    if ok is False:
-        return False, msg
-
     # FIX v5.2.3+: если прокси задан и обе попытки вернули SMTP-уровневую ошибку
     # (IP прокси заблокирован SMTP-сервером), перебор 12 портов через тот же прокси
     # бессмысленен — все провалятся, а это ~6-8 сек потерянного времени на аккаунт.

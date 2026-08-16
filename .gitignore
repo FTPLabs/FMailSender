@@ -9,6 +9,12 @@
   dist/
   build/
   .eggs/
+  .venv/
+  venv/
+  backend/node_modules/
+  backend/package-lock.json
+  electron/node_modules/
+  ui/package-lock.json
 
   # PyInstaller
   *.spec.bak
@@ -33,6 +39,13 @@
   server/licenses.db
   server/fsm_storage.json
   server/fsm_storage.tmp
+  server/*.bak
+  server/*.bak_*
+  server/*.backup_*
+  server/downloads/
+  server/ssl/
+  server/venv/
+  assets/images/*.ico
 
   # Logs
   *.log
