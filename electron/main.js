@@ -1,12 +1,13 @@
 'use strict'
 /**
- * FMailSender Electron Main Process v7.3.2
+ * FMailSender Electron Main Process v7.3.3
  * Starts the Node.js backend then opens the BrowserWindow.
  * Replaces src-tauri/src/main.rs entirely.
  */
-const { app, BrowserWindow, shell, Menu, Tray, nativeImage } = require('electron')
+const { app, BrowserWindow, shell, Menu, Tray, nativeImage, dialog } = require('electron')
 const path = require('path')
-const { fork } = require('child_process')
+const fs = require('fs')
+const { spawn } = require('child_process')
 
 // Handle Squirrel startup events (Windows installer)
 if (require('electron-squirrel-startup')) app.quit()
@@ -16,6 +17,8 @@ const CORE_PORT    = 7531
 const HEALTH_URL   = `http://127.0.0.1:${CORE_PORT}/api/health`
 const HEALTH_TRIES = 60   // up to 30 s (60 × 500 ms)
 const isDev        = !app.isPackaged
+const hasSingleInstance = app.requestSingleInstanceLock()
+if (!hasSingleInstance) app.quit()
 
 // ── Resolve paths ─────────────────────────────────────────────────────────────
 function getResourcesDir() {
@@ -44,22 +47,30 @@ let _backendProc = null
 function startBackend() {
   const entry = getBackendEntry()
   const uiDist = getUiDist()
+  if (!fs.existsSync(entry)) throw new Error(`Backend entry missing: ${entry}`)
+  if (!fs.existsSync(uiDist)) throw new Error(`UI assets missing: ${uiDist}`)
 
-  _backendProc = fork(entry, [], {
+  // In a packaged Electron app, fork() can relaunch the GUI executable rather
+  // than a Node child. Explicit ELECTRON_RUN_AS_NODE makes the backend mode
+  // deterministic on Windows, while process.execPath stays portable.
+  _backendProc = spawn(process.execPath, [entry], {
+    cwd: path.dirname(entry),
     env: {
       ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
       FMAIL_PORT:    String(CORE_PORT),
       FMAIL_UI_DIST: uiDist,
       FMAIL_DATA_DIR: path.join(app.getPath('appData'), 'FMailSender'),
       NODE_ENV:      isDev ? 'development' : 'production',
     },
-    silent: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
     detached: false,
   })
 
+  _backendProc.on('error', err => console.error('[backend] spawn error:', err.message))
   _backendProc.stdout?.on('data', d => console.log('[backend]', d.toString().trim()))
   _backendProc.stderr?.on('data', d => console.error('[backend]', d.toString().trim()))
-
   _backendProc.on('exit', (code, signal) => {
     console.log(`[backend] exited code=${code} signal=${signal}`)
     _backendProc = null
@@ -80,8 +91,20 @@ async function waitForBackend() {
     try {
       await new Promise((resolve, reject) => {
         const req = http.get(HEALTH_URL, res => {
-          res.on('data', () => {})
-          res.on('end', () => resolve())
+          let body = ''
+          res.setEncoding('utf8')
+          res.on('data', chunk => { body += chunk })
+          res.on('end', () => {
+            try {
+              const payload = JSON.parse(body)
+              if (res.statusCode !== 200 || payload.ok !== true) {
+                return reject(new Error(`health status ${res.statusCode}`))
+              }
+              resolve()
+            } catch (err) {
+              reject(err)
+            }
+          })
         })
         req.on('error', reject)
         req.setTimeout(1000, () => { req.destroy(); reject(new Error('timeout')) })
@@ -161,7 +184,11 @@ app.on('ready', async () => {
   startBackend()
   const ok = await waitForBackend()
   if (!ok) {
-    console.error('[main] Backend failed to start within 30s — opening anyway')
+    const message = `Ядро FMailSender не запустилось на порту ${CORE_PORT}.`
+    console.error(`[main] ${message}`)
+    dialog.showErrorBox('Ошибка запуска ядра', message)
+    app.quit()
+    return
   }
   createWindow()
   createTray()
