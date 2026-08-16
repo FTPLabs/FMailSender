@@ -1,62 +1,59 @@
 # Python
-  __pycache__/
-  *.py[cod]
-  *.pyo
-  *.pyd
-  *.so
-  *.egg
-  *.egg-info/
-  dist/
-  build/
-  .eggs/
-  .venv/
-  venv/
-  backend/node_modules/
-  backend/package-lock.json
-  electron/node_modules/
-  ui/package-lock.json
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+.eggs/
+.venv/
+venv/
 
-  # PyInstaller
-  *.spec.bak
-  src-tauri/binaries/*.exe
+# Build artefacts
+dist/
+build/
+*.spec.bak
+src-tauri/binaries/*.exe
+src-tauri/target/
 
-  # Vite / React
-  ui/node_modules/
-  ui/dist/
+# JavaScript dependencies and generated files
+backend/node_modules/
+backend/package-lock.json
+electron/node_modules/
+electron/package-lock.json
+ui/node_modules/
+ui/package-lock.json
+ui/dist/
 
-  # Rust / Tauri
-  src-tauri/target/
+# Local application data and secrets
+data/
+server/.env
+server/.env.*
+server/*.db
+server/fsm_storage.json
+server/fsm_storage.tmp
+server/*.bak
+server/*.bak_*
+server/*.backup_*
+server/downloads/
+server/ssl/
+server/static/
+server/venv/
 
-  # Data (НИКОГДА не коммитить — содержат зашифрованные учётные данные)
-  data/accounts.json
-  data/global_proxies.json
-  data/recipients.json
-  data/campaign.json
-  data/.fernet_key
+# Generated assets and logs
+assets/images/*.ico
+*.log
+logs/
 
-  # Server secrets
-  server/.env
-  server/licenses.db
-  server/fsm_storage.json
-  server/fsm_storage.tmp
-  server/*.bak
-  server/*.bak_*
-  server/*.backup_*
-  server/downloads/
-  server/ssl/
-  server/venv/
-  assets/images/*.ico
+# IDE and OS files
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
 
-  # Logs
-  *.log
-  logs/
-
-  # IDE
-  .idea/
-  .vscode/settings.json
-  *.swp
-  *.swo
-  .DS_Store
-  Thumbs.db
-  desktop.ini
-  
+# Legacy local archive; not part of the current release source tree
+core/CHANGELOG.md
