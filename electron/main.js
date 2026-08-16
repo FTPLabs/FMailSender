@@ -1,6 +1,6 @@
 'use strict'
 /**
- * FMailSender Electron Main Process v7.3.1
+ * FMailSender Electron Main Process v7.3.2
  * Starts the Node.js backend then opens the BrowserWindow.
  * Replaces src-tauri/src/main.rs entirely.
  */

@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 7.3.1)"
+        description: "Version (e.g. 7.3.2)"
         required: true
-        default: "7.3.1"
+        default: "7.3.2"
 
 env:
   NODE_VERSION: "22"
@@ -222,6 +222,36 @@ jobs:
             exit 1
           }
 
+      - name: "Windows startup smoke-test (packaged EXE)"
+        shell: pwsh
+        run: |
+          $exeName = "${{ steps.build_exe.outputs.name }}"
+          $dataDir = Join-Path $env:RUNNER_TEMP "fmailsender-smoke-data"
+          Remove-Item -Recurse -Force $dataDir -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $dataDir | Out-Null
+          $env:FMAIL_DATA_DIR = $dataDir
+          $process = Start-Process -FilePath (Join-Path $PWD $exeName) -ArgumentList "--disable-gpu" -PassThru
+          $deadline = (Get-Date).AddSeconds(90)
+          $health = $null
+          try {
+            do {
+              Start-Sleep -Seconds 2
+              try {
+                $health = Invoke-RestMethod -Uri "http://127.0.0.1:7531/api/health" -TimeoutSec 3
+              } catch {
+                $health = $null
+              }
+            } while (-not $health -and (Get-Date) -lt $deadline)
+
+            if (-not $health -or $health.ok -ne $true -or $health.version -ne "${{ steps.tag.outputs.version }}") {
+              throw "Packaged EXE did not expose a valid health endpoint within 90 seconds."
+            }
+            Write-Host "[OK] Packaged EXE health: version=$($health.version)" -ForegroundColor Green
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            Remove-Item -Recurse -Force $dataDir -ErrorAction SilentlyContinue
+          }
+
       # ── GitHub Release ────────────────────────────────────────────────────────
 
       - name: "GitHub Release"
@@ -239,7 +269,7 @@ jobs:
             1. Скачайте **FMailSender_v${{ steps.tag.outputs.version }}.exe**
             2. Запустите — приложение откроется мгновенно
 
-            ### Архитектура v7.3.1 (Electron + Node.js — новое ядро)
+            ### Архитектура v7.3.2 (Electron + Node.js — новое ядро)
             - **Electron** — Chromium WebView + Node.js runtime (нет AV-блокировок)
             - **Node.js backend** — Express сервер, запускается за ~200 мс (vs 60 с у Python)
             - **Nodemailer** — нативная SMTP-отправка с поддержкой SOCKS5/HTTP прокси
