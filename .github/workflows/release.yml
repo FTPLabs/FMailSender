@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 7.3.3)"
+        description: "Version (e.g. 7.3.4)"
         required: true
-        default: "7.3.3"
+        default: "7.3.4"
 
 env:
   NODE_VERSION: "22"
@@ -247,6 +247,15 @@ jobs:
               throw "Packaged EXE did not expose a valid health endpoint within 90 seconds."
             }
             Write-Host "[OK] Packaged EXE health: version=$($health.version)" -ForegroundColor Green
+            $statusProbe = Invoke-WebRequest -Uri "http://127.0.0.1:7531/api/status" -SkipHttpErrorCheck -TimeoutSec 5
+            if ($statusProbe.StatusCode -ne 403) {
+              throw "Expected license-protected status endpoint to return 403 before activation; got $($statusProbe.StatusCode)."
+            }
+            $rootProbe = Invoke-WebRequest -Uri "http://127.0.0.1:7531/" -TimeoutSec 5
+            if ($rootProbe.StatusCode -ne 200 -or $rootProbe.Content -notmatch '<!doctype html>') {
+              throw "Packaged backend did not serve the UI root page."
+            }
+            Write-Host "[OK] Backend status guard and UI root page" -ForegroundColor Green
           } finally {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
             Remove-Item -Recurse -Force $dataDir -ErrorAction SilentlyContinue
@@ -269,7 +278,7 @@ jobs:
             1. Скачайте **FMailSender_v${{ steps.tag.outputs.version }}.exe**
             2. Запустите — приложение откроется мгновенно
 
-            ### Архитектура v7.3.3 (Electron + Node.js — новое ядро)
+            ### Архитектура v7.3.4 (Electron + Node.js — новое ядро)
             - **Electron** — Chromium WebView + Node.js runtime (нет AV-блокировок)
             - **Node.js backend** — Express сервер, запускается за ~200 мс (vs 60 с у Python)
             - **Nodemailer** — нативная SMTP-отправка с поддержкой SOCKS5/HTTP прокси

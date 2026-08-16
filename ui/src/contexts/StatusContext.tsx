@@ -76,11 +76,18 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await api.status()
-      if (isValidStatus(data)) {
-        markOnline()
-        setStatus(data)
-      }
+      // Health is deliberately license-free. The startup overlay must learn
+      // that the local backend is alive before it shows license activation.
+      const health = await api.health()
+      if (!health || health.ok !== true) return
+      markOnline()
+
+      // Detailed status remains license-protected. A 403 here is expected
+      // before activation and must never return the UI to an endless boot wait.
+      try {
+        const data = await api.status()
+        if (isValidStatus(data)) setStatus(data)
+      } catch {}
     } catch {}
   }, [markOnline])
 

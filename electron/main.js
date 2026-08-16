@@ -1,10 +1,10 @@
 'use strict'
 /**
- * FMailSender Electron Main Process v7.3.3
+ * FMailSender Electron Main Process v7.3.4
  * Starts the Node.js backend then opens the BrowserWindow.
  * Replaces src-tauri/src/main.rs entirely.
  */
-const { app, BrowserWindow, shell, Menu, Tray, nativeImage, dialog } = require('electron')
+const { app, BrowserWindow, shell, Menu, Tray, nativeImage, dialog, ipcMain } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { spawn } = require('child_process')
@@ -44,6 +44,20 @@ function getUiDist() {
 // ── Backend process ───────────────────────────────────────────────────────────
 let _backendProc = null
 
+function coreLog(message) {
+  try {
+    const logPath = path.join(app.getPath('userData'), 'core.log')
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`, 'utf8')
+  } catch {}
+}
+
+ipcMain.handle('app:restart', () => {
+  coreLog('application relaunch requested by user')
+  app.relaunch()
+  app.exit(0)
+  return true
+})
+
 function startBackend() {
   const entry = getBackendEntry()
   const uiDist = getUiDist()
@@ -53,6 +67,7 @@ function startBackend() {
   // In a packaged Electron app, fork() can relaunch the GUI executable rather
   // than a Node child. Explicit ELECTRON_RUN_AS_NODE makes the backend mode
   // deterministic on Windows, while process.execPath stays portable.
+  coreLog(`starting backend entry=${entry} ui=${uiDist}`)
   _backendProc = spawn(process.execPath, [entry], {
     cwd: path.dirname(entry),
     env: {
@@ -68,11 +83,23 @@ function startBackend() {
     detached: false,
   })
 
-  _backendProc.on('error', err => console.error('[backend] spawn error:', err.message))
-  _backendProc.stdout?.on('data', d => console.log('[backend]', d.toString().trim()))
-  _backendProc.stderr?.on('data', d => console.error('[backend]', d.toString().trim()))
+  _backendProc.on('error', err => {
+    console.error('[backend] spawn error:', err.message)
+    coreLog(`backend spawn error: ${err.message}`)
+  })
+  _backendProc.stdout?.on('data', d => {
+    const message = d.toString().trim()
+    console.log('[backend]', message)
+    if (message) coreLog(`[stdout] ${message}`)
+  })
+  _backendProc.stderr?.on('data', d => {
+    const message = d.toString().trim()
+    console.error('[backend]', message)
+    if (message) coreLog(`[stderr] ${message}`)
+  })
   _backendProc.on('exit', (code, signal) => {
     console.log(`[backend] exited code=${code} signal=${signal}`)
+    coreLog(`backend exited code=${code} signal=${signal}`)
     _backendProc = null
   })
 }
@@ -186,7 +213,8 @@ app.on('ready', async () => {
   if (!ok) {
     const message = `Ядро FMailSender не запустилось на порту ${CORE_PORT}.`
     console.error(`[main] ${message}`)
-    dialog.showErrorBox('Ошибка запуска ядра', message)
+    coreLog(message)
+    dialog.showErrorBox('Ошибка запуска ядра', `${message}\nЛог: %APPDATA%\\FMailSender\\core.log`)
     app.quit()
     return
   }

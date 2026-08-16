@@ -207,8 +207,20 @@ export default function StartupOverlay() {
     setDisplayElapsed(0)
     setElapsed(0)
     setProgress(0)
-    await invokeTauri('restart_core')
-    setTimeout(() => setRestarting(false), 3000)
+    try {
+      const bridge = (window as unknown as {
+        fmailApp?: { restartApp?: () => Promise<boolean> }
+      }).fmailApp
+      if (typeof bridge?.restartApp === 'function') {
+        await bridge.restartApp()
+        return // Electron process exits immediately after scheduling relaunch.
+      }
+      window.location.reload()
+    } catch (err) {
+      setCoreStage('failed')
+      setCoreMsg((err as Error).message || 'Не удалось перезапустить приложение')
+      setRestarting(false)
+    }
   }
 
   if (!visible) return null
@@ -361,7 +373,7 @@ export default function StartupOverlay() {
         <div className="mt-5 max-w-sm px-4 w-full">
           <div className="rounded-xl p-4" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.22)' }}>
             <p className="text-[0.78rem] leading-relaxed mb-3" style={{ color: 'rgba(252,165,165,0.9)' }}>
-              {coreMsg || 'Не удалось запустить Python ядро.'}
+              {coreMsg || 'Не удалось запустить локальное ядро.'}
             </p>
             <p className="text-[0.7rem] leading-relaxed" style={{ color: '#5a5a8a' }}>
               Добавьте <code>%LOCALAPPDATA%\FMailSender</code> в исключения антивируса и нажмите «Перезапустить».
