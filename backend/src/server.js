@@ -1,6 +1,6 @@
 'use strict'
 /**
- * FMailSender — Node.js Express Backend v7.5.1
+ * FMailSender — Node.js Express Backend v7.5.2
  * Drop-in replacement for Python FastAPI core/server.py
  * All endpoints identical, port 7531.
  */
@@ -15,7 +15,7 @@ const sender   = require('./sender')
 const license  = require('./license')
 const { getSmtpConfigForDomain, getSmtpPresetForEmail } = require('./smtp_configs')
 
-const APP_VERSION = '7.5.1'
+const APP_VERSION = '7.5.2'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 

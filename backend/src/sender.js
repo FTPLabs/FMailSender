@@ -109,6 +109,49 @@ function makeProxyAgent(proxyUrl, secure) {
   throw new Error('Поддерживаются только HTTP(S), SOCKS4 и SOCKS5 proxy.')
 }
 
+function providerFromEmail(email) {
+  const domain = String(email || '').trim().toLowerCase().split('@').pop() || ''
+  if (domain === 'gmx.com' || domain.startsWith('gmx.')) return 'gmx'
+  if (['rambler.ru', 'lenta.ru', 'ro.ru', 'autorambler.ru', 'myrambler.ru'].includes(domain)) return 'rambler'
+  return ''
+}
+
+function sanitizedTransportError(err, email) {
+  const message = String(err?.message || err || 'Неизвестная ошибка')
+    .replaceAll(String(email || ''), '[account]')
+    .replace(/\b(?:AUTH(?:\s+PLAIN)?|LOGIN|XOAUTH2)\b.*$/gim, '[auth data hidden]')
+  return message.slice(0, 220)
+}
+
+/**
+ * Produces a user-safe diagnostic. It deliberately does not disclose a supplied
+ * password or server response credentials, and it never retries authentication.
+ */
+function classifySmtpError(err, account) {
+  const provider = providerFromEmail(account?.email)
+  const code = String(err?.code || '').toUpperCase()
+  const responseCode = Number(err?.responseCode || 0)
+  const raw = String(err?.message || err || '').toLowerCase()
+  const authFailure = code === 'EAUTH' || [530, 534, 535, 538].includes(responseCode) ||
+    /auth(?:entication)?\s+(?:failed|required)|invalid\s+(?:login|credential)|login\s+not\s+allowed|username and password/.test(raw)
+  const networkFailure = ['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENOTFOUND', 'ETIMEDOUT', 'ESOCKET'].includes(code) ||
+    /timed?\s*out|connection\s+(?:refused|reset)|getaddrinfo/.test(raw)
+  const tlsFailure = code === 'ETLS' || /certificate|tls|ssl|wrong version number/.test(raw)
+  const temporaryFailure = [421, 450, 451, 452, 454].includes(responseCode) || /temporar|too many|rate.?limit|try again later/.test(raw)
+
+  if (authFailure && provider === 'gmx') {
+    return 'GMX: аутентификация не пройдена. Проверьте адрес и пароль. При 2FA используйте app password, а в GMX включите POP3/IMAP для внешних клиентов.'
+  }
+  if (authFailure && provider === 'rambler') {
+    return 'Rambler: аутентификация не пройдена. Включите доступ почтовых клиентов в «Настройки → Программы». При 2FA создайте пароль для почтовых протоколов и используйте его вместо основного.'
+  }
+  if (authFailure) return 'SMTP: аутентификация не пройдена. Проверьте адрес, пароль приложения и настройки доступа внешнего клиента.'
+  if (temporaryFailure) return 'SMTP: временное ограничение со стороны провайдера. Не повторяйте вход автоматически; проверьте уведомления в веб-почте и попробуйте позже.'
+  if (tlsFailure) return 'SMTP: ошибка TLS/сертификата. Сверьте хост, порт и тип шифрования с официальной документацией провайдера.'
+  if (networkFailure) return 'SMTP: сервер недоступен по сети. Проверьте хост, порт, firewall и proxy; учётные данные не проверялись.'
+  return `SMTP: ${sanitizedTransportError(err, account?.email)}`
+}
+
 // ── SMTP connection test ──────────────────────────────────────────────────────
 async function testSmtpConnection(account) {
   const domain = account.email.split('@')[1] || ''
@@ -149,7 +192,7 @@ async function testSmtpConnection(account) {
     return [true, 'OK']
   } catch (err) {
     transporter.close()
-    return [false, err.message || String(err)]
+    return [false, classifySmtpError(err, account)]
   }
 }
 
@@ -208,7 +251,7 @@ class SendingEngine {
       agent = proxy ? makeProxyAgent(proxy, secure) : undefined
     } catch (err) {
       if (lim) { lim.sentToday--; lim.sentHour-- }
-      return { success: false, error: err.message || String(err), account_used: acc.email, recipient_email: recipient.email }
+      return { success: false, error: classifySmtpError(err, acc), account_used: acc.email, recipient_email: recipient.email }
     }
 
     const transportOpts = {
@@ -241,7 +284,7 @@ class SendingEngine {
     } catch (err) {
       transporter.close()
       if (lim) { lim.sentToday--; lim.sentHour-- }
-      return { success: false, error: err.message || String(err), account_used: acc.email, recipient_email: recipient.email }
+      return { success: false, error: classifySmtpError(err, acc), account_used: acc.email, recipient_email: recipient.email }
     }
   }
 
@@ -283,4 +326,4 @@ class SendingEngine {
   }
 }
 
-module.exports = { testSmtpConnection, SendingEngine, getSmtpConfigForDomain }
+module.exports = { testSmtpConnection, SendingEngine, getSmtpConfigForDomain, classifySmtpError }

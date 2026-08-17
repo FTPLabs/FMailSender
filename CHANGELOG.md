@@ -1,3 +1,10 @@
+## [7.5.2] — 2026-08-17
+
+### Authentication diagnostics
+- SMTP connection tests now classify GMX and Rambler authentication, client-access, 2FA/app-password, temporary provider restriction, TLS and network errors.
+- User-facing diagnostics never echo SMTP authentication payloads or account email addresses from transport errors.
+- No automatic retry, downgrade, TLS bypass, or abuse-control bypass was added.
+
 ## [7.5.1] — 2026-08-17
 
 ### IMAP autofill
