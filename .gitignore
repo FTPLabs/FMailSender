@@ -27,6 +27,9 @@ ui/package-lock.json
 ui/dist/
 
 # Local application data and secrets
+.env
+.env.*
+*.db
 data/
 server/.env
 server/.env.*

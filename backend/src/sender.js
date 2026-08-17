@@ -13,6 +13,20 @@ const { getSmtpConfigForDomain } = require('./smtp_configs')
 // ── Utilities ─────────────────────────────────────────────────────────────────
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+
+const HEADER_MAX = 180
+function safeHeader(value, field, max = HEADER_MAX) {
+  const text = String(value ?? '').trim()
+  if (/[\r\n\0]/.test(text)) throw new Error(`${field} содержит недопустимый перенос строки.`)
+  if (text.length > max) throw new Error(`${field} превышает допустимую длину.`)
+  return text
+}
+function safeEmail(value, field) {
+  const email = safeHeader(value, field, 254)
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(`${field} имеет некорректный формат.`)
+  return email
+}
+
 function randBetween(min, max) {
   return Math.random() * (max - min) + min
 }
@@ -82,16 +96,17 @@ class AccountLimits {
 // ── Proxy agent factory ───────────────────────────────────────────────────────
 function makeProxyAgent(proxyUrl, secure) {
   if (!proxyUrl) return undefined
-  try {
-    const u = new URL(proxyUrl.includes('://') ? proxyUrl : 'socks5://' + proxyUrl)
-    const scheme = u.protocol.replace(':', '')
-    if (scheme === 'socks5' || scheme === 'socks4') {
-      return new SocksProxyAgent(proxyUrl)
-    }
-    // HTTP CONNECT proxy
+  let u
+  try { u = new URL(proxyUrl.includes('://') ? proxyUrl : 'socks5://' + proxyUrl) }
+  catch { throw new Error('Некорректный формат proxy URL.') }
+  const scheme = u.protocol.replace(':', '').toLowerCase()
+  if (!u.hostname || !u.port) throw new Error('Proxy URL должен содержать host и port.')
+  if (scheme === 'socks5' || scheme === 'socks4') return new SocksProxyAgent(u.toString())
+  if (scheme === 'http' || scheme === 'https') {
     const Agent = secure ? HttpsProxyAgent : require('hpagent').HttpProxyAgent
-    return new Agent({ proxy: proxyUrl })
-  } catch { return undefined }
+    return new Agent({ proxy: u.toString() })
+  }
+  throw new Error('Поддерживаются только HTTP(S), SOCKS4 и SOCKS5 proxy.')
 }
 
 // ── SMTP connection test ──────────────────────────────────────────────────────
@@ -107,7 +122,9 @@ async function testSmtpConnection(account) {
   if (!host) return [false, `Неизвестный провайдер: ${domain}. Укажите хост вручную.`]
 
   const proxy = account.proxy || ''
-  const agent = proxy ? makeProxyAgent(proxy, secure) : undefined
+  let agent
+  try { agent = proxy ? makeProxyAgent(proxy, secure) : undefined }
+  catch (err) { return [false, err.message || String(err)] }
 
   const transportOpts = {
     host, port,
@@ -178,17 +195,21 @@ class SendingEngine {
       return { success: false, error: `Unknown provider: ${domain}`, account_used: acc.email, recipient_email: recipient.email }
     }
 
-    // Substitute template vars
-    const subject  = spintax(substituteVars(this.template.subject || '', recipient))
-    let   bodyHtml = substituteVars(this.template.body_html || '', recipient)
-    const bodyText = substituteVars(this.template.body_text || '', recipient)
-
-    // Uniqueize HTML (fingerprint comment)
-    if (this.config.uniqueize && bodyHtml) bodyHtml = addFingerprint(bodyHtml)
-
-    const fromName = acc.display_name || (this.template.from_name || '')
-    const proxy    = acc.proxy || ''
-    const agent    = proxy ? makeProxyAgent(proxy, secure) : undefined
+    let subject, bodyHtml, bodyText, fromName, recipientName, recipientEmail, replyTo, agent
+    try {
+      subject = safeHeader(spintax(substituteVars(this.template.subject || '', recipient)), 'Тема')
+      bodyHtml = substituteVars(this.template.body_html || '', recipient)
+      bodyText = substituteVars(this.template.body_text || '', recipient)
+      fromName = safeHeader(acc.display_name || (this.template.from_name || ''), 'Имя отправителя', 120)
+      recipientName = safeHeader(recipient.name || '', 'Имя получателя', 120)
+      recipientEmail = safeEmail(recipient.email, 'Адрес получателя')
+      replyTo = this.template.reply_to ? safeEmail(this.template.reply_to, 'Reply-To') : ''
+      const proxy = acc.proxy || ''
+      agent = proxy ? makeProxyAgent(proxy, secure) : undefined
+    } catch (err) {
+      if (lim) { lim.sentToday--; lim.sentHour-- }
+      return { success: false, error: err.message || String(err), account_used: acc.email, recipient_email: recipient.email }
+    }
 
     const transportOpts = {
       host, port, secure, requireTLS,
@@ -196,6 +217,9 @@ class SendingEngine {
       connectionTimeout: 15000,
       greetingTimeout:   10000,
       socketTimeout:     30000,
+      disableFileAccess: true,
+      disableUrlAccess: true,
+      tls: { rejectUnauthorized: true, minVersion: 'TLSv1.2' },
       ...(agent ? { socketOptions: { agent } } : {}),
     }
     if (acc.access_token) {
@@ -206,11 +230,11 @@ class SendingEngine {
     try {
       await transporter.sendMail({
         from:    fromName ? `"${fromName}" <${acc.email}>` : acc.email,
-        to:      recipient.name ? `"${recipient.name}" <${recipient.email}>` : recipient.email,
+        to:      recipientName ? `"${recipientName}" <${recipientEmail}>` : recipientEmail,
         subject,
         html:    bodyHtml || undefined,
         text:    bodyText || undefined,
-        replyTo: this.template.reply_to || undefined,
+        replyTo: replyTo || undefined,
       })
       transporter.close()
       return { success: true, account_used: acc.email, recipient_email: recipient.email }

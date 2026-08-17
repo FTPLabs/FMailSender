@@ -2897,6 +2897,50 @@ async def activate(req: ActivateRequest):
     }
 
 
+class AiTemplateRequest(BaseModel):
+    key: str
+    hwid: str
+    mode: str
+    brief: str = ""
+    subject: str = ""
+    body_html: str = ""
+    body_text: str = ""
+
+
+async def _require_ai_license(key_raw: str, hwid_raw: str) -> dict:
+    key = key_raw.strip().upper()
+    hwid = hwid_raw.strip().upper()
+    if not key or not hwid:
+        raise HTTPException(status_code=400, detail="Не переданы данные лицензии.")
+    lic = await db.get_license(key)
+    if not lic:
+        raise HTTPException(status_code=404, detail="License not found")
+    if not lic.get("is_active"):
+        raise HTTPException(status_code=403, detail="License revoked")
+    try:
+        expires_at = datetime.fromisoformat(str(lic.get("expires_at", "")).replace("Z", "+00:00"))
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Invalid expiry date") from exc
+    if datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(status_code=403, detail="License expired")
+    existing_hwid = str(lic.get("hwid", ""))
+    if existing_hwid and existing_hwid.upper() != hwid:
+        raise HTTPException(status_code=403, detail="HWID mismatch")
+    return lic
+
+
+@api_app.post("/v1/ai/templates")
+async def create_ai_template(req: AiTemplateRequest):
+    await _require_ai_license(req.key, req.hwid)
+    from gemini_templates import create_template
+    return await create_template(
+        license_key=req.key.strip().upper(), mode=req.mode, brief=req.brief,
+        subject=req.subject, body_html=req.body_html, body_text=req.body_text,
+    )
+
+
 class VerifyRequest(BaseModel):
     key: str
     hwid: str

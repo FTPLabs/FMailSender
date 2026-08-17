@@ -97,6 +97,21 @@ export interface CampaignStatus {
   errors: string[]
 }
 
+export interface AiTemplateRequest {
+  mode: 'generate' | 'refine'
+  brief?: string
+  subject?: string
+  body_html?: string
+  body_text?: string
+}
+
+export interface AiTemplateResult {
+  subject: string
+  body_html: string
+  body_text: string
+  model: string
+}
+
 export interface AppStatus {
   campaign: CampaignStatus
   accounts: { total: number; valid: number; invalid: number; untested: number; ready: number }
@@ -140,6 +155,10 @@ export const api = {
       return _http.post('/api/recipients/import-txt', fd).then(r => r.data)
     },
     clear:     ()                        => _http.delete('/api/recipients').then(r => r.data),
+  },
+
+  ai: {
+    template: (payload: AiTemplateRequest) => _http.post<AiTemplateResult>('/api/ai/template', payload).then(r => r.data),
   },
 
   campaign: {

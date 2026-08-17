@@ -11,38 +11,38 @@ const HTTP_PORTS = new Set([80, 8080, 8088, 8118, 3128, 3129, 8443, 8888, 8889, 
  * Normalise proxy string → scheme://[user:pass@]host:port
  */
 function parseProxy(raw) {
-  if (!raw) return null
+  if (typeof raw !== 'string') return null
   raw = raw.trim()
-  if (!raw || raw.startsWith('#')) return null
-  if (raw.includes('://')) return raw
+  if (!raw || raw.startsWith('#') || /[\r\n\0]/.test(raw)) return null
 
-  const parts = raw.split(':')
-  if (parts.length === 2) {
-    const [host, portStr] = parts
-    const port = parseInt(portStr, 10)
-    const scheme = HTTP_PORTS.has(port) ? 'http' : 'socks5'
-    return `${scheme}://${host}:${port}`
+  let candidate = raw
+  if (!raw.includes('://')) {
+    const parts = raw.split(':')
+    if (parts.length === 2) {
+      const [host, portStr] = parts
+      const port = Number(portStr)
+      if (!Number.isInteger(port)) return null
+      candidate = `${HTTP_PORTS.has(port) ? 'http' : 'socks5'}://${host}:${port}`
+    } else if (parts.length === 4) {
+      const portFirst = Number(parts[1])
+      const portLast = Number(parts[3])
+      if (Number.isInteger(portFirst)) {
+        candidate = `${HTTP_PORTS.has(portFirst) ? 'http' : 'socks5'}://${encodeURIComponent(parts[2])}:${encodeURIComponent(parts[3])}@${parts[0]}:${portFirst}`
+      } else if (Number.isInteger(portLast)) {
+        candidate = `${HTTP_PORTS.has(portLast) ? 'http' : 'socks5'}://${encodeURIComponent(parts[0])}:${encodeURIComponent(parts[1])}@${parts[2]}:${portLast}`
+      } else return null
+    } else return null
   }
-  if (parts.length === 4) {
-    // try host:port:user:pass
-    const port1 = parseInt(parts[1], 10)
-    if (!isNaN(port1)) {
-      const scheme = HTTP_PORTS.has(port1) ? 'http' : 'socks5'
-      return `${scheme}://${parts[2]}:${parts[3]}@${parts[0]}:${port1}`
-    }
-    // try user:pass:host:port
-    const port2 = parseInt(parts[3], 10)
-    if (!isNaN(port2)) {
-      const scheme = HTTP_PORTS.has(port2) ? 'http' : 'socks5'
-      return `${scheme}://${parts[0]}:${parts[1]}@${parts[2]}:${port2}`
-    }
+
+  try {
+    const parsed = new url.URL(candidate)
+    const scheme = parsed.protocol.slice(0, -1).toLowerCase()
+    const port = Number(parsed.port)
+    if (!['http', 'https', 'socks4', 'socks5'].includes(scheme) || !parsed.hostname || !Number.isInteger(port) || port < 1 || port > 65535) return null
+    return parsed.toString()
+  } catch {
+    return null
   }
-  if (raw.includes('@')) {
-    const parsed = new url.URL('http://' + raw)
-    const port = parsed.port || 3128
-    return `http://${parsed.username}:${parsed.password}@${parsed.hostname}:${port}`
-  }
-  return null
 }
 
 /**
@@ -103,17 +103,15 @@ function checkProxy(proxyUrl, timeout = 7000) {
   })
 }
 
-function checkSmtpViaProxy(proxyUrl, timeout = 8000) {
-  return new Promise(resolve => {
-    // simplified: just check TCP connect to smtp.gmail.com:587 via proxy
-    checkProxy(proxyUrl, timeout).then(r => resolve(r.ok))
-  })
-}
-
 async function validateProxy(proxyUrl) {
-  const { ok, error, ping_ms } = await checkProxy(proxyUrl)
-  const smtp_ok = ok ? await checkSmtpViaProxy(proxyUrl) : false
-  return { proxy: proxyUrl, ok, smtp_ok, error, ping_ms }
+  const normalized = parseProxy(proxyUrl)
+  if (!normalized) {
+    return { proxy: String(proxyUrl || ''), ok: false, smtp_ok: false, error: 'Некорректный формат proxy URL', ping_ms: 0 }
+  }
+  const { ok, error, ping_ms } = await checkProxy(normalized)
+  // This is deliberately proxy reachability/authentication only. It does not
+  // perform SMTP traffic and never claims delivery readiness.
+  return { proxy: normalized, ok, smtp_ok: false, error, ping_ms, note: 'Проверено соединение proxy; SMTP не выполнялся.' }
 }
 
 class ProxyManager {
@@ -142,4 +140,4 @@ class ProxyManager {
   }
 }
 
-module.exports = { parseProxy, checkProxy, checkSmtpViaProxy, validateProxy, ProxyManager }
+module.exports = { parseProxy, checkProxy, validateProxy, ProxyManager }

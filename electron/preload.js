@@ -4,7 +4,7 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('fmailApp', {
-  version: process.env.npm_package_version || '7.3.5',
+  version: process.env.npm_package_version || '7.4.0',
   platform: process.platform,
   restartApp: () => ipcRenderer.invoke('app:restart'),
 })

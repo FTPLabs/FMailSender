@@ -1,6 +1,6 @@
 {
   "name": "@fmail/backend",
-  "version": "7.3.5",
+  "version": "7.4.0",
   "private": true,
   "main": "src/server.js",
   "scripts": {
@@ -11,10 +11,13 @@
     "axios": "^1.7.9",
     "express": "^4.21.2",
     "multer": "^1.4.5-lts.1",
-    "nodemailer": "^6.9.16",
+    "nodemailer": "^9.0.5",
     "socks-proxy-agent": "^8.0.5",
     "hpagent": "^1.2.0",
     "jsonwebtoken": "^9.0.2",
     "node-machine-id": "^1.1.12"
+  },
+  "overrides": {
+    "ip-address": "^10.5.0"
   }
 }

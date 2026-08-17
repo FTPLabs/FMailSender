@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Save, Eye, EyeOff, FileText } from 'lucide-react'
+import { Save, Eye, EyeOff, FileText, Sparkles, Wand2 } from 'lucide-react'
 import { api, type CampaignConfig } from '../api'
 
 const TAGS = [
@@ -21,6 +21,10 @@ export default function Compose() {
   const [htmlMode, setHtml] = useState(true)
   const [saved, setSaved]   = useState(false)
   const [loading, setLoading] = useState(true)
+  const [aiBrief, setAiBrief] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiError, setAiError] = useState('')
+  const [aiNote, setAiNote] = useState('')
 
   useEffect(() => {
     api.campaign.get()
@@ -39,6 +43,20 @@ export default function Compose() {
   async function save() {
     await api.campaign.save(cfg)
     setSaved(true); setTimeout(() => setSaved(false), 2000)
+  }
+
+  async function applyAi(mode: 'generate' | 'refine') {
+    setAiBusy(true); setAiError(''); setAiNote('')
+    try {
+      const result = await api.ai.template({
+        mode, brief: aiBrief, subject: cfg.subject ?? '', body_html: cfg.body_html ?? '', body_text: cfg.body_text ?? '',
+      })
+      setCfg(c => ({ ...c, subject: result.subject, body_html: result.body_html, body_text: result.body_text }))
+      setHtml(true)
+      setAiNote(`Черновик подготовлен (${result.model}). Проверьте и сохраните его вручную.`)
+    } catch (err: any) {
+      setAiError(err?.response?.data?.detail || err?.message || 'Не удалось выполнить AI-операцию.')
+    } finally { setAiBusy(false) }
   }
 
   function insertTag(tag: string) {
@@ -115,6 +133,23 @@ export default function Compose() {
             до <span className="text-[#e8e8ff]">{cfg.delay_max}с</span>. Рекомендуется не менее 1с.
           </p>
         </div>
+      </div>
+
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-sm font-semibold text-[#e8e8ff] flex items-center gap-2"><Sparkles size={15} className="text-[#a78bfa]" />AI-шаблон</h2>
+            <p className="text-xs text-[#6666aa] mt-1">Создаёт или улучшает прозрачный HTML для согласованных писем. Результат всегда нужно проверить перед сохранением.</p>
+          </div>
+          <div className="flex gap-2">
+            <button disabled={aiBusy} onClick={() => applyAi('generate')} className="btn btn-secondary btn-sm disabled:opacity-50"><Sparkles size={12} />Создать HTML</button>
+            <button disabled={aiBusy || !(cfg.body_html || cfg.body_text || cfg.subject)} onClick={() => applyAi('refine')} className="btn btn-secondary btn-sm disabled:opacity-50"><Wand2 size={12} />Улучшить</button>
+          </div>
+        </div>
+        <input className="input" maxLength={1200} value={aiBrief} onChange={e => setAiBrief(e.target.value)} placeholder="Цель, аудитория и тон. Например: письмо участникам вебинара с резюме и ссылкой на запись." />
+        {aiBusy && <p className="text-xs text-[#a78bfa]">Gemini готовит черновик…</p>}
+        {aiError && <p className="text-xs text-red-400">{aiError}</p>}
+        {aiNote && <p className="text-xs text-emerald-400">{aiNote}</p>}
       </div>
 
       {/* Body — fills remaining height */}

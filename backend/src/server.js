@@ -1,6 +1,6 @@
 'use strict'
 /**
- * FMailSender — Node.js Express Backend v7.3.5
+ * FMailSender — Node.js Express Backend v7.4.0
  * Drop-in replacement for Python FastAPI core/server.py
  * All endpoints identical, port 7531.
  */
@@ -15,7 +15,7 @@ const sender   = require('./sender')
 const license  = require('./license')
 const { getSmtpConfigForDomain } = require('./smtp_configs')
 
-const APP_VERSION = '7.3.5'
+const APP_VERSION = '7.4.0'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 
@@ -266,6 +266,27 @@ app.delete('/api/recipients', (req, res) => {
   res.json({ ok: true })
 })
 
+// ── AI templates ──────────────────────────────────────────────────────────────
+app.post('/api/ai/template', async (req, res) => {
+  const body = req.body || {}
+  const mode = body.mode === 'refine' ? 'refine' : body.mode === 'generate' ? 'generate' : ''
+  const brief = typeof body.brief === 'string' ? body.brief.trim() : ''
+  const subject = typeof body.subject === 'string' ? body.subject.trim() : ''
+  const bodyHtml = typeof body.body_html === 'string' ? body.body_html : ''
+  const bodyText = typeof body.body_text === 'string' ? body.body_text : ''
+  if (!mode) return res.status(400).json({ detail: 'Неизвестный режим AI-операции.' })
+  if (brief.length > 1200 || subject.length > 180 || bodyHtml.length > 20_000 || bodyText.length > 8_000) {
+    return res.status(413).json({ detail: 'Превышен допустимый размер запроса AI.' })
+  }
+  try {
+    res.json(await license.requestAiTemplate({ mode, brief, subject, body_html: bodyHtml, body_text: bodyText }))
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'Не удалось выполнить AI-операцию.'
+    console.warn(`[ai] template request failed: ${detail}`)
+    res.status(502).json({ detail })
+  }
+})
+
 // ── Campaign ──────────────────────────────────────────────────────────────────
 app.get('/api/campaign', (req, res) => res.json({ ..._campaignCfg, status: _campaignStatus }))
 
@@ -297,7 +318,7 @@ app.post('/api/campaign/start', (req, res) => {
       max_delay_ms:    (_campaignCfg.delay_max || 3.0) * 1000,
       max_threads:     Math.min(active.length, 10),
       rotate_accounts: true,
-      uniqueize:       true,
+      uniqueize:       false, // quality variants are created explicitly in Compose AI and reviewed by the user
     },
     recipients: _recipients.map(r => ({ email: r.email, name: r.name || '', variables: r.variables || {} })),
     template:  {

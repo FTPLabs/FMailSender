@@ -195,6 +195,24 @@ async function activateLicenseKey(key) {
   return { success: true, plan: cacheData.plan, expires_at: cacheData.expires_at, message: result.message || 'Лицензия успешно активирована' }
 }
 
+async function requestAiTemplate(input) {
+  const cached = storage.loadLicenseCache()
+  if (!cached?.key) throw new Error('Сначала активируйте лицензию.')
+  const hwid = _getHwid()
+  try {
+    const resp = await axios.post(LICENSE_SERVER + '/v1/ai/templates', {
+      key: cached.key, hwid, ...input,
+    }, { timeout: 60_000 })
+    return resp.data
+  } catch (err) {
+    if (err.response) {
+      const detail = err.response.data?.detail || err.response.data?.message || `HTTP ${err.response.status}`
+      throw new Error(detail)
+    }
+    throw new Error('Не удалось связаться с AI-сервисом. Проверьте подключение.')
+  }
+}
+
 // ── Runtime state (mirrors server.js licenseOk) ───────────────────────────────
 let _licenseOk = false
 let _bgChecking = false
@@ -224,7 +242,7 @@ function stopPeriodicCheck() {
 
 module.exports = {
   _getHwid, _isValidKeyFormat,
-  getCachedLicenseStatus, validateOnStartup, activateLicenseKey,
+  getCachedLicenseStatus, validateOnStartup, activateLicenseKey, requestAiTemplate,
   setLicenseOk, getLicenseOk, setBgChecking, isBgChecking,
   startPeriodicCheck, stopPeriodicCheck,
 }

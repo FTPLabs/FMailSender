@@ -1,3 +1,13 @@
+## [7.4.0] — 2026-08-17
+
+### Added
+- Server-side Gemini integration for creating and improving user-reviewed HTML email templates.
+- Local AI template controls in Compose; Gemini credentials remain outside the desktop build.
+
+### Security
+- Gemini requests require a valid bound license, are size-limited and rate-limited, and return sanitized HTML.
+- The assistant does not generate hidden content, tracking pixels, scripts or anti-filter evasion techniques.
+
 ## [7.3.5] — 2026-08-17
 
 ### Fixed
