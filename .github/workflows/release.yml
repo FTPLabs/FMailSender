@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 7.3.4)"
+        description: "Version (e.g. 7.3.5)"
         required: true
-        default: "7.3.4"
+        default: "7.3.5"
 
 env:
   NODE_VERSION: "22"
@@ -256,6 +256,11 @@ jobs:
               throw "Packaged backend did not serve the UI root page."
             }
             Write-Host "[OK] Backend status guard and UI root page" -ForegroundColor Green
+            $invalidActivation = Invoke-WebRequest -Uri "http://127.0.0.1:7531/api/license/activate" -Method POST -ContentType "application/json" -Body '{"key":"FMSND-000000-000000-000000-000000"}' -SkipHttpErrorCheck -TimeoutSec 20
+            if ($invalidActivation.StatusCode -ne 400 -or $invalidActivation.Content -notmatch 'License not found') {
+              throw "Packaged activation transport failed: expected the production API error to pass through local backend; got HTTP $($invalidActivation.StatusCode): $($invalidActivation.Content)"
+            }
+            Write-Host "[OK] Packaged license activation transport" -ForegroundColor Green
           } finally {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
             Remove-Item -Recurse -Force $dataDir -ErrorAction SilentlyContinue
@@ -278,7 +283,7 @@ jobs:
             1. Скачайте **FMailSender_v${{ steps.tag.outputs.version }}.exe**
             2. Запустите — приложение откроется мгновенно
 
-            ### Архитектура v7.3.4 (Electron + Node.js — новое ядро)
+            ### Архитектура v7.3.5 (Electron + Node.js — новое ядро)
             - **Electron** — Chromium WebView + Node.js runtime (нет AV-блокировок)
             - **Node.js backend** — Express сервер, запускается за ~200 мс (vs 60 с у Python)
             - **Nodemailer** — нативная SMTP-отправка с поддержкой SOCKS5/HTTP прокси

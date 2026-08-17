@@ -191,7 +191,7 @@ export default function StartupOverlay() {
       })
       const data = await res.json()
       if (data.success) setLicenseOk(true)
-      else setActivateErr(data.message || data.error || 'Ключ недействителен')
+      else setActivateErr(data.detail || data.message || data.error || 'Ключ недействителен')
     } catch (e: unknown) {
       setActivateErr((e as Error).message || 'Ошибка сети')
     } finally {
