@@ -50,19 +50,19 @@ async function invokeTauri(cmd: string): Promise<void> {
 
 const GLOW_STYLES = `
   @keyframes logo-glow {
-    0%, 100% { box-shadow: 0 0 28px rgba(139,92,246,0.40), 0 0 60px rgba(6,182,212,0.08); }
-    50%       { box-shadow: 0 0 52px rgba(139,92,246,0.70), 0 0 90px rgba(6,182,212,0.22); }
+    0%, 100% { box-shadow: 0 0 28px rgb(var(--c-accent) / .28), 0 0 60px rgb(var(--c-signal) / .08); }
+    50%       { box-shadow: 0 0 42px rgb(var(--c-accent) / .46), 0 0 76px rgb(var(--c-signal) / .17); }
   }
 `
 
 function AppLogo({ size = 72 }: { size?: number }) {
   return (
     <img
-      src="./fmail_logo.png"
+      src="./fmail_nocturne_mark.png"
       alt="FMailSender"
       style={{
-        width: size, height: size, borderRadius: '50%', objectFit: 'cover',
-        flexShrink: 0, border: '1.5px solid rgba(139,92,246,0.5)',
+        width: size, height: size, borderRadius: '16px', objectFit: 'cover',
+        flexShrink: 0, border: '1.5px solid rgb(var(--c-accent) / .55)',
         animation: 'logo-glow 2.5s ease-in-out infinite',
       }}
     />
@@ -229,7 +229,7 @@ export default function StartupOverlay() {
   if (online && licenseOk === false) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center"
-        style={{ background: 'linear-gradient(160deg, #030308 0%, #08081e 55%, #040410 100%)', gap: '2rem' }}>
+        style={{ background: 'linear-gradient(160deg, rgb(var(--c-base)) 0%, rgb(var(--c-surf2)) 55%, rgb(var(--c-base)) 100%)', gap: '2rem' }}>
         <div style={{
           position: 'absolute', top: '38%', left: '50%',
           transform: 'translate(-50%, -50%)', width: 480, height: 480, borderRadius: '50%',
@@ -239,38 +239,38 @@ export default function StartupOverlay() {
         <div className="relative flex flex-col items-center gap-3">
           <AppLogo size={88} />
           <div className="text-center mt-1">
-            <h1 className="text-[1.5rem] font-bold tracking-tight" style={{ color: '#e8e8ff' }}>FMailSender</h1>
-            <p className="text-[0.8rem] mt-0.5 font-medium" style={{ color: '#6b6baa' }}>Активация лицензии</p>
+            <h1 className="text-[1.5rem] font-bold tracking-tight" style={{ color: 'rgb(var(--c-text))' }}>FMAIL / NOCTURNE</h1>
+            <p className="text-[0.8rem] mt-0.5 font-medium" style={{ color: 'rgb(var(--c-muted))' }}>Активация лицензии</p>
           </div>
         </div>
         <div className="relative w-full rounded-2xl p-6"
           style={{ maxWidth: 360, background: 'rgba(8,8,24,0.92)', border: '1px solid rgba(139,92,246,0.18)', boxShadow: '0 24px 64px rgba(0,0,0,0.55)' }}>
           {licenseMsg && (
-            <p className="text-[0.82rem] mb-4 leading-snug" style={{ color: '#9090cc' }}>{licenseMsg}</p>
+            <p className="text-[0.82rem] mb-4 leading-snug" style={{ color: 'rgb(var(--c-muted))' }}>{licenseMsg}</p>
           )}
           {bgChecking && (
-            <p className="text-[0.75rem] mb-3" style={{ color: '#5858aa' }}>Идёт проверка лицензии на сервере...</p>
+            <p className="text-[0.75rem] mb-3" style={{ color: 'rgb(var(--c-muted))' }}>Идёт проверка лицензии на сервере...</p>
           )}
           <input
             className="w-full rounded-xl px-4 py-3 font-mono text-[0.82rem] focus:outline-none"
-            style={{ background: 'rgba(139,92,246,0.07)', border: '1px solid rgba(139,92,246,0.28)', color: '#e8e8ff', marginBottom: '0.75rem', transition: 'border-color 0.15s' }}
+            style={{ background: 'rgb(var(--c-accent) / .07)', border: '1px solid rgb(var(--c-accent) / .28)', color: 'rgb(var(--c-text))', marginBottom: '0.75rem', transition: 'border-color 0.15s' }}
             placeholder="FMSND-XXXXXX-XXXXXX-XXXXXX-XXXXXX"
             value={licenseKey}
             onChange={e => { setLicenseKey(e.target.value); setActivateErr('') }}
             onKeyDown={e => e.key === 'Enter' && activateLicense()}
             onFocus={e  => (e.target.style.borderColor = 'rgba(139,92,246,0.65)')}
-            onBlur={e   => (e.target.style.borderColor = 'rgba(139,92,246,0.28)')}
+            onBlur={e   => (e.target.style.borderColor = 'rgb(var(--c-accent) / .28)')}
           />
           {activateErr && (
-            <p className="text-[0.78rem] mb-3" style={{ color: '#f87171' }}>{activateErr}</p>
+            <p className="text-[0.78rem] mb-3" style={{ color: 'rgb(var(--c-error))' }}>{activateErr}</p>
           )}
           <button
             onClick={activateLicense}
             disabled={activating || !licenseKey.trim()}
             className="w-full rounded-xl px-4 py-3 font-semibold text-[0.9rem]"
             style={{
-              background: activating || !licenseKey.trim() ? 'rgba(124,58,237,0.22)' : 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
-              color: activating || !licenseKey.trim() ? 'rgba(232,232,255,0.32)' : '#fff',
+              background: activating || !licenseKey.trim() ? 'rgb(var(--c-accent) / .22)' : 'linear-gradient(135deg, rgb(var(--c-accent-dark)) 0%, rgb(var(--c-accent-dark)) 100%)',
+              color: activating || !licenseKey.trim() ? 'rgb(var(--c-text) / .32)' : '#fff',
               cursor: activating || !licenseKey.trim() ? 'not-allowed' : 'pointer',
               boxShadow: activating || !licenseKey.trim() ? 'none' : '0 0 22px rgba(124,58,237,0.38)',
               transition: 'all 0.15s',
@@ -279,7 +279,7 @@ export default function StartupOverlay() {
             {activating ? 'Проверка...' : 'Активировать'}
           </button>
         </div>
-        <p className="relative text-[0.7rem]" style={{ color: '#252550' }}>
+        <p className="relative text-[0.7rem]" style={{ color: 'rgb(var(--c-dim))' }}>
           Ключ привязывается к устройству · Поддержка: fmail.shop
         </p>
         <style>{GLOW_STYLES}</style>
@@ -320,30 +320,30 @@ export default function StartupOverlay() {
 
   const dots = (!online && !isFailed) ? '.'.repeat(Math.floor(displayElapsed * 2) % 4) : ''
 
-  const msgColor = isFailed                ? '#ef4444'
-                 : coreStage === 'ready'   ? '#10b981'
-                 : online                  ? '#10b981'
+  const msgColor = isFailed                ? 'rgb(var(--c-error))'
+                 : coreStage === 'ready'   ? 'rgb(var(--c-success))'
+                 : online                  ? 'rgb(var(--c-success))'
                  : displayElapsed > 300    ? 'rgba(239,68,68,0.85)'
-                 : '#6666aa'
+                 : 'rgb(var(--c-muted))'
 
   return (
     <div
       className="fixed inset-0 z-50 flex flex-col items-center justify-center"
-      style={{ background: '#040410', opacity: fadeOut ? 0 : 1, transition: 'opacity 0.4s ease', pointerEvents: fadeOut ? 'none' : 'all' }}
+      style={{ background: 'rgb(var(--c-base))', opacity: fadeOut ? 0 : 1, transition: 'opacity 0.4s ease', pointerEvents: fadeOut ? 'none' : 'all' }}
     >
       <div className="mb-8 flex flex-col items-center gap-4">
         <AppLogo size={72} />
         <div className="text-center">
-          <div className="text-xl font-semibold tracking-tight" style={{ color: '#e8e8ff' }}>FMail Sender</div>
+          <div className="text-xl font-semibold tracking-tight" style={{ color: 'rgb(var(--c-text))' }}>FMAIL / NOCTURNE</div>
         </div>
       </div>
 
       <div className="w-64 space-y-3">
-        <div className="h-1 rounded-full overflow-hidden" style={{ background: '#1a1a2e' }}>
+        <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgb(var(--c-surf2))' }}>
           <div className="h-full rounded-full"
             style={{
               width: `${Math.round(progress)}%`,
-              background: isFailed ? '#ef4444' : 'linear-gradient(90deg, #8b5cf6, #06b6d4)',
+              background: isFailed ? 'rgb(var(--c-error))' : 'linear-gradient(90deg, rgb(var(--c-accent)), rgb(var(--c-signal)))',
               transition: online ? 'width 0.3s ease-out' : 'width 0.2s linear',
             }}
           />
@@ -352,7 +352,7 @@ export default function StartupOverlay() {
           <span>{displayMsg}{dots}</span>
         </div>
         {!online && displayElapsed > 5 && !isFailed && (
-          <div className="text-center text-[0.68rem]" style={{ color: '#383860' }}>
+          <div className="text-center text-[0.68rem]" style={{ color: 'rgb(var(--c-muted))' }}>
             {displayElapsed} сек
           </div>
         )}
@@ -361,9 +361,9 @@ export default function StartupOverlay() {
       {/* AV hint — через 20 сек */}
       {showDefenderHint && (
         <div className="mt-4 max-w-xs px-4 text-center">
-          <p className="text-[0.7rem] leading-relaxed" style={{ color: '#3a3a6a' }}>
+          <p className="text-[0.7rem] leading-relaxed" style={{ color: 'rgb(var(--c-muted))' }}>
             Антивирус проверяет файлы ядра при первом запуске (20–60 сек).
-            Добавьте папку <code style={{ color: '#5a5a8a' }}>%LOCALAPPDATA%\FMailSender</code> в исключения.
+            Добавьте папку <code style={{ color: 'rgb(var(--c-muted))' }}>%LOCALAPPDATA%\FMailSender</code> в исключения.
           </p>
         </div>
       )}
@@ -375,7 +375,7 @@ export default function StartupOverlay() {
             <p className="text-[0.78rem] leading-relaxed mb-3" style={{ color: 'rgba(252,165,165,0.9)' }}>
               {coreMsg || 'Не удалось запустить локальное ядро.'}
             </p>
-            <p className="text-[0.7rem] leading-relaxed" style={{ color: '#5a5a8a' }}>
+            <p className="text-[0.7rem] leading-relaxed" style={{ color: 'rgb(var(--c-muted))' }}>
               Добавьте <code>%LOCALAPPDATA%\FMailSender</code> в исключения антивируса и нажмите «Перезапустить».
             </p>
           </div>
@@ -390,9 +390,9 @@ export default function StartupOverlay() {
             disabled={restarting}
             className="rounded-xl px-6 py-2.5 text-sm font-semibold"
             style={{
-              background: restarting ? 'rgba(124,58,237,0.22)' : isFailed ? 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)' : 'rgba(124,58,237,0.35)',
+              background: restarting ? 'rgb(var(--c-accent) / .22)' : isFailed ? 'linear-gradient(135deg, rgb(var(--c-accent-dark)) 0%, rgb(var(--c-accent-dark)) 100%)' : 'rgb(var(--c-accent) / .35)',
               border: '1px solid rgba(139,92,246,0.45)',
-              color: restarting ? 'rgba(232,232,255,0.4)' : '#e8e8ff',
+              color: restarting ? 'rgb(var(--c-text) / .4)' : 'rgb(var(--c-text))',
               cursor: restarting ? 'not-allowed' : 'pointer',
               transition: 'all 0.15s',
               boxShadow: isFailed && !restarting ? '0 0 18px rgba(124,58,237,0.3)' : 'none',
@@ -401,7 +401,7 @@ export default function StartupOverlay() {
             {restarting ? 'Перезапуск...' : '↺ Перезапустить ядро'}
           </button>
           {!isFailed && !restarting && (
-            <p className="text-[0.65rem]" style={{ color: '#2a2a4a' }}>
+            <p className="text-[0.65rem]" style={{ color: 'rgb(var(--c-muted))' }}>
               Запуск занимает 15–60 сек (первый раз дольше)
             </p>
           )}

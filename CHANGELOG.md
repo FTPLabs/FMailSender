@@ -1,3 +1,11 @@
+## [7.5.0] — 2026-08-17
+
+### Nocturne design system
+- Original gothic FMail Nocturne visual identity: new app mark, Windows icon, navigation shell and startup presentation.
+- Dark, light and system theme modes with local persistence and OS-preference tracking.
+- Semantic CSS color tokens replace the previous dark-only fixed palette across existing UI screens.
+- No changes to SMTP delivery, proxy logic, licensing, account imports or AI template behavior.
+
 ## [7.4.1] — 2026-08-17
 
 ### SMTP autofill and import
