@@ -1,3 +1,12 @@
+## [7.4.1] — 2026-08-17
+
+### SMTP autofill and import
+- The desktop UI now gets SMTP presets from a single backend catalogue rather than a duplicated, incomplete UI list.
+- Added verified Telekom Mail presets for `t-online.de` and `magenta.de` and aligned GMX, WEB.DE, Outlook.com, Rambler, Mail, Apple, Yahoo, Fastmail and Zoho settings.
+- Manual paste accepts `email|password`, `email;password`, and `email:password`, preserving colons inside passwords; lookup never receives a password.
+- Account import uses the same backend catalogue and reports configured versus manual-required domains without testing SMTP automatically.
+- Unknown/private domains intentionally remain manual: the app does not guess `smtp.<domain>`.
+
 ## [7.4.0] — 2026-08-17
 
 ### Added

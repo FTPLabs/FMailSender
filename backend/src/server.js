@@ -1,6 +1,6 @@
 'use strict'
 /**
- * FMailSender — Node.js Express Backend v7.4.0
+ * FMailSender — Node.js Express Backend v7.4.1
  * Drop-in replacement for Python FastAPI core/server.py
  * All endpoints identical, port 7531.
  */
@@ -13,9 +13,9 @@ const storage  = require('./storage')
 const proxy    = require('./proxy')
 const sender   = require('./sender')
 const license  = require('./license')
-const { getSmtpConfigForDomain } = require('./smtp_configs')
+const { getSmtpConfigForDomain, getSmtpPresetForEmail } = require('./smtp_configs')
 
-const APP_VERSION = '7.4.0'
+const APP_VERSION = '7.4.1'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 
@@ -73,14 +73,23 @@ app.use((req, res, next) => {
 app.get('/api/health', (req, res) => res.json({ ok: true, version: APP_VERSION }))
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
+// Lookup never receives a password. It is the only SMTP preset source used by UI and import.
+app.get('/api/accounts/smtp-preset', (req, res) => {
+  const email = typeof req.query.email === 'string' ? req.query.email : ''
+  res.json(getSmtpPresetForEmail(email))
+})
+
 app.get('/api/accounts', (req, res) => res.json(_accounts))
 
 app.post('/api/accounts', (req, res) => {
-  const body = req.body
+  const body = req.body || {}
+  if (!getSmtpPresetForEmail(body.email).domain) {
+    return res.status(400).json({ detail: 'Введите корректный email-адрес.' })
+  }
   if (_accounts.some(a => a.email.toLowerCase() === body.email.toLowerCase())) {
     return res.status(400).json({ detail: `Account ${body.email} already exists` })
   }
-  const acc = _makeAccount(body)
+  const acc = _makeAccount(_applySmtpPreset(body))
   _accounts.push(acc)
   storage.saveAccounts(_accounts)
   res.json(acc)
@@ -89,7 +98,10 @@ app.post('/api/accounts', (req, res) => {
 app.put('/api/accounts/:email', (req, res) => {
   const idx = _accounts.findIndex(a => a.email.toLowerCase() === req.params.email.toLowerCase())
   if (idx === -1) return res.status(404).json({ detail: 'Account not found' })
-  _accounts[idx] = _makeAccount(req.body)
+  if (!getSmtpPresetForEmail(req.body?.email).domain) {
+    return res.status(400).json({ detail: 'Введите корректный email-адрес.' })
+  }
+  _accounts[idx] = _makeAccount(_applySmtpPreset(req.body || {}))
   storage.saveAccounts(_accounts)
   res.json(_accounts[idx])
 })
@@ -172,36 +184,35 @@ app.get('/api/accounts/test-all/stream', async (req, res) => {
 })
 
 app.post('/api/accounts/import-txt', upload.single('file'), (req, res) => {
-  const content  = req.file.buffer.toString('utf8')
+  if (!req.file?.buffer) return res.status(400).json({ detail: 'Файл импорта не выбран.' })
+  const content = req.file.buffer.toString('utf8')
   const existing = new Set(_accounts.map(a => a.email.toLowerCase()))
-  let imported = 0, skipped = 0
+  const added = []
+  let imported = 0, skipped = 0, auto_configured = 0, manual_required = 0
 
-  for (let line of content.split('\n')) {
-    line = line.trim()
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = String(rawLine || '').trim()
     if (!line || line.startsWith('#')) continue
-    let parts = null
-    for (const sep of ['|', ';', ':']) {
-      const p = line.split(sep)
-      if (p.length >= 2) { parts = p; break }
-    }
-    if (!parts) { skipped++; continue }
-    const email = parts[0].trim()
-    const pwd   = parts[1].trim()
-    const rt    = parts[2]?.trim() || ''
-    if (!email.includes('@') || existing.has(email.toLowerCase())) { skipped++; continue }
-    const domain = email.split('@')[1].toLowerCase()
-    const cfg    = getSmtpConfigForDomain(domain) || {}
-    _accounts.push(_makeAccount({ email, password: pwd, refresh_token: rt, host: cfg.host || '', port: cfg.port || 587, use_ssl: cfg.secure ?? false, use_tls: cfg.requireTLS ?? true }))
-    existing.add(email.toLowerCase())
+    const parsed = _parseImportedCredential(line)
+    if (!parsed || existing.has(parsed.email.toLowerCase())) { skipped++; continue }
+    const preset = getSmtpPresetForEmail(parsed.email)
+    const body = _applySmtpPreset({
+      email: parsed.email,
+      password: parsed.password,
+      refresh_token: '',
+    })
+    _accounts.push(_makeAccount(body))
+    added.push(_accounts[_accounts.length - 1])
+    existing.add(parsed.email.toLowerCase())
     imported++
+    preset.known ? auto_configured++ : manual_required++
   }
 
-  if (_proxies.length) {
-    const start = _accounts.length - imported
-    new proxy.ProxyManager(_proxies).distribute(_accounts.slice(start), start)
+  if (_proxies.length && added.length) {
+    new proxy.ProxyManager(_proxies).distribute(added, _accounts.length - added.length)
   }
   storage.saveAccounts(_accounts)
-  res.json({ imported, skipped, total: _accounts.length })
+  res.json({ imported, skipped, auto_configured, manual_required, total: _accounts.length })
 })
 
 // ── Proxies ───────────────────────────────────────────────────────────────────
@@ -456,6 +467,32 @@ app.get('*', (req, res) => {
 })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+function _applySmtpPreset(body) {
+  const input = body && typeof body === 'object' ? body : {}
+  if (String(input.host || '').trim()) return input
+  const preset = getSmtpPresetForEmail(input.email)
+  if (!preset.known) return input
+  return {
+    ...input,
+    host: preset.host,
+    port: preset.port,
+    use_ssl: preset.use_ssl,
+    use_tls: preset.use_tls,
+  }
+}
+
+function _parseImportedCredential(rawLine) {
+  const line = String(rawLine || '').trim()
+  if (!line || line.startsWith('#')) return null
+  // Delimit only once. This preserves ':' inside passwords and avoids logging them.
+  const match = line.match(/^([^\s|;:]+@[^\s|;:]+)[|;:](.+)$/)
+  if (!match) return null
+  const email = match[1].trim().toLowerCase()
+  const password = match[2].trim()
+  if (!getSmtpPresetForEmail(email).domain || !password) return null
+  return { email, password }
+}
+
 function _makeAccount(body) {
   return {
     email: body.email || '', password: body.password || '',

@@ -1,30 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Plus, Trash2, RefreshCw, Upload, CheckCircle, XCircle, Clock, Globe, Users, Loader2 } from 'lucide-react'
-import { api, getBaseUrl, type Account } from '../api'
-
-const KNOWN_HOSTS: Record<string, { host: string; port: number; use_ssl: boolean }> = {
-  'gmail.com':    { host: 'smtp.gmail.com',       port: 465, use_ssl: true  },
-  'outlook.com':  { host: 'smtp.office365.com',   port: 587, use_ssl: false },
-  'hotmail.com':  { host: 'smtp.office365.com',   port: 587, use_ssl: false },
-  'live.com':     { host: 'smtp.office365.com',   port: 587, use_ssl: false },
-  'yahoo.com':    { host: 'smtp.mail.yahoo.com',  port: 465, use_ssl: true  },
-  'mail.ru':      { host: 'smtp.mail.ru',         port: 465, use_ssl: true  },
-  'yandex.ru':    { host: 'smtp.yandex.ru',       port: 465, use_ssl: true  },
-  'rambler.ru':   { host: 'smtp.rambler.ru',      port: 465, use_ssl: true  },
-  // FIX v6.1: smtp.gmx.com → mail.gmx.net (официальный SMTP-хост для gmx.com)
-  'gmx.com':      { host: 'mail.gmx.net',          port: 587, use_ssl: false },
-  'gmx.net':      { host: 'mail.gmx.net',         port: 587, use_ssl: false },
-  'gmx.de':       { host: 'mail.gmx.net',         port: 587, use_ssl: false },
-}
-
-function autofill(email: string) {
-  const domain = email.split('@')[1]?.toLowerCase()
-  const cfg = domain ? (KNOWN_HOSTS[domain] ?? null) : null
-  if (!cfg) return null
-  // FIX v6.8: set use_tls as inverse of use_ssl so both flags are always consistent
-  return { ...cfg, use_tls: !cfg.use_ssl }
-}
+import { api, getBaseUrl, type Account, type SmtpPreset } from '../api'
 
 function StatusIcon({ ok, testing }: { ok: boolean | null; testing?: boolean }) {
   if (testing) return <Loader2 size={13} className="text-[#a78bfa] animate-spin" />
@@ -59,6 +36,7 @@ export default function Accounts() {
   const [form, setForm]         = useState<Frm>(EMPTY)
   const [editEmail, setEditEmail] = useState<string | null>(null)
   const [error, setError]       = useState<string | null>(null)
+  const [smtpPreset, setSmtpPreset] = useState<SmtpPreset | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement>(null)
   const esRef   = useRef<EventSource | null>(null)
@@ -71,11 +49,42 @@ export default function Accounts() {
 
   function set(k: keyof Frm, v: any) { setForm(f => ({ ...f, [k]: v })) }
 
-  function onEmailBlur() {
-    if (!form.host && form.email.includes('@')) {
-      const cfg = autofill(form.email)
-      if (cfg) setForm(f => ({ ...f, ...cfg }))
+  function applySmtpPreset(preset: SmtpPreset, force = false) {
+    setSmtpPreset(preset)
+    if (!preset.known) return
+    setForm(f => (!force && f.host.trim()) ? f : ({
+      ...f,
+      host: preset.host,
+      port: preset.port,
+      use_ssl: preset.use_ssl,
+      use_tls: preset.use_tls,
+    }))
+  }
+
+  async function lookupSmtp(email: string, force = false) {
+    try {
+      const preset = await api.accounts.smtpPreset(email)
+      applySmtpPreset(preset, force)
+    } catch {
+      setSmtpPreset(null)
     }
+  }
+
+  function onEmailBlur() {
+    if (form.email.includes('@')) void lookupSmtp(form.email)
+  }
+
+  function onEmailPaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const value = e.clipboardData.getData('text').trim()
+    // Only the first separator is structural. Colons remain valid inside a password.
+    const match = value.match(/^([^\s|;:]+@[^\s|;:]+)[|;:](.+)$/)
+    if (!match) return
+    const email = match[1].trim()
+    const password = match[2].trim()
+    if (!password) return
+    e.preventDefault()
+    setForm(f => ({ ...f, email, password, refresh_token: '' }))
+    void lookupSmtp(email, true)
   }
 
   async function save() {
@@ -168,7 +177,7 @@ export default function Accounts() {
     const file = e.target.files?.[0]; if (!file) return
     try {
       const r = await api.accounts.importTxt(file)
-      alert(`Импортировано: ${r.imported}, пропущено: ${r.skipped}`)
+      alert(`Импортировано: ${r.imported}; автозаполнено: ${r.auto_configured}; ручная настройка нужна: ${r.manual_required}; пропущено: ${r.skipped}`)
       load()
     } catch (ex: any) { setError(ex.message) }
     e.target.value = ''
@@ -250,12 +259,21 @@ export default function Accounts() {
               <h2 className="text-sm font-semibold text-[#a78bfa]">
                 {editEmail ? `Редактировать: ${editEmail}` : 'Новый аккаунт'}
               </h2>
+              {!editEmail && (
+                <p className="text-xs text-[#6666aa]">Вставьте в поле Email строку <code>email|пароль</code>, <code>email;пароль</code> или <code>email:пароль</code>: SMTP заполнится из проверенного каталога. Для неизвестного домена укажите SMTP вручную.</p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">Email</label>
-                  <input className="input" placeholder="user@gmail.com" value={form.email}
-                    onChange={e => set('email', e.target.value)}
+                  <input className="input" placeholder="user@gmail.com или user@mail.com|app-password" value={form.email}
+                    onChange={e => { set('email', e.target.value); setSmtpPreset(null) }}
+                    onPaste={onEmailPaste}
                     onBlur={onEmailBlur} disabled={!!editEmail} />
+                  {smtpPreset && (
+                    <p className={`mt-1 text-[11px] ${smtpPreset.known ? 'text-[#10b981]' : 'text-[#f59e0b]'}`}>
+                      {smtpPreset.message}{smtpPreset.password_hint ? ` ${smtpPreset.password_hint}` : ''}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="label">Пароль / App Password</label>

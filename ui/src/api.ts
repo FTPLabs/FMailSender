@@ -68,6 +68,27 @@ export interface Account {
   sent_this_hour: number
 }
 
+export interface SmtpPreset {
+  known: boolean
+  domain: string
+  provider: string
+  host: string
+  port: number
+  use_ssl: boolean
+  use_tls: boolean
+  password_hint: string
+  auth_mode: 'password' | 'oauth2' | 'manual'
+  message: string
+}
+
+export interface AccountImportResult {
+  imported: number
+  skipped: number
+  auto_configured: number
+  manual_required: number
+  total: number
+}
+
 export interface Recipient {
   email: string
   name: string
@@ -132,10 +153,11 @@ export const api = {
     delete:    (email: string)       => _http.delete(`/api/accounts/${encodeURIComponent(email)}`).then(r => r.data),
     test:      (a: Partial<Account>) => _http.post<{ok:boolean;message:string}>('/api/accounts/test', a).then(r => r.data),
     testAll:   ()                    => _http.post('/api/accounts/test-all').then(r => r.data),
+    smtpPreset: (email: string)      => _http.get<SmtpPreset>('/api/accounts/smtp-preset', { params: { email } }).then(r => r.data),
     importTxt: (file: File)          => {
       const fd = new FormData()
       fd.append('file', file)
-      return _http.post('/api/accounts/import-txt', fd).then(r => r.data)
+      return _http.post<AccountImportResult>('/api/accounts/import-txt', fd).then(r => r.data)
     },
   },
 
