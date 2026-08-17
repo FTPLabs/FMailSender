@@ -76,6 +76,9 @@ export interface SmtpPreset {
   port: number
   use_ssl: boolean
   use_tls: boolean
+  imap_host: string
+  imap_port: number
+  imap_ssl: boolean
   password_hint: string
   auth_mode: 'password' | 'oauth2' | 'manual'
   message: string

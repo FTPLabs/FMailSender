@@ -1,6 +1,6 @@
 'use strict'
 /**
- * FMailSender — Node.js Express Backend v7.5.0
+ * FMailSender — Node.js Express Backend v7.5.1
  * Drop-in replacement for Python FastAPI core/server.py
  * All endpoints identical, port 7531.
  */
@@ -15,7 +15,7 @@ const sender   = require('./sender')
 const license  = require('./license')
 const { getSmtpConfigForDomain, getSmtpPresetForEmail } = require('./smtp_configs')
 
-const APP_VERSION = '7.5.0'
+const APP_VERSION = '7.5.1'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 
@@ -469,16 +469,22 @@ app.get('*', (req, res) => {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function _applySmtpPreset(body) {
   const input = body && typeof body === 'object' ? body : {}
-  if (String(input.host || '').trim()) return input
   const preset = getSmtpPresetForEmail(input.email)
   if (!preset.known) return input
-  return {
-    ...input,
-    host: preset.host,
-    port: preset.port,
-    use_ssl: preset.use_ssl,
-    use_tls: preset.use_tls,
+  const output = { ...input }
+  if (!String(output.host || '').trim()) {
+    output.host = preset.host
+    output.port = preset.port
+    output.use_ssl = preset.use_ssl
+    output.use_tls = preset.use_tls
   }
+  // IMAP is filled only from a verified provider preset; unknown domains remain manual.
+  if (!String(output.imap_host || '').trim() && preset.imap_host) {
+    output.imap_host = preset.imap_host
+    output.imap_port = preset.imap_port
+    output.imap_ssl = preset.imap_ssl
+  }
+  return output
 }
 
 function _parseImportedCredential(rawLine) {

@@ -1,3 +1,11 @@
+## [7.5.1] — 2026-08-17
+
+### IMAP autofill
+- Unified provider presets now auto-fill verified IMAP hostname, port and SSL along with SMTP during manual account creation and file import.
+- Unknown domains remain manual: no speculative IMAP or SMTP hostname is generated.
+- Added editable IMAP host, port and SSL fields in the Accounts form; user-entered values are preserved.
+- Rambler Mail now receives the documented `imap.rambler.ru:993` SSL incoming preset. No anti-spam or abuse-control bypass was added.
+
 ## [7.5.0] — 2026-08-17
 
 ### Nocturne design system

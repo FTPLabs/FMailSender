@@ -5,13 +5,35 @@
  * The backend is the only source of truth; UI receives a public normalized copy
  * through /api/accounts/smtp-preset and never keeps a second provider table.
  */
-function preset(provider, host, port, secure, passwordHint = '', authMode = 'password') {
+const IMAP_BY_PROVIDER = Object.freeze({
+  'Gmail': 'imap.gmail.com',
+  'Outlook.com': 'imap-mail.outlook.com',
+  'Yahoo Mail': 'imap.mail.yahoo.com',
+  'AOL Mail': 'imap.aol.com',
+  'iCloud Mail': 'imap.mail.me.com',
+  'Telekom Mail': 'secureimap.t-online.de',
+  'GMX': 'imap.gmx.com',
+  'WEB.DE': 'imap.web.de',
+  'Fastmail': 'imap.fastmail.com',
+  'Mail': 'imap.mail.ru',
+  'Rambler Mail': 'imap.rambler.ru',
+  'Yandex Mail': 'imap.yandex.ru',
+  'Zoho Mail': 'imap.zoho.com',
+  'QQ Mail': 'imap.qq.com',
+  'NetEase Mail': 'imap.163.com',
+  'Sina Mail': 'imap.sina.com',
+})
+
+function preset(provider, host, port, secure, passwordHint = '', authMode = 'password', imapHost = IMAP_BY_PROVIDER[provider] || '') {
   return Object.freeze({
     provider,
     host,
     port,
     secure,
     requireTLS: !secure,
+    imapHost,
+    imapPort: imapHost ? 993 : 0,
+    imapSecure: Boolean(imapHost),
     passwordHint,
     authMode,
   })
@@ -149,6 +171,9 @@ function getSmtpPresetForEmail(email) {
     port: 587,
     use_ssl: false,
     use_tls: true,
+    imap_host: '',
+    imap_port: 993,
+    imap_ssl: true,
     password_hint: '',
     auth_mode: 'manual',
     message: domain
@@ -163,6 +188,9 @@ function getSmtpPresetForEmail(email) {
     port: cfg.port,
     use_ssl: cfg.secure,
     use_tls: cfg.requireTLS,
+    imap_host: cfg.imapHost,
+    imap_port: cfg.imapPort,
+    imap_ssl: cfg.imapSecure,
     password_hint: cfg.passwordHint,
     auth_mode: cfg.authMode,
     message: `Автозаполнено: ${cfg.provider} — ${cfg.host}:${cfg.port}.`,

@@ -1,6 +1,6 @@
 [package]
   name = "fmail-sender"
-  version = "7.5.0"
+  version = "7.5.1"
   description = "FMailSender — Professional Email Campaign Tool"
   authors = ["FTPLabs"]
   edition = "2021"

@@ -1,6 +1,6 @@
 {
   "name": "fmailsender",
-  "version": "7.5.0",
+  "version": "7.5.1",
   "description": "FMailSender — Professional Email Campaign Tool",
   "main": "main.js",
   "private": true,

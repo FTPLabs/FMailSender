@@ -14,7 +14,7 @@ interface Frm {
   email: string; password: string; host: string; port: number
   use_ssl: boolean; use_tls: boolean; display_name: string
   daily_limit: number; hourly_limit: number
-  proxy: string; imap_host: string; imap_port: number
+  proxy: string; imap_host: string; imap_port: number; imap_ssl: boolean
   refresh_token: string
 }
 
@@ -22,7 +22,7 @@ const EMPTY: Frm = {
   email: '', password: '', host: '', port: 587,
   use_ssl: false, use_tls: true, display_name: '',
   daily_limit: 500, hourly_limit: 50,
-  proxy: '', imap_host: '', imap_port: 993,
+  proxy: '', imap_host: '', imap_port: 993, imap_ssl: true,
   refresh_token: '',
 }
 
@@ -52,12 +52,19 @@ export default function Accounts() {
   function applySmtpPreset(preset: SmtpPreset, force = false) {
     setSmtpPreset(preset)
     if (!preset.known) return
-    setForm(f => (!force && f.host.trim()) ? f : ({
+    setForm(f => ({
       ...f,
-      host: preset.host,
-      port: preset.port,
-      use_ssl: preset.use_ssl,
-      use_tls: preset.use_tls,
+      ...((force || !f.host.trim()) ? {
+        host: preset.host,
+        port: preset.port,
+        use_ssl: preset.use_ssl,
+        use_tls: preset.use_tls,
+      } : {}),
+      ...((force || !f.imap_host.trim()) && preset.imap_host ? {
+        imap_host: preset.imap_host,
+        imap_port: preset.imap_port,
+        imap_ssl: preset.imap_ssl,
+      } : {}),
     }))
   }
 
@@ -188,7 +195,7 @@ export default function Accounts() {
       email: acc.email, password: acc.password, host: acc.host, port: acc.port,
       use_ssl: acc.use_ssl, use_tls: acc.use_tls, display_name: acc.display_name,
       daily_limit: acc.daily_limit, hourly_limit: acc.hourly_limit,
-      proxy: acc.proxy, imap_host: acc.imap_host, imap_port: acc.imap_port,
+      proxy: acc.proxy, imap_host: acc.imap_host, imap_port: acc.imap_port, imap_ssl: acc.imap_ssl,
       refresh_token: acc.refresh_token ?? '',
     })
     setEditEmail(acc.email); setShowForm(true)
@@ -260,7 +267,7 @@ export default function Accounts() {
                 {editEmail ? `Редактировать: ${editEmail}` : 'Новый аккаунт'}
               </h2>
               {!editEmail && (
-                <p className="text-xs text-[#6666aa]">Вставьте в поле Email строку <code>email|пароль</code>, <code>email;пароль</code> или <code>email:пароль</code>: SMTP заполнится из проверенного каталога. Для неизвестного домена укажите SMTP вручную.</p>
+                <p className="text-xs text-[#6666aa]">Вставьте в поле Email строку <code>email|пароль</code>, <code>email;пароль</code> или <code>email:пароль</code>: SMTP и IMAP заполнятся из проверенного каталога. Для неизвестного домена укажите SMTP вручную.</p>
               )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -311,6 +318,26 @@ export default function Accounts() {
                       }))}>
                       <option value="tls">TLS / 587</option>
                       <option value="ssl">SSL / 465</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="label">IMAP хост</label>
+                  <input className="input" placeholder="imap.gmail.com" value={form.imap_host}
+                    onChange={e => set('imap_host', e.target.value)} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="label">IMAP порт</label>
+                    <input className="input" type="number" value={form.imap_port}
+                      onChange={e => set('imap_port', +e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">IMAP TLS</label>
+                    <select className="input" value={form.imap_ssl ? 'ssl' : 'plain'}
+                      onChange={e => set('imap_ssl', e.target.value === 'ssl')}>
+                      <option value="ssl">SSL / 993</option>
+                      <option value="plain">Без SSL</option>
                     </select>
                   </div>
                 </div>
