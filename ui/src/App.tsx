@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { StatusProvider } from './contexts/StatusContext'
 import { I18nProvider } from './i18n'
@@ -12,9 +13,21 @@ import Compose from './pages/Compose'
 import Sending from './pages/Sending'
 import Inbox from './pages/Inbox'
 import Guide from './pages/Guide'
+import Settings from './pages/Settings'
+import NocturneBackground from './components/NocturneBackground'
+
+function DesktopPreferenceBridge() {
+  useEffect(() => {
+    const bridge = (window as Window & { fmailApp?: { setCloseWarningEnabled?: (enabled: boolean) => Promise<boolean> } }).fmailApp
+    void bridge?.setCloseWarningEnabled?.(localStorage.getItem('fmail-close-warning') !== '0')
+  }, [])
+  return null
+}
 
 export default function App() {
   return <I18nProvider><StatusProvider>
+    <NocturneBackground />
+    <DesktopPreferenceBridge />
     <StartupOverlay />
     <AppTour />
     <Layout><Routes>
@@ -27,6 +40,7 @@ export default function App() {
       <Route path="/sending" element={<Sending />} />
       <Route path="/inbox" element={<Inbox />} />
       <Route path="/guide" element={<Guide />} />
+      <Route path="/settings" element={<Settings />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes></Layout>
   </StatusProvider></I18nProvider>

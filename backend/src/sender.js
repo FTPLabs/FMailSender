@@ -142,6 +142,14 @@ function classifySmtpError(err, account) {
     /timed?\s*out|connection\s+(?:refused|reset)|getaddrinfo/.test(raw)
   const tlsFailure = code === 'ETLS' || /certificate|tls|ssl|wrong version number/.test(raw)
   const temporaryFailure = [421, 450, 451, 452, 454].includes(responseCode) || /temporar|too many|rate.?limit|try again later/.test(raw)
+  const spamRejection = (responseCode === 554 || /\b554\b/.test(raw)) && /5\.7\.1|spam|abuse|policy|content/i.test(raw)
+
+  if (spamRejection && provider === 'rambler') {
+    return 'Rambler: письмо отклонено антиспамом (554 5.7.1). Остановите повторные попытки, проверьте согласие получателя, SPF/DKIM/DMARC, List-Unsubscribe, ссылки и содержимое; при легитимной рассылке обратитесь в abuse Rambler.'
+  }
+  if (spamRejection) {
+    return 'SMTP: письмо отклонено антиспам-политикой провайдера (554 5.7.1). Остановите повторы и проверьте согласие, аутентификацию домена, отписку, ссылки и содержимое.'
+  }
 
   if (authFailure && provider === 'gmx') {
     return 'GMX: аутентификация не пройдена. Проверьте адрес и пароль. При 2FA используйте app password, а в GMX включите POP3/IMAP для внешних клиентов.'

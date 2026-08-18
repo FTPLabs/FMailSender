@@ -51,6 +51,11 @@ function coreLog(message) {
   } catch {}
 }
 
+ipcMain.handle('app:set-close-warning', (_event, enabled) => {
+  _closeWarningEnabled = Boolean(enabled)
+  return _closeWarningEnabled
+})
+
 ipcMain.handle('app:restart', () => {
   coreLog('application relaunch requested by user')
   app.relaunch()
@@ -147,6 +152,17 @@ async function waitForBackend() {
 // ── Window ────────────────────────────────────────────────────────────────────
 let _win  = null
 let _tray = null
+let _isQuitting = false
+let _closeWarningEnabled = true
+
+function clearLocalConfig() {
+  const dataDir = path.join(app.getPath('appData'), 'FMailSender')
+  const files = ['accounts.json', 'global_proxies.json', 'recipients.json', 'campaign.json', 'license.json', '.aes_key']
+  for (const name of files) {
+    try { fs.rmSync(path.join(dataDir, name), { force: true }) } catch (err) { coreLog(`config cleanup failed for ${name}: ${err.message}`) }
+  }
+  coreLog('local configuration cleared by user before exit')
+}
 
 function createWindow() {
   _win = new BrowserWindow({
@@ -200,6 +216,23 @@ function createWindow() {
     })
   }
 
+  _win.on('close', event => {
+    if (_isQuitting || !_closeWarningEnabled) return
+    event.preventDefault()
+    const result = dialog.showMessageBoxSync(_win, {
+      type: 'question',
+      title: 'Close FMailSender?',
+      message: 'Choose what to do with local configuration before exiting.',
+      buttons: ['Clear and exit', 'Exit without clearing', 'Cancel'],
+      defaultId: 2,
+      cancelId: 2,
+      noLink: true,
+    })
+    if (result === 2) return
+    if (result === 0) clearLocalConfig()
+    _isQuitting = true
+    app.quit()
+  })
   _win.on('closed', () => { _win = null })
 }
 
@@ -248,6 +281,7 @@ app.on('activate', () => {
 })
 
 app.on('before-quit', () => {
+  _isQuitting = true
   stopBackend()
 })
 

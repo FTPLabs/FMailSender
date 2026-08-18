@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 
-export type GothicIconName = 'dashboard' | 'accounts' | 'proxies' | 'recipients' | 'compose' | 'sending' | 'inbox' | 'guide' | 'light' | 'dark' | 'system' | 'tour' | 'back' | 'next' | 'close' | 'add' | 'import' | 'refresh' | 'delete' | 'distribute' | 'check' | 'error' | 'waiting' | 'play' | 'pause' | 'stop' | 'warning' | 'info' | 'search' | 'save' | 'eye' | 'eyeoff' | 'ai' | 'key' | 'external' | 'spark'
+export type GothicIconName = 'dashboard' | 'accounts' | 'proxies' | 'recipients' | 'compose' | 'sending' | 'inbox' | 'guide' | 'settings' | 'light' | 'dark' | 'system' | 'tour' | 'back' | 'next' | 'close' | 'add' | 'import' | 'refresh' | 'delete' | 'distribute' | 'check' | 'error' | 'waiting' | 'play' | 'pause' | 'stop' | 'warning' | 'info' | 'search' | 'save' | 'eye' | 'eyeoff' | 'ai' | 'key' | 'external' | 'spark'
 
 type Props = { name: GothicIconName; size?: number; className?: string; title?: string; style?: CSSProperties }
 
@@ -13,6 +13,7 @@ const PATHS: Record<GothicIconName, JSX.Element> = {
   sending: <><path d="M3 11.5 21 3l-6.7 18-2.6-7-8.7-2.5Z"/><path d="m11.7 14 3.8-5.1M11.7 14l.1 5.1"/></>,
   inbox: <><path d="M4 4h16v12l-3 4H7l-3-4V4Z"/><path d="M4 15h5l1.5 2h3L15 15h5"/></>,
   guide: <><path d="M4 4.5c3.2-1.3 5.8-.7 8 1.4 2.2-2.1 4.8-2.7 8-1.4v14c-3-1.1-5.6-.6-8 1.4-2.4-2-5-2.5-8-1.4v-14Z"/><path d="M12 6v14M7 9h2.5M14.5 9H17"/></>,
+  settings: <><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="4.2"/><path d="M12 8.5v1.2M12 14.3v1.2M8.5 12h1.2M14.3 12h1.2"/></>,
   light: <><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></>,
   dark: <><path d="M19.5 15.2A8.4 8.4 0 0 1 8.8 4.5 8.4 8.4 0 1 0 19.5 15.2Z"/><path d="m16.8 4 .5 1.2L18.5 6l-1.2.5-.5 1.2-.5-1.2L15 6l1.3-.8.5-1.2Z"/></>,
   system: <><path d="M4 5h16v11H4V5Z"/><path d="M9 20h6M12 16v4"/><path d="M7 8h10"/></>,

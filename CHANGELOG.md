@@ -1,3 +1,18 @@
+## [7.5.7] — 2026-08-18
+
+### Reliability and delivery diagnostics
+- Added explicit Rambler 554 5.7.1 spam-rejection diagnostics with no automatic retry or filter bypass.
+- Added transparent content preflight for subject casing/length, insecure links, excessive links, tracking pixels, thin content and unsubscribe hygiene.
+- Added optional AI-assisted content revision that preserves legitimate sender identity and requires user review before sending.
+
+### Experience and data safety
+- Added a settings screen, optional animated Nocturne background, close-warning with clear-or-exit choices, and local configuration cleanup.
+- Added status/expiry display, fixed error contrast across themes, and removed remaining Unicode status emoji in the sending UI.
+- Added import support for `mail|pass|refresh_token|client_id` while preserving legacy formats; OAuth fields remain protected by local storage encryption and are never logged.
+
+### Provider handling
+- Kept Gmail/Googlemail presets explicit; `gmailx.com` is treated as a custom domain and is never mapped to Google SMTP automatically.
+
 ## [7.5.6] — 2026-08-18
 
 ### Experience and accessibility

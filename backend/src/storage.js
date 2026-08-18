@@ -137,6 +137,22 @@ function loadCampaign()    { return { ...CAMPAIGN_DEFAULTS, ...readJson(CAMPAIGN
 function saveLicenseCache(data) { writeJson(LICENSE_FILE, data) }
 function loadLicenseCache()     { return readJson(LICENSE_FILE, null) }
 
+function clearData(scope = 'all') {
+  const files = {
+    accounts: [ACCOUNTS_FILE],
+    campaign: [CAMPAIGN_FILE],
+    license: [LICENSE_FILE],
+    all: [ACCOUNTS_FILE, PROXIES_FILE, RECIPIENTS_FILE, CAMPAIGN_FILE, LICENSE_FILE, KEY_FILE],
+  }
+  const selected = files[scope] || []
+  for (const file of selected) {
+    try { if (fs.existsSync(file)) fs.rmSync(file, { force: true }) } catch {}
+  }
+  if (scope === 'proxies' || scope === 'all') _proxyCache = []
+  if (scope === 'recipients' || scope === 'all') _recipientCache = []
+  _keyCache = null
+}
+
 module.exports = {
   DATA_DIR, LICENSE_FILE,
   encrypt, decrypt,
@@ -144,5 +160,5 @@ module.exports = {
   saveProxies,  loadProxies,
   saveRecipients, loadRecipients,
   saveCampaign,   loadCampaign,
-  saveLicenseCache, loadLicenseCache,
+  saveLicenseCache, loadLicenseCache, clearData,
 }

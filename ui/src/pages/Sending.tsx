@@ -25,6 +25,13 @@ const ISSUE_COPY: Record<string, { ru: string; en: string }> = {
   missing_unsubscribe: { ru: 'Для согласованных массовых писем добавьте заметную ссылку отписки.', en: 'For consent-based bulk mail, add a visible unsubscribe link.' },
   short_delay: { ru: 'Короткая задержка может не соответствовать правилам нового почтового ящика. Сверьте лимиты провайдера.', en: 'A short delay may not suit a new mailbox. Check your provider limits.' },
   daily_capacity: { ru: 'Список больше доступного дневного лимита активных аккаунтов.', en: 'The list exceeds the remaining daily capacity of active accounts.' },
+  'spam:subject_long': { ru: 'Тема длиннее рекомендуемого объёма. Сократите её.', en: 'The subject is longer than recommended. Shorten it.' },
+  'spam:subject_caps': { ru: 'В теме слишком много заглавных букв. Уберите крикливое оформление.', en: 'The subject uses excessive capital letters. Use normal casing.' },
+  'spam:many_links': { ru: 'Слишком много ссылок. Оставьте только необходимые и проверенные ссылки.', en: 'Too many links. Keep only necessary, verified links.' },
+  'spam:insecure_link': { ru: 'Найдена ссылка без HTTPS. Замените её на защищённую.', en: 'An HTTP link was found. Replace it with HTTPS.' },
+  'spam:tracking_pixel': { ru: 'Найден невидимый tracking pixel. Удалите его для прозрачной рассылки.', en: 'A hidden tracking pixel was found. Remove it for transparent sending.' },
+  'spam:thin_content': { ru: 'Слишком мало видимого текста. Добавьте ясное содержание и контекст письма.', en: 'There is too little visible content. Add clear context and substance.' },
+  'spam:missing_unsubscribe': { ru: 'Добавьте понятную ссылку отписки для подписных рассылок.', en: 'Add a clear unsubscribe link for subscribed mail.' },
 }
 
 export default function Sending() {
@@ -33,6 +40,7 @@ export default function Sending() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [readiness, setReadiness] = useState<CampaignReadiness | null>(null)
+  const [aiBusy, setAiBusy] = useState(false)
 
   const loadReadiness = useCallback(async () => {
     try { setReadiness(await api.campaign.readiness()) }
@@ -54,6 +62,20 @@ export default function Sending() {
       setNotice(message?.response?.data?.detail ?? (error as Error).message)
     } finally { setBusy(false) }
   }
+  async function improveWithAi() {
+    setAiBusy(true); setNotice('')
+    try {
+      const campaign = await api.campaign.get()
+      const result = await api.ai.template({ mode: 'refine', brief: 'Improve legitimate email deliverability without evasion: preserve factual meaning, remove manipulative wording, keep clear sender identity, HTTPS links, readable text, and a visible unsubscribe instruction where appropriate.', subject: campaign.subject || '', body_html: campaign.body_html || '', body_text: campaign.body_text || '' })
+      await api.campaign.save({ subject: result.subject, body_html: result.body_html, body_text: result.body_text })
+      await loadReadiness()
+      setNotice(language === 'en' ? 'AI revised the content. Review it before sending.' : 'ИИ исправил содержимое. Проверьте его перед отправкой.')
+    } catch (error: unknown) {
+      const message = error as { response?: { data?: { detail?: string } }; message?: string }
+      setNotice(message?.response?.data?.detail ?? message?.message ?? (language === 'en' ? 'AI revision failed.' : 'Не удалось исправить содержимое через ИИ.'))
+    } finally { setAiBusy(false) }
+  }
+
   async function start() {
     const current = await api.campaign.readiness()
     setReadiness(current)
@@ -64,23 +86,23 @@ export default function Sending() {
   const elapsed = cp?.started_at ? Math.round((Date.now() / 1000 - cp.started_at) / 60) : 0
   const speed = elapsed > 0 && cp?.sent ? Math.round(cp.sent / elapsed) : 0
   const stateColor = run ? '#06b6d4' : done ? '#10b981' : failed ? '#ef4444' : paused ? '#f59e0b' : '#6666aa'
-  const stateLabel = run ? (language === 'en' ? '▶ Sending...' : '▶ Отправка...') : paused ? (language === 'en' ? '⏸ Paused' : '⏸ Пауза') : done ? (language === 'en' ? '✓ Completed' : '✓ Завершено') : failed ? (language === 'en' ? '✗ Error' : '✗ Ошибка') : (language === 'en' ? '⏹ Idle' : '⏹ Ожидание')
+  const stateLabel = run ? (language === 'en' ? 'Sending' : 'Отправка') : paused ? (language === 'en' ? 'Paused' : 'Пауза') : done ? (language === 'en' ? 'Completed' : 'Завершено') : failed ? (language === 'en' ? 'Error' : 'Ошибка') : (language === 'en' ? 'Idle' : 'Ожидание')
 
   return <div className="page max-w-2xl flex-1 flex flex-col">
     <div><h1 className="page-title">Рассылка</h1><p className="page-sub">Запуск и мониторинг кампании</p></div>
-    {notice && <div role="status" className="mt-4 text-sm text-[#f59e0b] bg-[#f59e0b]/10 border border-[#f59e0b]/20 rounded-lg px-4 py-2">{notice}</div>}
+    {notice && <div role="status" className="mt-4 rounded-lg border border-warn/35 bg-warn/10 px-4 py-2 text-sm text-warn">{notice}</div>}
     {!run && !paused && !done && <div className="card mt-5 space-y-3">
       <div className="flex items-center justify-between gap-3"><h2 className="text-sm font-semibold text-[#e8e8ff]">Готовность</h2><button onClick={() => void loadReadiness()} className="btn btn-secondary btn-sm"><GothicIcon name="refresh" size={13} /> Обновить</button></div>
       <div className="space-y-2">
-        {(readiness?.errors || []).map(code => <div key={code} className="flex items-start gap-3 text-sm"><GothicIcon name="error" size={14} className="mt-0.5 text-error flex-shrink-0" /><span className="text-xs text-[#fca5a5]">{local(code)}</span></div>)}
+        {(readiness?.errors || []).map(code => <div key={code} className="flex items-start gap-3 text-sm"><GothicIcon name="error" size={14} className="mt-0.5 text-error flex-shrink-0" /><span className="text-xs text-error">{local(code)}</span></div>)}
         {readiness?.ready && <div className="flex items-center gap-3 text-sm"><GothicIcon name="check" size={14} className="text-success" /><span className="text-xs text-[#86efac]">{language === 'en' ? 'Required conditions are met.' : 'Обязательные условия выполнены.'}</span></div>}
-        {(readiness?.warnings || []).map(code => <div key={code} className="flex items-start gap-3 text-sm"><GothicIcon name="info" size={14} className="mt-0.5 text-warn flex-shrink-0" /><span className="text-xs text-[#fcd34d]">{local(code)}</span></div>)}
+        {(readiness?.warnings || []).map(code => <div key={code} className="flex items-start gap-3 text-sm"><GothicIcon name="info" size={14} className="mt-0.5 text-warn flex-shrink-0" /><span className="text-xs text-warn">{local(code)}</span></div>)}
       </div>
-      {readiness && <p className="text-[11px] text-[#6666aa]">{language === 'en' ? `Ready accounts: ${readiness.active_accounts} · recipients: ${readiness.recipients} · available today: ${readiness.available_daily}` : `Готовых аккаунтов: ${readiness.active_accounts} · получателей: ${readiness.recipients} · доступно сегодня: ${readiness.available_daily}`}</p>}
+      {readiness && <><p className="text-[11px] text-[#6666aa]">{language === 'en' ? `Ready accounts: ${readiness.active_accounts} · recipients: ${readiness.recipients} · available today: ${readiness.available_daily}` : `Готовых аккаунтов: ${readiness.active_accounts} · получателей: ${readiness.recipients} · доступно сегодня: ${readiness.available_daily}`}</p>{readiness.spam && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dim/40 bg-surf2/50 px-3 py-2"><span className="text-xs text-muted">{language === 'en' ? `Content risk: ${readiness.spam.level} · score ${readiness.spam.score}/100` : `Риск контента: ${readiness.spam.level} · оценка ${readiness.spam.score}/100`}</span><button type="button" className="btn btn-secondary btn-sm" disabled={aiBusy} onClick={() => void improveWithAi()}><GothicIcon name="ai" size={13}/>{aiBusy ? (language === 'en' ? 'Working…' : 'Обработка…') : (language === 'en' ? 'Fix with AI' : 'Исправить ИИ')}</button></div>}</>}
     </div>}
     <div className="card flex-1 mt-5 flex flex-col items-center justify-center gap-6 py-10">
       <Ring value={cp?.sent ?? 0} max={cp?.total || recipients || 1} />
-      <div className="text-center"><div className="text-base font-semibold" style={{ color: stateColor }}>{stateLabel}</div>{cp?.current_email && <div className="text-xs text-[#6666aa] mt-1 font-mono">→ <span className="text-[#06b6d4]">{cp.current_email}</span>{cp.current_account && <span> · <span className="text-[#8b5cf6]">{cp.current_account}</span></span>}</div>}</div>
+      <div className="text-center"><div className="text-base font-semibold" style={{ color: stateColor }}>{stateLabel}</div>{cp?.current_email && <div className="mt-1 text-xs font-mono text-muted"><GothicIcon name="sending" size={12} className="mr-1 inline-block text-cyan" /><span className="text-[#06b6d4]">{cp.current_email}</span>{cp.current_account && <span> · <span className="text-[#8b5cf6]">{cp.current_account}</span></span>}</div>}</div>
       {(cp?.total ?? 0) > 0 && <div className="grid grid-cols-4 gap-3 w-full text-center">{[
         { label: language === 'en' ? 'Sent' : 'Отправлено', value: cp?.sent ?? 0, color: '#10b981' }, { label: language === 'en' ? 'Errors' : 'Ошибок', value: cp?.failed ?? 0, color: '#ef4444' }, { label: language === 'en' ? 'Remaining' : 'Осталось', value: Math.max(0, (cp?.total ?? 0) - (cp?.sent ?? 0) - (cp?.failed ?? 0)), color: '#6666aa' }, { label: language === 'en' ? 'Speed' : 'Скорость', value: `${speed}/${language === 'en' ? 'm' : 'м'}`, color: '#06b6d4' },
       ].map(item => <div key={item.label} className="card-inset py-3"><div className="text-base font-bold tabular-nums" style={{ color: item.color }}>{item.value}</div><div className="text-[10px] text-[#6666aa] mt-0.5">{item.label}</div></div>)}</div>}
@@ -91,6 +113,6 @@ export default function Sending() {
         {(done || failed) && <button onClick={() => void act(api.campaign.stop)} disabled={busy} className="btn btn-secondary px-6"><GothicIcon name="refresh" size={15} /> {language === 'en' ? 'Reset' : 'Сбросить'}</button>}
       </div>
     </div>
-    {cp?.errors?.length ? <div className="card mt-5 space-y-2"><div className="flex items-center gap-2 text-xs font-semibold text-[#f59e0b] uppercase tracking-wider"><GothicIcon name="warning" size={13} /> {language === 'en' ? `Sending errors (${cp.errors.length})` : `Ошибки отправки (${cp.errors.length})`}</div><div className="max-h-40 overflow-y-auto space-y-1">{cp.errors.slice(-20).map((item, index) => <div key={index} className="text-xs font-mono text-[#ef4444]/80 bg-[#ef4444]/5 px-2.5 py-1 rounded">{item}</div>)}</div></div> : null}
+    {cp?.errors?.length ? <div className="card mt-5 space-y-2"><div className="flex items-center gap-2 text-xs font-semibold text-[#f59e0b] uppercase tracking-wider"><GothicIcon name="warning" size={13} /> {language === 'en' ? `Sending errors (${cp.errors.length})` : `Ошибки отправки (${cp.errors.length})`}</div><div className="max-h-40 overflow-y-auto space-y-1">{cp.errors.slice(-20).map((item, index) => <div key={index} className="rounded bg-error/10 px-2.5 py-1 text-xs font-mono text-error">{item}</div>)}</div></div> : null}
   </div>
 }

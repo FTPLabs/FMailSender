@@ -4,7 +4,8 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('fmailApp', {
-  version: process.env.npm_package_version || '7.5.6',
+  version: process.env.npm_package_version || '7.5.7',
   platform: process.platform,
   restartApp: () => ipcRenderer.invoke('app:restart'),
+  setCloseWarningEnabled: (enabled) => ipcRenderer.invoke('app:set-close-warning', Boolean(enabled)),
 })

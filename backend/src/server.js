@@ -1,6 +1,6 @@
 'use strict'
 /**
- * FMailSender — Node.js Express Backend v7.5.6
+ * FMailSender — Node.js Express Backend v7.5.7
  * Drop-in replacement for Python FastAPI core/server.py
  * All endpoints identical, port 7531.
  */
@@ -16,7 +16,7 @@ const license  = require('./license')
 const { createTemplateWithPersonalKey } = require('./gemini_local')
 const { getSmtpConfigForDomain, getSmtpPresetForEmail } = require('./smtp_configs')
 
-const APP_VERSION = '7.5.6'
+const APP_VERSION = '7.5.7'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 
@@ -67,7 +67,7 @@ app.use(express.static(uiDist))
 
 // ── License guard middleware ──────────────────────────────────────────────────
 const LICENSE_EXEMPT = new Set([
-  '/api/health', '/api/license', '/api/license/activate', '/api/license/poll', '/api/events',
+  '/api/health', '/api/license', '/api/license/activate', '/api/license/poll', '/api/events', '/api/settings/clear',
 ])
 
 app.use((req, res, next) => {
@@ -209,7 +209,9 @@ app.post('/api/accounts/import-txt', upload.single('file'), (req, res) => {
     const body = _applySmtpPreset({
       email: parsed.email,
       password: parsed.password,
-      refresh_token: '',
+      refresh_token: parsed.refresh_token || '',
+      client_id: parsed.client_id || '',
+      auth_type: parsed.refresh_token ? 'oauth_refresh' : 'password',
     })
     _accounts.push(_makeAccount(body))
     added.push(_accounts[_accounts.length - 1])
@@ -325,6 +327,24 @@ app.post('/api/campaign', (req, res) => {
   res.json({ ok: true })
 })
 
+function _spamPreflight(subject, bodyHtml, bodyText) {
+  const findings = []
+  const source = `${subject} ${bodyHtml} ${bodyText}`
+  const visible = String(bodyText || bodyHtml || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  const links = (String(bodyHtml || '').match(/https?:\/\//gi) || []).length
+  const alpha = (subject.match(/[A-Za-zА-Яа-я]/g) || []).length
+  const upper = (subject.match(/[A-ZА-Я]/g) || []).length
+  if (subject.length > 120) findings.push({ code: 'subject_long', severity: 'warning' })
+  if (alpha >= 12 && upper / alpha > 0.65) findings.push({ code: 'subject_caps', severity: 'warning' })
+  if (links > 8) findings.push({ code: 'many_links', severity: 'warning' })
+  if (/href=["']http:\/\//i.test(String(bodyHtml || ''))) findings.push({ code: 'insecure_link', severity: 'warning' })
+  if (/width=["']1["'][^>]*height=["']1["']|height=["']1["'][^>]*width=["']1["']/i.test(String(bodyHtml || ''))) findings.push({ code: 'tracking_pixel', severity: 'warning' })
+  if (!/unsubscribe|отпис/i.test(source)) findings.push({ code: 'missing_unsubscribe', severity: 'warning' })
+  if (!visible || visible.length < 40) findings.push({ code: 'thin_content', severity: 'warning' })
+  const score = Math.min(100, findings.reduce((n, item) => n + (item.severity === 'error' ? 30 : 12), 0))
+  return { score, findings, level: score >= 60 ? 'high' : score >= 25 ? 'medium' : 'low' }
+}
+
 function _campaignReadiness() {
   const errors = []
   const warnings = []
@@ -335,6 +355,7 @@ function _campaignReadiness() {
   const replyTo = String(_campaignCfg.reply_to || '').trim()
   const delayMin = Number(_campaignCfg.delay_min || 1)
   const availableDaily = active.reduce((sum, account) => sum + Math.max(0, Number(account.daily_limit || 0) - Number(account.sent_today || 0)), 0)
+  const spam = _spamPreflight(subject, bodyHtml, bodyText)
   if (!active.length) errors.push('no_ready_accounts')
   if (!_recipients.length) errors.push('no_recipients')
   if (!subject) errors.push('missing_subject')
@@ -344,10 +365,15 @@ function _campaignReadiness() {
   if (!/unsubscribe|отпис/i.test(`${bodyHtml} ${bodyText}`)) warnings.push('missing_unsubscribe')
   if (delayMin < 30) warnings.push('short_delay')
   if (availableDaily > 0 && _recipients.length > availableDaily) warnings.push('daily_capacity')
-  return { ready: errors.length === 0, errors, warnings, active_accounts: active.length, recipients: _recipients.length, available_daily: availableDaily }
+  for (const finding of spam.findings) warnings.push(`spam:${finding.code}`)
+  return { ready: errors.length === 0, errors, warnings, spam, active_accounts: active.length, recipients: _recipients.length, available_daily: availableDaily }
 }
 
 app.get('/api/campaign/readiness', (req, res) => res.json(_campaignReadiness()))
+app.post('/api/campaign/spam-check', (req, res) => {
+  const body = req.body || {}
+  res.json(_spamPreflight(String(body.subject || ''), String(body.body_html || ''), String(body.body_text || '')))
+})
 
 app.post('/api/campaign/start', (req, res) => {
   if (_campaignStatus.state === 'running') return res.status(400).json({ detail: 'Campaign already running' })
@@ -439,9 +465,25 @@ function _buildStatus() {
     accounts:   { total: _accounts.length, valid: ok_cnt, invalid: fail_cnt, untested: _accounts.length - ok_cnt - fail_cnt, ready: _accounts.filter(a => a.is_active && a.last_test_ok === true).length },
     recipients: _recipients.length,
     proxies:    _proxies.length,
+    core:       { online: true, version: APP_VERSION },
+    license:    (() => { const c = license.getCachedLicenseStatus() || {}; return { valid: Boolean(c.valid && license.getLicenseOk()), plan: c.plan || null, expires_at: c.expires_at || null, checking: license.isBgChecking() } })(),
   }
 }
 
+app.post('/api/settings/clear', (req, res) => {
+  const scope = typeof req.body?.scope === 'string' ? req.body.scope : 'all'
+  const allowed = new Set(['all', 'accounts', 'campaign', 'recipients', 'proxies', 'license'])
+  if (!allowed.has(scope)) return res.status(400).json({ detail: 'Unknown settings scope' })
+  if (_campaignStatus.state === 'running' || _campaignStatus.state === 'paused') _stopCampaign()
+  if (scope === 'all' || scope === 'accounts') _accounts = []
+  if (scope === 'all' || scope === 'recipients') _recipients = []
+  if (scope === 'all' || scope === 'proxies') _proxies = []
+  if (scope === 'all' || scope === 'campaign') _campaignCfg = storage.loadCampaign()
+  if (scope === 'all' || scope === 'license') license.setLicenseOk(false)
+  storage.clearData(scope)
+  if (scope === 'all' || scope === 'campaign') _campaignCfg = storage.loadCampaign()
+  res.json({ ok: true, scope })
+})
 app.get('/api/status', (req, res) => res.json(_buildStatus()))
 
 // SSE: /api/events
@@ -534,13 +576,22 @@ function _applySmtpPreset(body) {
 function _parseImportedCredential(rawLine) {
   const line = String(rawLine || '').trim()
   if (!line || line.startsWith('#')) return null
-  // Delimit only once. This preserves ':' inside passwords and avoids logging them.
+  // OAuth export: mail|password|refresh_token|client_id. Never log token values.
+  const oauth = line.split('|')
+  if (oauth.length === 4) {
+    const [emailRaw, passwordRaw, refreshRaw, clientRaw] = oauth.map(v => String(v || '').trim())
+    const email = emailRaw.toLowerCase()
+    if (getSmtpPresetForEmail(email).domain && passwordRaw && refreshRaw && clientRaw) {
+      return { email, password: passwordRaw, refresh_token: refreshRaw, client_id: clientRaw }
+    }
+  }
+  // Legacy password export. Delimit only once to preserve ':' inside passwords.
   const match = line.match(/^([^\s|;:]+@[^\s|;:]+)[|;:](.+)$/)
   if (!match) return null
   const email = match[1].trim().toLowerCase()
   const password = match[2].trim()
   if (!getSmtpPresetForEmail(email).domain || !password) return null
-  return { email, password }
+  return { email, password, refresh_token: '', client_id: '' }
 }
 
 function _makeAccount(body) {
@@ -553,6 +604,7 @@ function _makeAccount(body) {
     is_active: body.is_active ?? true,
     proxy: body.proxy || '', proxy_list: body.proxy_list || [],
     access_token: body.access_token || '', refresh_token: body.refresh_token || '',
+    client_id: body.client_id || '', auth_type: body.auth_type || (body.refresh_token ? 'oauth_refresh' : 'password'),
     token_expires_at: body.token_expires_at || 0,
     imap_host: body.imap_host || '', imap_port: body.imap_port || 993, imap_ssl: body.imap_ssl ?? true,
     last_test_ok: body.last_test_ok ?? null, last_test_msg: body.last_test_msg || '',
@@ -599,4 +651,4 @@ server.listen(PORT, '127.0.0.1', () => {
 process.on('SIGTERM', () => { license.stopPeriodicCheck(); server.close(() => process.exit(0)) })
 process.on('SIGINT',  () => { license.stopPeriodicCheck(); server.close(() => process.exit(0)) })
 
-module.exports = { app }
+module.exports = { app, _parseImportedCredential, _makeAccount, _spamPreflight }

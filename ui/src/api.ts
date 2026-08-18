@@ -115,6 +115,7 @@ export interface CampaignReadiness {
   active_accounts: number
   recipients: number
   available_daily: number
+  spam?: { score: number; level: 'low' | 'medium' | 'high'; findings: Array<{ code: string; severity: string }> }
 }
 
 export interface CampaignStatus {
@@ -150,6 +151,8 @@ export interface AppStatus {
   accounts: { total: number; valid: number; invalid: number; untested: number; ready: number }
   recipients: number
   proxies: number
+  core?: { online: boolean; version: string }
+  license?: { valid: boolean; plan?: string | null; expires_at?: string | null; checking?: boolean }
 }
 
 // ── API calls ─────────────────────────────────────────────────────────────────
@@ -195,8 +198,9 @@ export const api = {
     template: (payload: AiTemplateRequest) => _http.post<AiTemplateResult>('/api/ai/template', payload).then(r => r.data),
   },
 
-  campaign: {
-    get:    ()                             => _http.get('/api/campaign').then(r => r.data),
+    campaign: {
+    get:      ()                          => _http.get('/api/campaign').then(r => r.data),
+    spamCheck: (payload: { subject: string; body_html: string; body_text: string }) => _http.post('/api/campaign/spam-check', payload).then(r => r.data),
     readiness: ()                          => _http.get<CampaignReadiness>('/api/campaign/readiness').then(r => r.data),
     save:   (cfg: Partial<CampaignConfig>) => _http.post('/api/campaign', cfg).then(r => r.data),
     start:  ()                             => _http.post('/api/campaign/start').then(r => r.data),
@@ -206,6 +210,10 @@ export const api = {
   },
 
   status: () => _http.get<AppStatus>('/api/status').then(r => r.data),
+
+  settings: {
+    clear: (scope: 'all' | 'accounts' | 'campaign' | 'recipients' | 'proxies' | 'license' = 'all') => _http.post<{ ok: boolean; scope: string }>(`/api/settings/clear`, { scope }).then(r => r.data),
+  },
 
     license: {
       get: () => _http.get('/api/license').then(r => r.data),

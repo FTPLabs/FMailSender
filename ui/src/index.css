@@ -177,3 +177,16 @@
   :root [class*="hover:bg-[#141424]"]:hover { background-color: rgb(var(--c-surf3)) !important; }
   :root [class*="hover:text-[#e8e8ff]"]:hover { color: rgb(var(--c-text)) !important; }
 }
+
+/* Original Nocturne ambient background: CSS-only, optional, and reduced-motion aware. */
+.nocturne-ambient{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;opacity:.82;background:radial-gradient(circle at 18% 18%,rgba(126,67,180,.14),transparent 32%),radial-gradient(circle at 84% 76%,rgba(26,151,170,.10),transparent 28%)}
+.nocturne-ambient .ambient-orb{position:absolute;border-radius:999px;filter:blur(42px);mix-blend-mode:screen;opacity:.38;animation:ambient-drift 18s ease-in-out infinite alternate}
+.nocturne-ambient .orb-a{width:28rem;height:28rem;left:-9rem;top:-11rem;background:#6f2da8}
+.nocturne-ambient .orb-b{width:24rem;height:24rem;right:-8rem;bottom:-10rem;background:#147f91;animation-delay:-7s}
+.nocturne-ambient .ambient-grid{position:absolute;inset:-20%;opacity:.16;background-image:linear-gradient(rgba(190,140,245,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(190,140,245,.16) 1px,transparent 1px);background-size:42px 42px;transform:perspective(420px) rotateX(58deg) translateY(12%);mask-image:linear-gradient(to bottom,transparent,black 30%,transparent 100%);animation:ambient-grid 26s linear infinite}
+.nocturne-ambient .ambient-sigil{position:absolute;left:50%;top:48%;width:46px;height:46px;border:1px solid rgba(190,140,245,.24);transform:translate(-50%,-50%) rotate(45deg);box-shadow:0 0 28px rgba(126,67,180,.2),inset 0 0 18px rgba(126,67,180,.12);animation:ambient-sigil 12s ease-in-out infinite}
+.nocturne-ambient .ambient-sigil::before,.nocturne-ambient .ambient-sigil::after{content:"";position:absolute;inset:9px;border:1px solid rgba(190,140,245,.26);transform:rotate(45deg)}
+@keyframes ambient-drift{from{transform:translate3d(-2%,0,0) scale(.94)}to{transform:translate3d(5%,7%,0) scale(1.08)}}
+@keyframes ambient-grid{from{transform:perspective(420px) rotateX(58deg) translateY(12%) translateX(0)}to{transform:perspective(420px) rotateX(58deg) translateY(18%) translateX(-42px)}}
+@keyframes ambient-sigil{0%,100%{opacity:.28;scale:.92}50%{opacity:.64;scale:1.08}}
+@media (prefers-reduced-motion: reduce){.nocturne-ambient *{animation:none!important}.nocturne-ambient{opacity:.42}}
