@@ -15,6 +15,7 @@ import Inbox from './pages/Inbox'
 import Guide from './pages/Guide'
 import Settings from './pages/Settings'
 import NocturneBackground from './components/NocturneBackground'
+import CloseConfirmModal from './components/CloseConfirmModal'
 
 function DesktopPreferenceBridge() {
   useEffect(() => {
@@ -27,6 +28,7 @@ function DesktopPreferenceBridge() {
 export default function App() {
   return <I18nProvider><StatusProvider>
     <NocturneBackground />
+    <CloseConfirmModal />
     <DesktopPreferenceBridge />
     <StartupOverlay />
     <AppTour />

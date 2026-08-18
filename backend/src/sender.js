@@ -131,6 +131,12 @@ function sanitizedTransportError(err, email) {
  * Produces a user-safe diagnostic. It deliberately does not disclose a supplied
  * password or server response credentials, and it never retries authentication.
  */
+function isSpamRejectionError(err) {
+  const responseCode = Number(err?.responseCode || 0)
+  const raw = String(err?.message || err || '').toLowerCase()
+  return (responseCode === 554 || /\b554\b/.test(raw)) && /5\.7\.1|spam|abuse|policy|content/.test(raw)
+}
+
 function classifySmtpError(err, account) {
   const provider = providerFromEmail(account?.email)
   const code = String(err?.code || '').toUpperCase()
@@ -144,7 +150,7 @@ function classifySmtpError(err, account) {
   const temporaryFailure = [421, 450, 451, 452, 454].includes(responseCode) || /temporar|too many|rate.?limit|try again later/.test(raw)
   const spamRejection = (responseCode === 554 || /\b554\b/.test(raw)) && /5\.7\.1|spam|abuse|policy|content/i.test(raw)
 
-  if (spamRejection && provider === 'rambler') {
+  if (spamRejection && (provider === 'rambler' || /rambler|rambler-co\.ru/.test(raw))) {
     return 'Rambler: письмо отклонено антиспамом (554 5.7.1). Остановите повторные попытки, проверьте согласие получателя, SPF/DKIM/DMARC, List-Unsubscribe, ссылки и содержимое; при легитимной рассылке обратитесь в abuse Rambler.'
   }
   if (spamRejection) {
@@ -296,7 +302,10 @@ class SendingEngine {
     } catch (err) {
       transporter.close()
       if (lim) lim.rollback()
-      return { success: false, error: classifySmtpError(err, acc), account_used: acc.email, recipient_email: recipient.email }
+      const error = classifySmtpError(err, acc)
+      const stopRetries = isSpamRejectionError(err)
+      if (stopRetries) this.stopEvent.set()
+      return { success: false, error, stop_retries: stopRetries, account_used: acc.email, recipient_email: recipient.email }
     }
   }
 
@@ -324,6 +333,7 @@ class SendingEngine {
         sent++
 
         if (this.on_progress) this.on_progress(sent, total, result)
+        if (result.stop_retries) break
 
         const delay = randBetween(this.config.min_delay_ms || 1000, this.config.max_delay_ms || 3000)
         await sleep(delay)

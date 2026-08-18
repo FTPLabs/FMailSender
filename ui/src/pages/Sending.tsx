@@ -50,7 +50,7 @@ export default function Sending() {
 
   const cp = status?.campaign
   const state = cp?.state ?? 'idle'
-  const run = state === 'running'; const paused = state === 'paused'; const done = state === 'done'; const failed = state === 'error'
+  const run = state === 'running'; const paused = state === 'paused'; const done = state === 'done'; const stopped = state === 'stopped'; const failed = state === 'error' || stopped
   const recipients = status?.recipients ?? 0
 
   const local = (code: string) => ISSUE_COPY[code]?.[language] || code
@@ -86,7 +86,7 @@ export default function Sending() {
   const elapsed = cp?.started_at ? Math.round((Date.now() / 1000 - cp.started_at) / 60) : 0
   const speed = elapsed > 0 && cp?.sent ? Math.round(cp.sent / elapsed) : 0
   const stateColor = run ? '#06b6d4' : done ? '#10b981' : failed ? '#ef4444' : paused ? '#f59e0b' : '#6666aa'
-  const stateLabel = run ? (language === 'en' ? 'Sending' : 'Отправка') : paused ? (language === 'en' ? 'Paused' : 'Пауза') : done ? (language === 'en' ? 'Completed' : 'Завершено') : failed ? (language === 'en' ? 'Error' : 'Ошибка') : (language === 'en' ? 'Idle' : 'Ожидание')
+  const stateLabel = run ? (language === 'en' ? 'Sending' : 'Отправка') : paused ? (language === 'en' ? 'Paused' : 'Пауза') : done ? (language === 'en' ? 'Completed' : 'Завершено') : stopped ? (language === 'en' ? 'Stopped: anti-spam rejection' : 'Остановлено: антиспам') : failed ? (language === 'en' ? 'Error' : 'Ошибка') : (language === 'en' ? 'Idle' : 'Ожидание')
 
   return <div className="page max-w-2xl flex-1 flex flex-col">
     <div><h1 className="page-title">Рассылка</h1><p className="page-sub">Запуск и мониторинг кампании</p></div>
@@ -110,9 +110,10 @@ export default function Sending() {
         {!run && !paused && <button onClick={() => void start()} disabled={busy || readiness?.ready === false} className="btn btn-primary px-8 py-2.5 text-sm"><GothicIcon name="play" size={16} /> {language === 'en' ? 'Start campaign' : 'Начать рассылку'}</button>}
         {run && <><button onClick={() => void act(api.campaign.pause)} disabled={busy} className="btn btn-secondary px-6"><GothicIcon name="pause" size={15} /> {language === 'en' ? 'Pause' : 'Пауза'}</button><button onClick={() => void act(api.campaign.stop)} disabled={busy} className="btn btn-danger px-6"><GothicIcon name="stop" size={15} /> {language === 'en' ? 'Stop' : 'Стоп'}</button></>}
         {paused && <><button onClick={() => void act(api.campaign.resume)} disabled={busy} className="btn btn-primary px-6"><GothicIcon name="play" size={15} /> {language === 'en' ? 'Resume' : 'Продолжить'}</button><button onClick={() => void act(api.campaign.stop)} disabled={busy} className="btn btn-danger px-6"><GothicIcon name="stop" size={15} /> {language === 'en' ? 'Stop' : 'Стоп'}</button></>}
-        {(done || failed) && <button onClick={() => void act(api.campaign.stop)} disabled={busy} className="btn btn-secondary px-6"><GothicIcon name="refresh" size={15} /> {language === 'en' ? 'Reset' : 'Сбросить'}</button>}
+        {(done || failed || stopped) && <button onClick={() => void act(api.campaign.stop)} disabled={busy} className="btn btn-secondary px-6"><GothicIcon name="refresh" size={15} /> {language === 'en' ? 'Reset' : 'Сбросить'}</button>}
       </div>
     </div>
-    {cp?.errors?.length ? <div className="card mt-5 space-y-2"><div className="flex items-center gap-2 text-xs font-semibold text-[#f59e0b] uppercase tracking-wider"><GothicIcon name="warning" size={13} /> {language === 'en' ? `Sending errors (${cp.errors.length})` : `Ошибки отправки (${cp.errors.length})`}</div><div className="max-h-40 overflow-y-auto space-y-1">{cp.errors.slice(-20).map((item, index) => <div key={index} className="rounded bg-error/10 px-2.5 py-1 text-xs font-mono text-error">{item}</div>)}</div></div> : null}
+    {stopped && cp?.stop_reason && <div className="stop-notice card mt-5"><div className="flex items-start gap-3"><GothicIcon name="warning" size={16} className="mt-0.5 flex-shrink-0 text-error" /><div><div className="font-semibold text-error">{language === 'en' ? 'Sending stopped — no automatic retries' : 'Отправка остановлена — автоматические повторы отключены'}</div><div className="mt-1 text-sm text-text break-words">{cp.stop_reason}</div></div></div></div>}
+    {cp?.errors?.length ? <div className="card mt-5 space-y-2"><div className="flex items-center gap-2 text-xs font-semibold text-[#f59e0b] uppercase tracking-wider"><GothicIcon name="warning" size={13} /> {language === 'en' ? `Sending errors (${cp.errors.length})` : `Ошибки отправки (${cp.errors.length})`}</div><div className="error-log-list max-h-64 overflow-y-auto space-y-2 pr-1">{cp.errors.slice(-20).map((item, index) => <div key={index} className="error-log-item rounded-lg px-3 py-2 text-xs font-mono whitespace-pre-wrap break-words leading-relaxed">{item}</div>)}</div></div> : null}
   </div>
 }

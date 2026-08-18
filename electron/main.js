@@ -63,6 +63,15 @@ ipcMain.handle('app:restart', () => {
   return true
 })
 
+ipcMain.on('app:close-choice', (_event, choice) => {
+  if (!_closeRequestPending) return
+  _closeRequestPending = false
+  if (choice === 'cancel') { _win?.focus(); return }
+  if (choice === 'clear') clearLocalConfig()
+  _isQuitting = true
+  app.quit()
+})
+
 function startBackend() {
   const entry = getBackendEntry()
   const uiDist = getUiDist()
@@ -154,6 +163,7 @@ let _win  = null
 let _tray = null
 let _isQuitting = false
 let _closeWarningEnabled = true
+let _closeRequestPending = false
 
 function clearLocalConfig() {
   const dataDir = path.join(app.getPath('appData'), 'FMailSender')
@@ -219,19 +229,9 @@ function createWindow() {
   _win.on('close', event => {
     if (_isQuitting || !_closeWarningEnabled) return
     event.preventDefault()
-    const result = dialog.showMessageBoxSync(_win, {
-      type: 'question',
-      title: 'Close FMailSender?',
-      message: 'Choose what to do with local configuration before exiting.',
-      buttons: ['Clear and exit', 'Exit without clearing', 'Cancel'],
-      defaultId: 2,
-      cancelId: 2,
-      noLink: true,
-    })
-    if (result === 2) return
-    if (result === 0) clearLocalConfig()
-    _isQuitting = true
-    app.quit()
+    if (_closeRequestPending) return
+    _closeRequestPending = true
+    _win.webContents.send('app:close-request')
   })
   _win.on('closed', () => { _win = null })
 }

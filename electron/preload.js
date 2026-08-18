@@ -8,4 +8,10 @@ contextBridge.exposeInMainWorld('fmailApp', {
   platform: process.platform,
   restartApp: () => ipcRenderer.invoke('app:restart'),
   setCloseWarningEnabled: (enabled) => ipcRenderer.invoke('app:set-close-warning', Boolean(enabled)),
+  onCloseRequest: (callback) => {
+    const listener = () => callback()
+    ipcRenderer.on('app:close-request', listener)
+    return () => ipcRenderer.removeListener('app:close-request', listener)
+  },
+  resolveClose: (choice) => ipcRenderer.send('app:close-choice', choice),
 })

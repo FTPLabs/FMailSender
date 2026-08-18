@@ -16,7 +16,7 @@ const license  = require('./license')
 const { createTemplateWithPersonalKey } = require('./gemini_local')
 const { getSmtpConfigForDomain, getSmtpPresetForEmail } = require('./smtp_configs')
 
-const APP_VERSION = '7.5.7'
+const APP_VERSION = '7.5.8'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 
@@ -25,7 +25,7 @@ let _accounts   = []
 let _proxies    = []
 let _recipients = []
 let _campaignCfg = {}
-let _campaignStatus = { state: 'idle', sent: 0, failed: 0, total: 0, current_email: '', current_account: '', started_at: 0, errors: [] }
+let _campaignStatus = { state: 'idle', sent: 0, failed: 0, total: 0, current_email: '', current_account: '', started_at: 0, stop_reason: '', errors: [] }
 let _engine     = null
 let _stopEvent  = null
 let _runId      = 0
@@ -384,7 +384,7 @@ app.post('/api/campaign/start', (req, res) => {
 
   _runId++
   const currentRun = _runId
-  _campaignStatus  = { state: 'running', sent: 0, failed: 0, total: _recipients.length, current_email: '', current_account: '', started_at: Date.now() / 1000, errors: [] }
+  _campaignStatus  = { state: 'running', sent: 0, failed: 0, total: _recipients.length, current_email: '', current_account: '', started_at: Date.now() / 1000, stop_reason: '', errors: [] }
 
   const stop = { _flag: false, isSet() { return this._flag }, set() { this._flag = true } }
   _stopEvent = stop
@@ -416,6 +416,10 @@ app.post('/api/campaign/start', (req, res) => {
     if (result && !result.success) {
       _campaignStatus.failed++
       if (result.error) _campaignStatus.errors.push(`${result.recipient_email}: ${result.error}`)
+      if (result.stop_retries) {
+        _campaignStatus.state = 'stopped'
+        _campaignStatus.stop_reason = result.error || 'Anti-spam rejection; retries stopped.'
+      }
     }
     if (result?.success) _scheduleAccountsSave()
     _campaignStatus.current_email   = result?.recipient_email || ''
@@ -424,7 +428,7 @@ app.post('/api/campaign/start', (req, res) => {
 
   _engine.on_finished = results => {
     if (_runId !== currentRun) return
-    _campaignStatus.state  = 'done'
+    if (_campaignStatus.state !== 'stopped') _campaignStatus.state = 'done'
     _campaignStatus.sent   = results.filter(r => r.success).length
     _campaignStatus.failed = results.filter(r => !r.success).length
     if (_accountsSaveTimer) { clearTimeout(_accountsSaveTimer); _accountsSaveTimer = null }

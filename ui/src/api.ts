@@ -119,7 +119,7 @@ export interface CampaignReadiness {
 }
 
 export interface CampaignStatus {
-  state: 'idle' | 'running' | 'paused' | 'done' | 'error'
+  state: 'idle' | 'running' | 'paused' | 'done' | 'error' | 'stopped'
   sent: number
   failed: number
   total: number
@@ -127,6 +127,7 @@ export interface CampaignStatus {
   current_email: string
   current_account: string
   started_at: number
+  stop_reason?: string
   errors: string[]
 }
 
