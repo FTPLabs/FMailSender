@@ -1,1 +1,1 @@
-export const FRONTEND_VERSION = "7.5.9"
+export const FRONTEND_VERSION = "7.6.0"

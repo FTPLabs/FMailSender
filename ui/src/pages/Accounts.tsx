@@ -30,6 +30,7 @@ export default function Accounts() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading]   = useState(true)
   const [testing, setTesting]   = useState<string | null>(null)
+  const [imapTesting, setImapTesting] = useState<string | null>(null)
   const [testAll, setTestAll]   = useState(false)
   const [testProgress, setTestProgress] = useState<{ done: number; total: number } | null>(null)
   const [showForm, setShowForm] = useState(false)
@@ -54,7 +55,7 @@ export default function Accounts() {
     if (!preset.known) return
     setForm(f => ({
       ...f,
-      ...((force || !f.host.trim()) ? {
+      ...((preset.smtp_supported !== false && preset.host && (force || !f.host.trim())) ? {
         host: preset.host,
         port: preset.port,
         use_ssl: preset.use_ssl,
@@ -125,6 +126,16 @@ export default function Accounts() {
     } finally {
       setTesting(null)
     }
+  }
+
+  async function testImapOne(acc: Account) {
+    setImapTesting(acc.email)
+    try {
+      const result = await api.accounts.testImap({ ...acc })
+      setAccounts(prev => prev.map(a => a.email === acc.email ? { ...a, last_imap_ok: result.ok, last_imap_msg: result.message ?? '' } : a))
+    } catch (e: any) {
+      setAccounts(prev => prev.map(a => a.email === acc.email ? { ...a, last_imap_ok: false, last_imap_msg: e.message ?? 'IMAP error' } : a))
+    } finally { setImapTesting(null) }
   }
 
   function testAllFn() {
@@ -405,6 +416,7 @@ export default function Accounts() {
             <tbody>
               {accounts.map(acc => {
                 const isTesting = testing === acc.email
+                const isImapTesting = imapTesting === acc.email
                 return (
                   <tr key={acc.email}>
                     <td className="w-10">
@@ -449,20 +461,26 @@ export default function Accounts() {
                         </span>
                       </div>
                       {!isTesting && acc.last_test_ok === false && acc.last_test_msg && (
-                        <div className="text-[10px] text-[#ef4444]/70 mt-0.5 max-w-[160px] truncate"
-                          title={acc.last_test_msg}>{acc.last_test_msg}</div>
+                        <div className="text-[10px] text-[#ef4444]/70 mt-0.5 max-w-[160px] truncate" title={acc.last_test_msg}>{acc.last_test_msg}</div>
+                      )}
+                      {acc.imap_host && (
+                        <div className={`text-[10px] mt-0.5 max-w-[180px] truncate ${acc.last_imap_ok === true ? 'text-[#10b981]/80' : acc.last_imap_ok === false ? 'text-[#ef4444]/80' : 'text-[#6666aa]'}`} title={acc.last_imap_msg || `${acc.imap_host}:${acc.imap_port}`}>
+                          IMAP: {isImapTesting ? 'Проверка...' : acc.last_imap_ok === true ? 'ОК' : acc.last_imap_ok === false ? (acc.last_imap_msg || 'Ошибка') : `${acc.imap_host}:${acc.imap_port}`}
+                        </div>
                       )}
                     </td>
                     <td className="text-right pr-2">
                       <div className="flex items-center gap-1 justify-end">
-                        <button
-                          onClick={() => testOne(acc)}
-                          disabled={isTesting || testAll}
-                          title="Проверить SMTP"
-                          className="btn btn-ghost btn-sm p-1.5"
-                        >
-                          <GothicIcon name="refresh" size={12} className={isTesting ? 'animate-spin' : ''} />
-                        </button>
+                        {acc.host && (
+                          <button onClick={() => testOne(acc)} disabled={isTesting || isImapTesting || testAll} title="Проверить SMTP" className="btn btn-ghost btn-sm p-1.5">
+                            <GothicIcon name="refresh" size={12} className={isTesting ? 'animate-spin' : ''} />
+                          </button>
+                        )}
+                        {acc.imap_host && (
+                          <button onClick={() => testImapOne(acc)} disabled={isTesting || isImapTesting || testAll} title="Проверить IMAP" className="btn btn-ghost btn-sm p-1.5">
+                            <GothicIcon name="inbox" size={12} className={isImapTesting ? 'animate-spin' : ''} />
+                          </button>
+                        )}
                         <button onClick={() => del(acc.email)} title="Удалить"
                           className="btn btn-ghost btn-sm p-1.5 hover:text-[#ef4444]">
                           <GothicIcon name="delete" size={12} />

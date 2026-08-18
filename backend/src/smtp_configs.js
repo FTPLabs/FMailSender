@@ -13,6 +13,7 @@ const IMAP_BY_PROVIDER = Object.freeze({
   'iCloud Mail': 'imap.mail.me.com',
   'Telekom Mail': 'secureimap.t-online.de',
   'GMX': 'imap.gmx.net',
+  'Firstmail IMAP': 'imap.firstmail.ltd',
   'WEB.DE': 'imap.web.de',
   'Fastmail': 'imap.fastmail.com',
   'Mail': 'imap.mail.ru',
@@ -29,12 +30,13 @@ const IMAP_BY_PROVIDER = Object.freeze({
   'Runbox': 'mail.runbox.com',
 })
 
-function preset(provider, host, port, secure, passwordHint = '', authMode = 'password', imapHost = IMAP_BY_PROVIDER[provider] || '') {
+function preset(provider, host, port, secure, passwordHint = '', authMode = 'password', imapHost = IMAP_BY_PROVIDER[provider] || '', smtpSupported = true) {
   return Object.freeze({
     provider,
     host,
     port,
     secure,
+    smtpSupported,
     requireTLS: !secure,
     imapHost,
     imapPort: imapHost ? 993 : 0,
@@ -105,6 +107,13 @@ const SMTP_CONFIGS = Object.freeze({
   'gmx.fr':  preset('GMX', 'mail.gmx.net', 587, false, 'Включите IMAP/POP в настройках GMX; поддерживаются TLS 1.2/1.3.'),
   'gmx.es':  preset('GMX', 'mail.gmx.net', 587, false, 'Включите IMAP/POP в настройках GMX; поддерживаются TLS 1.2/1.3.'),
   'gmx.us':  preset('GMX', 'mail.gmx.net', 587, false, 'Включите IMAP/POP в настройках GMX; поддерживаются TLS 1.2/1.3.'),
+
+  // Firstmail custom domains: IMAP is verified; SMTP AUTH is not advertised on the exposed port.
+  'firsthidden.com':    preset('Firstmail IMAP', '', 0, false, 'IMAP-only: imap.firstmail.ltd:993 SSL. SMTP AUTH не подтверждён.', 'password', 'imap.firstmail.ltd', false),
+  'ishowfirstmail.com': preset('Firstmail IMAP', '', 0, false, 'IMAP-only: imap.firstmail.ltd:993 SSL. SMTP AUTH не подтверждён.', 'password', 'imap.firstmail.ltd', false),
+  'analismail.com':     preset('Firstmail IMAP', '', 0, false, 'IMAP-only: imap.firstmail.ltd:993 SSL. SMTP AUTH не подтверждён.', 'password', 'imap.firstmail.ltd', false),
+  'blackfirsta.com':    preset('Firstmail IMAP', '', 0, false, 'IMAP-only: imap.firstmail.ltd:993 SSL. SMTP AUTH не подтверждён.', 'password', 'imap.firstmail.ltd', false),
+
   'web.de':  preset('WEB.DE', 'smtp.web.de', 587, false, 'Включите IMAP/POP в настройках WEB.DE; поддерживаются TLS 1.2/1.3.'),
 
   // Fastmail: https://www.fastmail.help/hc/en-us/articles/1500000279921-IMAP-POP-and-SMTP
@@ -219,9 +228,12 @@ function getSmtpPresetForEmail(email) {
     imap_host: cfg.imapHost,
     imap_port: cfg.imapPort,
     imap_ssl: cfg.imapSecure,
+    smtp_supported: cfg.smtpSupported !== false,
     password_hint: cfg.passwordHint,
     auth_mode: cfg.authMode,
-    message: `Автозаполнено: ${cfg.provider} — ${cfg.host}:${cfg.port}.`,
+    message: cfg.smtpSupported === false
+      ? `Автозаполнено: ${cfg.provider} — IMAP ${cfg.imapHost}:${cfg.imapPort}. SMTP не подтверждён.`
+      : `Автозаполнено: ${cfg.provider} — ${cfg.host}:${cfg.port}.`,
   }
 }
 

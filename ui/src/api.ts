@@ -63,6 +63,8 @@ export interface Account {
   imap_ssl: boolean
   last_test_ok: boolean | null
   last_test_msg: string
+  last_imap_ok: boolean | null
+  last_imap_msg: string
   sent_today: number
   sent_this_hour: number
 }
@@ -78,6 +80,7 @@ export interface SmtpPreset {
   imap_host: string
   imap_port: number
   imap_ssl: boolean
+  smtp_supported?: boolean
   password_hint: string
   auth_mode: 'password' | 'oauth2' | 'manual'
   message: string
@@ -168,6 +171,7 @@ export const api = {
                  _http.put<Account>(`/api/accounts/${encodeURIComponent(email)}`, a).then(r => r.data),
     delete:    (email: string)       => _http.delete(`/api/accounts/${encodeURIComponent(email)}`).then(r => r.data),
     test:      (a: Partial<Account>) => _http.post<{ok:boolean;message:string}>('/api/accounts/test', a).then(r => r.data),
+    testImap:  (a: Partial<Account>) => _http.post<{ok:boolean;message:string}>('/api/accounts/test-imap', a).then(r => r.data),
     testAll:   ()                    => _http.post('/api/accounts/test-all').then(r => r.data),
     smtpPreset: (email: string)      => _http.get<SmtpPreset>('/api/accounts/smtp-preset', { params: { email } }).then(r => r.data),
     importTxt: (file: File)          => {

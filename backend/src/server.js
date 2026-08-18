@@ -15,8 +15,9 @@ const sender   = require('./sender')
 const license  = require('./license')
 const { createTemplateWithPersonalKey } = require('./gemini_local')
 const { getSmtpConfigForDomain, getSmtpPresetForEmail } = require('./smtp_configs')
+const { testImapLogin } = require('./imap_client')
 
-const APP_VERSION = '7.5.9'
+const APP_VERSION = '7.6.0'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 
@@ -142,6 +143,14 @@ app.post('/api/accounts/test', async (req, res) => {
   const [ok, msg] = await sender.testSmtpConnection(acc)
   const existing = _accounts.find(a => a.email.toLowerCase() === req.body.email.toLowerCase())
   if (existing) { existing.last_test_ok = ok; existing.last_test_msg = msg; storage.saveAccounts(_accounts) }
+  res.json({ ok, message: msg })
+})
+
+app.post('/api/accounts/test-imap', async (req, res) => {
+  const acc = _makeAccount(req.body || {})
+  const [ok, msg] = await testImapLogin({ host: acc.imap_host, port: acc.imap_port, secure: acc.imap_ssl, email: acc.email, password: acc.password })
+  const existing = _accounts.find(a => a.email.toLowerCase() === String(req.body?.email || '').toLowerCase())
+  if (existing) { existing.last_imap_ok = ok; existing.last_imap_msg = msg; storage.saveAccounts(_accounts) }
   res.json({ ok, message: msg })
 })
 
@@ -588,12 +597,12 @@ function _applySmtpPreset(body) {
   const output = { ...input }
   const host = String(output.host || '').trim().toLowerCase()
   const gmxHost = /^((mail|smtp)\.gmx\.(net|com))$/.test(host)
-  if (!host || (_isGmxDomain(output.email) && !gmxHost)) {
+  if (preset.host && (!host || (_isGmxDomain(output.email) && !gmxHost))) {
     output.host = preset.host
     output.port = preset.port
     output.use_ssl = preset.use_ssl
     output.use_tls = preset.use_tls
-  } else {
+  } else if (preset.host) {
     output.port = Number(output.port || preset.port)
     output.use_ssl = _toBool(output.use_ssl, preset.use_ssl)
     output.use_tls = _toBool(output.use_tls, preset.use_tls)
@@ -642,6 +651,7 @@ function _makeAccount(body) {
     token_expires_at: body.token_expires_at || 0,
     imap_host: String(body.imap_host || '').trim(), imap_port: Number(body.imap_port || 993), imap_ssl: _toBool(body.imap_ssl, true),
     last_test_ok: body.last_test_ok ?? null, last_test_msg: body.last_test_msg || '',
+    last_imap_ok: body.last_imap_ok ?? null, last_imap_msg: body.last_imap_msg || '',
     sent_today: body.sent_today || 0, sent_this_hour: body.sent_this_hour || 0,
   }
 }
