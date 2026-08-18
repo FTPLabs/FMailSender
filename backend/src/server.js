@@ -16,7 +16,7 @@ const license  = require('./license')
 const { createTemplateWithPersonalKey } = require('./gemini_local')
 const { getSmtpConfigForDomain, getSmtpPresetForEmail } = require('./smtp_configs')
 
-const APP_VERSION = '7.5.8'
+const APP_VERSION = '7.5.9'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 
@@ -33,7 +33,20 @@ let _accountsSaveTimer = null
 
 // ── Load state on startup ─────────────────────────────────────────────────────
 function _init() {
-  _accounts    = storage.loadAccounts()
+  const loaded = storage.loadAccounts()
+  let repaired = false
+  _accounts = loaded.map(account => {
+    const before = JSON.stringify({ host: account.host, port: account.port, use_ssl: account.use_ssl, use_tls: account.use_tls, imap_host: account.imap_host, imap_port: account.imap_port })
+    const normalized = _makeAccount(_applySmtpPreset(account))
+    const after = JSON.stringify({ host: normalized.host, port: normalized.port, use_ssl: normalized.use_ssl, use_tls: normalized.use_tls, imap_host: normalized.imap_host, imap_port: normalized.imap_port })
+    if (before !== after) {
+      normalized.last_test_ok = null
+      normalized.last_test_msg = 'Настройки провайдера обновлены; выполните повторную проверку.'
+      repaired = true
+    }
+    return normalized
+  })
+  if (repaired) storage.saveAccounts(_accounts)
   _proxies     = storage.loadProxies()
   _recipients  = storage.loadRecipients()
   _campaignCfg = storage.loadCampaign()
@@ -67,7 +80,7 @@ app.use(express.static(uiDist))
 
 // ── License guard middleware ──────────────────────────────────────────────────
 const LICENSE_EXEMPT = new Set([
-  '/api/health', '/api/license', '/api/license/activate', '/api/license/poll', '/api/events', '/api/settings/clear',
+  '/api/health', '/api/license', '/api/license/activate', '/api/license/poll', '/api/events', '/api/settings/clear', '/api/accounts/smtp-preset',
 ])
 
 app.use((req, res, next) => {
@@ -557,16 +570,33 @@ app.get('*', (req, res) => {
 })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+function _toBool(value, fallback = false) {
+  if (typeof value === 'boolean') return value
+  if (value == null) return fallback
+  if (typeof value === 'string') return !['', '0', 'false', 'no', 'off'].includes(value.trim().toLowerCase())
+  return Boolean(value)
+}
+
+function _isGmxDomain(email) {
+  return /^gmx\.[a-z]+$/i.test(String(email || '').split('@').pop() || '')
+}
+
 function _applySmtpPreset(body) {
   const input = body && typeof body === 'object' ? body : {}
   const preset = getSmtpPresetForEmail(input.email)
   if (!preset.known) return input
   const output = { ...input }
-  if (!String(output.host || '').trim()) {
+  const host = String(output.host || '').trim().toLowerCase()
+  const gmxHost = /^((mail|smtp)\.gmx\.(net|com))$/.test(host)
+  if (!host || (_isGmxDomain(output.email) && !gmxHost)) {
     output.host = preset.host
     output.port = preset.port
     output.use_ssl = preset.use_ssl
     output.use_tls = preset.use_tls
+  } else {
+    output.port = Number(output.port || preset.port)
+    output.use_ssl = _toBool(output.use_ssl, preset.use_ssl)
+    output.use_tls = _toBool(output.use_tls, preset.use_tls)
   }
   // IMAP is filled only from a verified provider preset; unknown domains remain manual.
   if (!String(output.imap_host || '').trim() && preset.imap_host) {
@@ -601,8 +631,8 @@ function _parseImportedCredential(rawLine) {
 function _makeAccount(body) {
   return {
     email: body.email || '', password: body.password || '',
-    host: body.host || '', port: body.port || 587,
-    use_ssl: body.use_ssl ?? false, use_tls: body.use_tls ?? true,
+    host: String(body.host || '').trim(), port: Number(body.port || 587),
+    use_ssl: _toBool(body.use_ssl, false), use_tls: _toBool(body.use_tls, true),
     display_name: body.display_name || '',
     daily_limit: body.daily_limit || 500, hourly_limit: body.hourly_limit || 50,
     is_active: body.is_active ?? true,
@@ -610,7 +640,7 @@ function _makeAccount(body) {
     access_token: body.access_token || '', refresh_token: body.refresh_token || '',
     client_id: body.client_id || '', auth_type: body.auth_type || (body.refresh_token ? 'oauth_refresh' : 'password'),
     token_expires_at: body.token_expires_at || 0,
-    imap_host: body.imap_host || '', imap_port: body.imap_port || 993, imap_ssl: body.imap_ssl ?? true,
+    imap_host: String(body.imap_host || '').trim(), imap_port: Number(body.imap_port || 993), imap_ssl: _toBool(body.imap_ssl, true),
     last_test_ok: body.last_test_ok ?? null, last_test_msg: body.last_test_msg || '',
     sent_today: body.sent_today || 0, sent_this_hour: body.sent_this_hour || 0,
   }

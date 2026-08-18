@@ -113,6 +113,13 @@ function makeProxyAgent(proxyUrl, secure) {
   throw new Error('Поддерживаются только HTTP(S), SOCKS4 и SOCKS5 proxy.')
 }
 
+function normalizeBool(value, fallback = false) {
+  if (typeof value === 'boolean') return value
+  if (value == null) return fallback
+  if (typeof value === 'string') return !['', '0', 'false', 'no', 'off'].includes(value.trim().toLowerCase())
+  return Boolean(value)
+}
+
 function providerFromEmail(email) {
   const domain = String(email || '').trim().toLowerCase().split('@').pop() || ''
   if (domain === 'gmx.com' || domain.startsWith('gmx.')) return 'gmx'
@@ -175,10 +182,10 @@ async function testSmtpConnection(account) {
   const domain = account.email.split('@')[1] || ''
   const cfg    = getSmtpConfigForDomain(domain)
 
-  const host = account.host || cfg?.host || ''
-  const port = account.port || cfg?.port || 587
-  const secure    = account.use_ssl != null ? account.use_ssl  : (cfg?.secure    ?? false)
-  const requireTLS = account.use_tls != null ? account.use_tls : (cfg?.requireTLS ?? true)
+  const host = String(account.host || cfg?.host || '').trim()
+  const port = Number(account.port || cfg?.port || 587)
+  const secure = normalizeBool(account.use_ssl != null ? account.use_ssl : (cfg?.secure ?? false), false)
+  const requireTLS = secure ? false : normalizeBool(account.use_tls != null ? account.use_tls : (cfg?.requireTLS ?? true), true)
 
   if (!host) return [false, `Неизвестный провайдер: ${domain}. Укажите хост вручную.`]
 

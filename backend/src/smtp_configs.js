@@ -12,7 +12,7 @@ const IMAP_BY_PROVIDER = Object.freeze({
   'AOL Mail': 'imap.aol.com',
   'iCloud Mail': 'imap.mail.me.com',
   'Telekom Mail': 'secureimap.t-online.de',
-  'GMX': 'imap.gmx.com',
+  'GMX': 'imap.gmx.net',
   'WEB.DE': 'imap.web.de',
   'Fastmail': 'imap.fastmail.com',
   'Mail': 'imap.mail.ru',
@@ -97,8 +97,8 @@ const SMTP_CONFIGS = Object.freeze({
   'magenta.de':  preset('Telekom Mail', 'securesmtp.t-online.de', 465, true, 'Используйте пароль для почтовых программ Telekom.'),
 
   // GMX and WEB.DE: https://hilfe.gmx.net/pop-imap/imap/imap-serverdaten.html ; https://hilfe.web.de/pop-imap/imap/imap-serverdaten.html
-  'gmx.com': preset('GMX', 'mail.gmx.net', 587, false, 'Включите IMAP/POP в настройках GMX; поддерживаются TLS 1.2/1.3.'),
-  'gmx.net': preset('GMX', 'mail.gmx.net', 587, false, 'Включите IMAP/POP в настройках GMX; поддерживаются TLS 1.2/1.3.'),
+  'gmx.com': preset('GMX', 'mail.gmx.net', 587, false, 'Включите IMAP/POP для внешних программ. При 2FA используйте GMX app password; SMTP: STARTTLS 587 или SSL 465.'),
+  'gmx.net': preset('GMX', 'mail.gmx.net', 587, false, 'Включите IMAP/POP для внешних программ. При 2FA используйте GMX app password; SMTP: STARTTLS 587 или SSL 465.'),
   'gmx.de':  preset('GMX', 'mail.gmx.net', 587, false, 'Включите IMAP/POP в настройках GMX; поддерживаются TLS 1.2/1.3.'),
   'gmx.at':  preset('GMX', 'mail.gmx.net', 587, false, 'Включите IMAP/POP в настройках GMX; поддерживаются TLS 1.2/1.3.'),
   'gmx.ch':  preset('GMX', 'mail.gmx.net', 587, false, 'Включите IMAP/POP в настройках GMX; поддерживаются TLS 1.2/1.3.'),
