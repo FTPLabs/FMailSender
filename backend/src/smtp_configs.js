@@ -22,6 +22,11 @@ const IMAP_BY_PROVIDER = Object.freeze({
   'QQ Mail': 'imap.qq.com',
   'NetEase Mail': 'imap.163.com',
   'Sina Mail': 'imap.sina.com',
+  'Mail.com': 'imap.mail.com',
+  'Mailbox.org': 'imap.mailbox.org',
+  'Posteo': 'posteo.de',
+  'Seznam Email': 'imap.seznam.cz',
+  'Runbox': 'mail.runbox.com',
 })
 
 function preset(provider, host, port, secure, passwordHint = '', authMode = 'password', imapHost = IMAP_BY_PROVIDER[provider] || '') {
@@ -106,6 +111,29 @@ const SMTP_CONFIGS = Object.freeze({
   'fastmail.com': preset('Fastmail', 'smtp.fastmail.com', 465, true, 'Нужен отдельный Fastmail App Password; SMTP доступен не на каждом тарифе.'),
   'fastmail.fm':  preset('Fastmail', 'smtp.fastmail.com', 465, true, 'Нужен отдельный Fastmail App Password; SMTP доступен не на каждом тарифе.'),
   'fastmail.net': preset('Fastmail', 'smtp.fastmail.com', 465, true, 'Нужен отдельный Fastmail App Password; SMTP доступен не на каждом тарифе.'),
+
+  // Mail.com: https://support.mail.com/premium/imap/server.html
+  'mail.com': preset('Mail.com', 'smtp.mail.com', 465, true, 'Разрешите IMAP/SMTP в настройках Mail.com, если доступ отключён.'),
+
+  // Mailbox.org: https://kb.mailbox.org/en/private/e-mail/e-mail-configuration/
+  'mailbox.org': preset('Mailbox.org', 'smtp.mailbox.org', 465, true, 'При 2FA используйте пароль приложения Mailbox.org.'),
+
+  // Posteo: https://posteo.de/en/help/how-do-i-set-up-posteo-in-an-email-client-pop3-imap-and-smtp
+  'posteo.de':  preset('Posteo', 'posteo.de', 465, true, 'Используйте Posteo app password; TLS обязателен.'),
+  'posteo.com': preset('Posteo', 'posteo.de', 465, true, 'Используйте Posteo app password; TLS обязателен.'),
+  'posteo.net': preset('Posteo', 'posteo.de', 465, true, 'Используйте Posteo app password; TLS обязателен.'),
+  'posteo.uk':  preset('Posteo', 'posteo.de', 465, true, 'Используйте Posteo app password; TLS обязателен.'),
+
+  // Seznam Email: https://o-seznam.cz/napoveda/email/mohlo-by-se-hodit/postovni-programy-a-aplikace/
+  'seznam.cz': preset('Seznam Email', 'smtp.seznam.cz', 465, true, 'SMTP требует аутентификацию полной почтовой учётной записью.'),
+
+  // Runbox: https://help.runbox.com/email-program-settings/
+  'runbox.com':     preset('Runbox', 'mail.runbox.com', 465, true, 'SMTP доступен после верификации альтернативного адреса или оплаты Runbox.'),
+  'runbox.no':      preset('Runbox', 'mail.runbox.com', 465, true, 'SMTP доступен после верификации альтернативного адреса или оплаты Runbox.'),
+  'rbx.run':        preset('Runbox', 'mail.runbox.com', 465, true, 'SMTP доступен после верификации альтернативного адреса или оплаты Runbox.'),
+  'rbx.email':      preset('Runbox', 'mail.runbox.com', 465, true, 'SMTP доступен после верификации альтернативного адреса или оплаты Runbox.'),
+  'offshore.rocks': preset('Runbox', 'mail.runbox.com', 465, true, 'SMTP доступен после верификации альтернативного адреса или оплаты Runbox.'),
+  'mailhouse.biz':  preset('Runbox', 'mail.runbox.com', 465, true, 'SMTP доступен после верификации альтернативного адреса или оплаты Runbox.'),
 
   // Mail.ru: https://help.mail.ru/mail/login/mailer/
   'mail.ru':  preset('Mail', 'smtp.mail.ru', 465, true, 'Нужен пароль для внешнего приложения Mail.'),

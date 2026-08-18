@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 7.5.2)"
+        description: "Version (e.g. 7.5.4)"
         required: true
-        default: "7.5.2"
+        default: "7.5.4"
 
 env:
   NODE_VERSION: "22"
@@ -283,7 +283,7 @@ jobs:
             1. Скачайте **FMailSender_v${{ steps.tag.outputs.version }}.exe**
             2. Запустите — приложение откроется мгновенно
 
-            ### Архитектура v7.5.2 (Electron + Node.js — новое ядро)
+            ### Архитектура v7.5.4 (Electron + Node.js — новое ядро)
             - **Electron** — Chromium WebView + Node.js runtime (нет AV-блокировок)
             - **Node.js backend** — Express сервер, запускается за ~200 мс (vs 60 с у Python)
             - **Nodemailer** — нативная SMTP-отправка с поддержкой SOCKS5/HTTP прокси

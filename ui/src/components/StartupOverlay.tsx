@@ -193,7 +193,7 @@ export default function StartupOverlay() {
       if (data.success) setLicenseOk(true)
       else setActivateErr(data.detail || data.message || data.error || 'Ключ недействителен')
     } catch (e: unknown) {
-      setActivateErr((e as Error).message || 'Ошибка сети')
+      setActivateErr('Сервер лицензий временно недоступен. Проверьте подключение и повторите попытку.')
     } finally {
       setActivating(false)
     }

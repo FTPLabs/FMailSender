@@ -15,6 +15,30 @@ const ACTIVATE_URL     = LICENSE_SERVER + '/v1/activate'
 const CACHE_TTL_MS     = 24 * 3600 * 1000
 const RECHECK_INTERVAL = 3600 * 1000
 
+
+const IPV4_OR_PORT_RE = /\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?::\d{1,5})?\b/g
+const URL_RE = /\b(?:https?|wss?):\/\/[^\s<>()]+/gi
+const IPV6_RE = /(?:^|[^0-9a-f])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?=$|[^0-9a-f])/gi
+
+/**
+ * Error text shown outside the licensing module. Raw transport errors often
+ * embed a resolved IP, URL or proxy path; none of those are user-facing data.
+ */
+function publicLicenseError(input, fallback = 'Сервер лицензий временно недоступен. Проверьте подключение и повторите попытку.') {
+  const raw = String(input?.message || input || '').trim()
+  const code = String(input?.code || '').toUpperCase()
+  const lower = raw.toLowerCase()
+  const transportFailure = [
+    'ECONNREFUSED', 'ECONNRESET', 'ECONNABORTED', 'EHOSTUNREACH',
+    'ENETUNREACH', 'ENOTFOUND', 'ETIMEDOUT', 'ESOCKET', 'CERT_HAS_EXPIRED',
+  ].includes(code) || /\b(connect|socket|network|timeout|timed out|certificate|tls|ssl|getaddrinfo|econnrefused)\b/.test(lower)
+  if (transportFailure) return fallback
+
+  const sanitized = raw.replace(URL_RE, '').replace(IPV4_OR_PORT_RE, '').replace(IPV6_RE, ' ').replace(/\s{2,}/g, ' ').trim()
+  if (!sanitized || sanitized !== raw || sanitized.length > 220) return fallback
+  return sanitized
+}
+
 let _hwidCache = null
 
 // ── HWID ──────────────────────────────────────────────────────────────────────
@@ -114,7 +138,8 @@ async function _validateOnline(key, hwid, timeout = 10000) {
     return resp.data
   } catch (err) {
     if (err.response) {
-      const detail = err.response.data?.detail || err.response.data?.message || `HTTP ${err.response.status}`
+      const rawDetail = err.response.data?.detail || err.response.data?.message || `HTTP ${err.response.status}`
+      const detail = publicLicenseError(rawDetail, `Ошибка лицензии (HTTP ${err.response.status})`)
       if (err.response.status === 403) {
         const dl = detail.toLowerCase()
         if (dl.includes('hwid') || dl.includes('mismatch') || dl.includes('device')) {
@@ -127,7 +152,7 @@ async function _validateOnline(key, hwid, timeout = 10000) {
       }
       return { valid: false, error: detail }
     }
-    return { valid: false, error: String(err.message), offline: true }
+    return { valid: false, error: publicLicenseError(err), offline: true }
   }
 }
 
@@ -163,18 +188,19 @@ async function activateLicenseKey(key) {
     result = resp.data
   } catch (err) {
     if (err.response) {
-      const detail = err.response.data?.detail || err.response.data?.message || `HTTP ${err.response.status}`
+      const rawDetail = err.response.data?.detail || err.response.data?.message || `HTTP ${err.response.status}`
+      const detail = publicLicenseError(rawDetail, `Ошибка активации (HTTP ${err.response.status})`)
       const dl = (detail || '').toLowerCase()
       if (dl.includes('hwid') || dl.includes('mismatch') || dl.includes('device')) {
         throw new Error('Этот ключ уже привязан к другому компьютеру. Обратитесь в поддержку.')
       }
       throw new Error(detail || 'Ключ недействителен')
     }
-    throw new Error(`Не удалось связаться с сервером лицензий: ${err.message}`)
+    throw new Error(publicLicenseError(err))
   }
 
   if (result.valid === false) {
-    throw new Error(result.detail || result.error || result.message || 'Ключ недействителен')
+    throw new Error(publicLicenseError(result.detail || result.error || result.message, 'Ключ недействителен'))
   }
 
   let { plan, expires_at } = result
@@ -242,7 +268,7 @@ function stopPeriodicCheck() {
 
 module.exports = {
   _getHwid, _isValidKeyFormat,
-  getCachedLicenseStatus, validateOnStartup, activateLicenseKey, requestAiTemplate,
+  getCachedLicenseStatus, validateOnStartup, activateLicenseKey, requestAiTemplate, publicLicenseError,
   setLicenseOk, getLicenseOk, setBgChecking, isBgChecking,
   startPeriodicCheck, stopPeriodicCheck,
 }

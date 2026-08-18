@@ -52,7 +52,7 @@ def test_version() -> None:
     from core._version import APP_VERSION
     check(bool(re.fullmatch(r"\d+\.\d+\.\d+", APP_VERSION)),
           f"APP_VERSION is SemVer (got: {APP_VERSION})", f"got {APP_VERSION}")
-    check(APP_VERSION == "7.5.2", "APP_VERSION matches current release", f"got {APP_VERSION}")
+    check(APP_VERSION == "7.5.4", "APP_VERSION matches current release", f"got {APP_VERSION}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

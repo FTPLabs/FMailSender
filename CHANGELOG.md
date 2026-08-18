@@ -1,3 +1,18 @@
+## [7.5.4] — 2026-08-18
+
+### License connectivity and privacy
+- Restored the Nginx HTTPS licensing endpoint after removal of conflicting VPN components.
+- Activation UI/API never expose resolved IP addresses, URLs or raw transport diagnostics.
+
+### Provider catalogue
+- Added documented SMTP/IMAP auto-configuration for Mail.com, Mailbox.org, Posteo, Seznam Email and Runbox aliases.
+
+## [7.5.3] — 2026-08-18
+
+### Activation privacy
+- Client-visible license activation errors no longer expose resolved IP addresses, URLs, proxy paths or raw transport details.
+- Network, TLS and timeout errors map to a neutral actionable message; server-side details are sanitized before API responses and client logs.
+
 ## [7.5.2] — 2026-08-17
 
 ### Authentication diagnostics

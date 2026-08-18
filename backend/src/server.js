@@ -1,6 +1,6 @@
 'use strict'
 /**
- * FMailSender — Node.js Express Backend v7.5.2
+ * FMailSender — Node.js Express Backend v7.5.4
  * Drop-in replacement for Python FastAPI core/server.py
  * All endpoints identical, port 7531.
  */
@@ -15,7 +15,7 @@ const sender   = require('./sender')
 const license  = require('./license')
 const { getSmtpConfigForDomain, getSmtpPresetForEmail } = require('./smtp_configs')
 
-const APP_VERSION = '7.5.2'
+const APP_VERSION = '7.5.4'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 
@@ -449,7 +449,7 @@ app.post('/api/license/activate', async (req, res) => {
     if (result.success) license.setLicenseOk(true)
     res.json(result)
   } catch (err) {
-    const detail = err instanceof Error ? err.message : 'Неизвестная ошибка активации'
+    const detail = license.publicLicenseError(err, 'Не удалось активировать ключ. Повторите попытку позже.')
     console.warn(`[license] activation failed: ${detail}`)
     res.status(400).json({ detail })
   }
