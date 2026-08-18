@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStatus } from '../contexts/StatusContext'
 import { getBaseUrl } from '../api'
 import { FRONTEND_VERSION } from '../version'
+import { useI18n } from '../i18n'
 
 // После этого времени показываем кнопку перезапуска (независимо от стадии)
 const RETRY_AFTER_SECS = 60
@@ -71,6 +72,7 @@ function AppLogo({ size = 72 }: { size?: number }) {
 
 export default function StartupOverlay() {
   const { online } = useStatus()
+  const { t } = useI18n()
 
   const [elapsed,     setElapsed]     = useState(0)
   const [progress,    setProgress]    = useState(0)
@@ -193,7 +195,7 @@ export default function StartupOverlay() {
       if (data.success) setLicenseOk(true)
       else setActivateErr(data.detail || data.message || data.error || 'Ключ недействителен')
     } catch (e: unknown) {
-      setActivateErr('Сервер лицензий временно недоступен. Проверьте подключение и повторите попытку.')
+      setActivateErr(t('startup.unavailable'))
     } finally {
       setActivating(false)
     }
@@ -240,7 +242,7 @@ export default function StartupOverlay() {
           <AppLogo size={88} />
           <div className="text-center mt-1">
             <h1 className="text-[1.5rem] font-bold tracking-tight" style={{ color: 'rgb(var(--c-text))' }}>FMAIL / NOCTURNE</h1>
-            <p className="text-[0.8rem] mt-0.5 font-medium" style={{ color: 'rgb(var(--c-muted))' }}>Активация лицензии</p>
+            <p className="text-[0.8rem] mt-0.5 font-medium" style={{ color: 'rgb(var(--c-muted))' }}>{t('startup.activation')}</p>
           </div>
         </div>
         <div className="relative w-full rounded-2xl p-6"
@@ -249,7 +251,7 @@ export default function StartupOverlay() {
             <p className="text-[0.82rem] mb-4 leading-snug" style={{ color: 'rgb(var(--c-muted))' }}>{licenseMsg}</p>
           )}
           {bgChecking && (
-            <p className="text-[0.75rem] mb-3" style={{ color: 'rgb(var(--c-muted))' }}>Идёт проверка лицензии на сервере...</p>
+            <p className="text-[0.75rem] mb-3" style={{ color: 'rgb(var(--c-muted))' }}>{t('startup.checking')}</p>
           )}
           <input
             className="w-full rounded-xl px-4 py-3 font-mono text-[0.82rem] focus:outline-none"
@@ -276,11 +278,11 @@ export default function StartupOverlay() {
               transition: 'all 0.15s',
             }}
           >
-            {activating ? 'Проверка...' : 'Активировать'}
+            {activating ? t('startup.activating') : t('startup.activate')}
           </button>
         </div>
         <p className="relative text-[0.7rem]" style={{ color: 'rgb(var(--c-dim))' }}>
-          Ключ привязывается к устройству · Поддержка: fmail.shop
+          {t('startup.device')}
         </p>
         <style>{GLOW_STYLES}</style>
       </div>

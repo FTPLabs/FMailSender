@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Save, Eye, EyeOff, FileText, Sparkles, Wand2 } from 'lucide-react'
+import { Save, Eye, EyeOff, FileText, Sparkles, Wand2, KeyRound } from 'lucide-react'
 import { api, type CampaignConfig } from '../api'
+import { useI18n } from '../i18n'
 
 const TAGS = [
   { tag: '{{name}}',   desc: 'Имя получателя' },
@@ -25,6 +26,9 @@ export default function Compose() {
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState('')
   const [aiNote, setAiNote] = useState('')
+  const [personalApiKey, setPersonalApiKey] = useState('')
+  const [showPersonalApiKey, setShowPersonalApiKey] = useState(false)
+  const { t } = useI18n()
 
   useEffect(() => {
     api.campaign.get()
@@ -49,7 +53,7 @@ export default function Compose() {
     setAiBusy(true); setAiError(''); setAiNote('')
     try {
       const result = await api.ai.template({
-        mode, brief: aiBrief, subject: cfg.subject ?? '', body_html: cfg.body_html ?? '', body_text: cfg.body_text ?? '',
+        mode, brief: aiBrief, subject: cfg.subject ?? '', body_html: cfg.body_html ?? '', body_text: cfg.body_text ?? '', personal_api_key: personalApiKey || undefined,
       })
       setCfg(c => ({ ...c, subject: result.subject, body_html: result.body_html, body_text: result.body_text }))
       setHtml(true)
@@ -72,12 +76,12 @@ export default function Compose() {
     <div className="page flex-1 flex flex-col">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Письмо</h1>
-          <p className="page-sub">Тема, тело и настройки рассылки</p>
+          <h1 className="page-title">{t('compose.title')}</h1>
+          <p className="page-sub">{t('compose.sub')}</p>
         </div>
         <button onClick={save} className="btn btn-primary">
           <Save size={14} />
-          {saved ? '✓ Сохранено' : 'Сохранить'}
+          {saved ? t('compose.saved') : t('compose.save')}
         </button>
       </div>
 
@@ -138,16 +142,21 @@ export default function Compose() {
       <div className="card space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h2 className="text-sm font-semibold text-[#e8e8ff] flex items-center gap-2"><Sparkles size={15} className="text-[#a78bfa]" />AI-шаблон</h2>
-            <p className="text-xs text-[#6666aa] mt-1">Создаёт или улучшает прозрачный HTML для согласованных писем. Результат всегда нужно проверить перед сохранением.</p>
+            <h2 className="text-sm font-semibold text-[#e8e8ff] flex items-center gap-2"><Sparkles size={15} className="text-[#a78bfa]" />{t('compose.ai')}</h2>
+            <p className="text-xs text-[#6666aa] mt-1">{t('compose.aiDescription')}</p>
           </div>
           <div className="flex gap-2">
-            <button disabled={aiBusy} onClick={() => applyAi('generate')} className="btn btn-secondary btn-sm disabled:opacity-50"><Sparkles size={12} />Создать HTML</button>
-            <button disabled={aiBusy || !(cfg.body_html || cfg.body_text || cfg.subject)} onClick={() => applyAi('refine')} className="btn btn-secondary btn-sm disabled:opacity-50"><Wand2 size={12} />Улучшить</button>
+            <button disabled={aiBusy} onClick={() => applyAi('generate')} className="btn btn-secondary btn-sm disabled:opacity-50"><Sparkles size={12} />{t('compose.create')}</button>
+            <button disabled={aiBusy || !(cfg.body_html || cfg.body_text || cfg.subject)} onClick={() => applyAi('refine')} className="btn btn-secondary btn-sm disabled:opacity-50"><Wand2 size={12} />{t('compose.refine')}</button>
           </div>
         </div>
-        <input className="input" maxLength={1200} value={aiBrief} onChange={e => setAiBrief(e.target.value)} placeholder="Цель, аудитория и тон. Например: письмо участникам вебинара с резюме и ссылкой на запись." />
-        {aiBusy && <p className="text-xs text-[#a78bfa]">Gemini готовит черновик…</p>}
+        <input className="input" maxLength={1200} value={aiBrief} onChange={e => setAiBrief(e.target.value)} placeholder={t('compose.brief')} />
+        <div className="rounded-lg border border-dim/50 bg-surface/50 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-3"><label className="label mb-0 flex items-center gap-2"><KeyRound size={13} />{t('compose.personalKey')}</label>{personalApiKey && <button type="button" className="text-xs text-muted hover:text-text" onClick={() => setPersonalApiKey('')}>{t('compose.clearKey')}</button>}</div>
+          <div className="flex gap-2"><input className="input flex-1" autoComplete="off" spellCheck={false} type={showPersonalApiKey ? 'text' : 'password'} value={personalApiKey} onChange={e => setPersonalApiKey(e.target.value)} placeholder={t('compose.personalKeyPlaceholder')} /><button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowPersonalApiKey(v => !v)}>{showPersonalApiKey ? <EyeOff size={13} /> : <Eye size={13} />}</button></div>
+          <p className="text-[11px] leading-5 text-muted">{personalApiKey ? t('compose.personalKeyHint') : t('compose.serverKey')}</p>
+        </div>
+        {aiBusy && <p className="text-xs text-[#a78bfa]">{t('compose.working')}</p>}
         {aiError && <p className="text-xs text-red-400">{aiError}</p>}
         {aiNote && <p className="text-xs text-emerald-400">{aiNote}</p>}
       </div>

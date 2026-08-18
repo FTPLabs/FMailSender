@@ -1,6 +1,6 @@
 'use strict'
 /**
- * FMailSender — Node.js Express Backend v7.5.4
+ * FMailSender — Node.js Express Backend v7.5.5
  * Drop-in replacement for Python FastAPI core/server.py
  * All endpoints identical, port 7531.
  */
@@ -13,9 +13,10 @@ const storage  = require('./storage')
 const proxy    = require('./proxy')
 const sender   = require('./sender')
 const license  = require('./license')
+const { createTemplateWithPersonalKey } = require('./gemini_local')
 const { getSmtpConfigForDomain, getSmtpPresetForEmail } = require('./smtp_configs')
 
-const APP_VERSION = '7.5.4'
+const APP_VERSION = '7.5.5'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 
@@ -285,14 +286,21 @@ app.post('/api/ai/template', async (req, res) => {
   const subject = typeof body.subject === 'string' ? body.subject.trim() : ''
   const bodyHtml = typeof body.body_html === 'string' ? body.body_html : ''
   const bodyText = typeof body.body_text === 'string' ? body.body_text : ''
+  // A personal key is request-scoped only: it is never persisted, logged, or sent to the license server.
+  const personalApiKey = typeof body.personal_api_key === 'string' ? body.personal_api_key.trim() : ''
+  if (personalApiKey.length > 256) return res.status(400).json({ detail: 'Некорректная длина Gemini API-ключа.' })
   if (!mode) return res.status(400).json({ detail: 'Неизвестный режим AI-операции.' })
   if (brief.length > 1200 || subject.length > 180 || bodyHtml.length > 20_000 || bodyText.length > 8_000) {
     return res.status(413).json({ detail: 'Превышен допустимый размер запроса AI.' })
   }
   try {
-    res.json(await license.requestAiTemplate({ mode, brief, subject, body_html: bodyHtml, body_text: bodyText }))
+    const result = personalApiKey
+      ? await createTemplateWithPersonalKey({ apiKey: personalApiKey, mode, brief, subject, body_html: bodyHtml, body_text: bodyText })
+      : await license.requestAiTemplate({ mode, brief, subject, body_html: bodyHtml, body_text: bodyText })
+    res.json(result)
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'Не удалось выполнить AI-операцию.'
+    // Do not log request content or a user-supplied API key.
     console.warn(`[ai] template request failed: ${detail}`)
     res.status(502).json({ detail })
   }

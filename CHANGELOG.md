@@ -1,3 +1,13 @@
+## [7.5.5] — 2026-08-18
+
+### Usability
+- Added concise in-app Quick Start instructions for activation, account import, recipients, message preparation and launch.
+- Added a persistent RU/EN interface language control for navigation, activation, composer AI controls and the guide.
+
+### Personal Gemini key
+- Added an optional session-only personal Gemini API key field in the message editor.
+- Personal keys are not persisted, logged, sent to the license server or included in campaign data.
+
 ## [7.5.4] — 2026-08-18
 
 ### License connectivity and privacy

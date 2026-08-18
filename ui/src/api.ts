@@ -1,9 +1,8 @@
 /**
  * FMailSender — HTTP client v6.1
  *
- * VPN-compatible: probes both 127.0.0.1 and localhost to find the working
- * address before the first API call. Some VPN clients intercept or block
- * connections to 127.0.0.1 while leaving 'localhost' untouched (or vice-versa).
+ * Local startup compatible: probes both 127.0.0.1 and localhost to find the
+ * responsive loopback address before the first API call.
  *
  * Security:
  *   withCredentials: false — never attaches cookies/auth headers to requests.
@@ -127,6 +126,7 @@ export interface AiTemplateRequest {
   subject?: string
   body_html?: string
   body_text?: string
+  personal_api_key?: string
 }
 
 export interface AiTemplateResult {
