@@ -54,42 +54,46 @@ function substituteVars(template, recipient) {
   return result
 }
 
-function addFingerprint(html) {
-  // Add invisible unique comment to vary HTML per recipient (anti-spam dedup)
-  const uid = Math.random().toString(36).slice(2, 10)
-  return html.replace('</body>', `<!-- ${uid} --></body>`) ||
-         html + `<!-- ${uid} -->`
-}
-
 // ── Account rate limiting ─────────────────────────────────────────────────────
+function dayKey(now = new Date()) { return now.toISOString().slice(0, 10) }
+function hourKey(now = new Date()) { return now.toISOString().slice(0, 13) }
+
 class AccountLimits {
   constructor(acc) {
-    this.dailyLimit  = acc.daily_limit  || 500
-    this.hourlyLimit = acc.hourly_limit || 50
-    this.sentToday   = acc.sent_today   || 0
-    this.sentHour    = acc.sent_this_hour || 0
-    this.dayReset    = Date.now()
-    this.hourReset   = Date.now()
+    this.account = acc
+    this.dailyLimit = Math.max(1, Number(acc.daily_limit || 500))
+    this.hourlyLimit = Math.max(1, Number(acc.hourly_limit || 50))
+    this.sentToday = acc._rate_day === dayKey() ? Number(acc.sent_today || 0) : 0
+    this.sentHour = acc._rate_hour === hourKey() ? Number(acc.sent_this_hour || 0) : 0
+    this._commit()
+  }
+
+  _commit() {
+    this.account.sent_today = this.sentToday
+    this.account.sent_this_hour = this.sentHour
+    this.account._rate_day = dayKey()
+    this.account._rate_hour = hourKey()
   }
 
   _tick() {
-    const now = Date.now()
-    if (now - this.dayReset  >= 86400000) { this.sentToday = 0; this.sentHour = 0; this.dayReset = now; this.hourReset = now }
-    else if (now - this.hourReset >= 3600000) { this.sentHour = 0; this.hourReset = now }
-  }
-
-  canSend() {
-    this._tick()
-    return this.sentToday < this.dailyLimit && this.sentHour < this.hourlyLimit
+    if (this.account._rate_day !== dayKey()) { this.sentToday = 0; this.sentHour = 0 }
+    else if (this.account._rate_hour !== hourKey()) this.sentHour = 0
+    this._commit()
   }
 
   increment() {
     this._tick()
-    if (this.sentToday < this.dailyLimit && this.sentHour < this.hourlyLimit) {
-      this.sentToday++; this.sentHour++
-      return true
-    }
-    return false
+    if (this.sentToday >= this.dailyLimit || this.sentHour >= this.hourlyLimit) return false
+    this.sentToday++; this.sentHour++
+    this._commit()
+    return true
+  }
+
+  rollback() {
+    this._tick()
+    this.sentToday = Math.max(0, this.sentToday - 1)
+    this.sentHour = Math.max(0, this.sentHour - 1)
+    this._commit()
   }
 }
 
@@ -234,7 +238,7 @@ class SendingEngine {
     const requireTLS = acc.use_tls != null ? acc.use_tls : (cfg?.requireTLS ?? true)
 
     if (!host) {
-      if (lim) { lim.sentToday--; lim.sentHour-- }
+      if (lim) lim.rollback()
       return { success: false, error: `Unknown provider: ${domain}`, account_used: acc.email, recipient_email: recipient.email }
     }
 
@@ -250,7 +254,7 @@ class SendingEngine {
       const proxy = acc.proxy || ''
       agent = proxy ? makeProxyAgent(proxy, secure) : undefined
     } catch (err) {
-      if (lim) { lim.sentToday--; lim.sentHour-- }
+      if (lim) lim.rollback()
       return { success: false, error: classifySmtpError(err, acc), account_used: acc.email, recipient_email: recipient.email }
     }
 
@@ -283,7 +287,7 @@ class SendingEngine {
       return { success: true, account_used: acc.email, recipient_email: recipient.email }
     } catch (err) {
       transporter.close()
-      if (lim) { lim.sentToday--; lim.sentHour-- }
+      if (lim) lim.rollback()
       return { success: false, error: classifySmtpError(err, acc), account_used: acc.email, recipient_email: recipient.email }
     }
   }

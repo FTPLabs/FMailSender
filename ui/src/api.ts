@@ -108,6 +108,15 @@ export interface CampaignConfig {
   daily_limit_per_account: number
 }
 
+export interface CampaignReadiness {
+  ready: boolean
+  errors: string[]
+  warnings: string[]
+  active_accounts: number
+  recipients: number
+  available_daily: number
+}
+
 export interface CampaignStatus {
   state: 'idle' | 'running' | 'paused' | 'done' | 'error'
   sent: number
@@ -166,7 +175,7 @@ export const api = {
 
   proxies: {
     list:       ()                   => _http.get<{proxies:string[];count:number}>('/api/proxies').then(r => r.data),
-    set:        (proxies: string[])  => _http.post('/api/proxies', {proxies}).then(r => r.data),
+    set:        (proxies: string[])  => _http.post<{count:number;imported:number;invalid:number;duplicates:number;ignored:number}>('/api/proxies', {proxies}).then(r => r.data),
     check:      (proxies?: string[]) => _http.post('/api/proxies/check', {proxies}).then(r => r.data),
     distribute: ()                   => _http.post('/api/proxies/distribute').then(r => r.data),
   },
@@ -188,6 +197,7 @@ export const api = {
 
   campaign: {
     get:    ()                             => _http.get('/api/campaign').then(r => r.data),
+    readiness: ()                          => _http.get<CampaignReadiness>('/api/campaign/readiness').then(r => r.data),
     save:   (cfg: Partial<CampaignConfig>) => _http.post('/api/campaign', cfg).then(r => r.data),
     start:  ()                             => _http.post('/api/campaign/start').then(r => r.data),
     pause:  ()                             => _http.post('/api/campaign/pause').then(r => r.data),

@@ -4,7 +4,10 @@ FMail Sender — Telegram Bot + FastAPI License Server v3.0.0
 Поддержка: тикеты с диалогом, медиафайлы, голосовые, ответы обеих сторон.
 """
 import asyncio
+import base64
+from collections import defaultdict, deque
 import copy
+import hashlib
 import hmac
 import html
 import logging
@@ -23,6 +26,7 @@ from typing import Any, Dict, Optional
 
 import jwt
 import uvicorn
+from cryptography.hazmat.primitives.serialization import load_der_private_key
 from core._version import APP_VERSION
 import aiohttp
 from aiogram import Bot, Dispatcher, F
@@ -2822,9 +2826,10 @@ class ActivateRequest(BaseModel):
 
 
 @api_app.post("/v1/activate")
-async def activate(req: ActivateRequest):
+async def activate(req: ActivateRequest, request: Request):
     key = req.key.strip().upper()
     hwid = req.hwid.strip().upper()
+    _enforce_license_rate_limit(request, "activate", key, limit=10)
 
     lic = await db.get_license(key)
     if not lic:
@@ -2886,8 +2891,10 @@ async def activate(req: ActivateRequest):
     # FIX v1.3.0: Return plain fields alongside JWT token so that
     # core/license.py can populate the local cache without decoding the JWT.
     # This fixes plan="unknown" and expires_at=None in the local cache.
+    receipt = _license_receipt(key, hwid, lic.get("plan", ""), expires_at, lic["max_threads"], lic["max_recipients"])
     return {
         "token": token,
+        "receipt": receipt,
         "valid": True,
         "plan": lic.get("plan", ""),
         "expires_at": expires_at_str,
@@ -2895,6 +2902,56 @@ async def activate(req: ActivateRequest):
         "max_recipients": lic["max_recipients"],
         "message": "Лицензия успешно активирована",
     }
+
+
+def _license_receipt(key: str, hwid: str, plan: str, expires_at: datetime, max_threads: int, max_recipients: int) -> dict:
+    """Create a detached Ed25519 receipt that desktop clients can verify offline.
+
+    The private key exists only in the protected server environment. The receipt
+    deliberately contains no JWT secret and is bound to the activated device.
+    """
+    private_b64 = os.environ.get("LICENSE_RECEIPT_ED25519_PRIVATE_DER_B64", "").strip()
+    if not private_b64:
+        raise HTTPException(status_code=503, detail="License signing service is unavailable")
+    try:
+        private_key = load_der_private_key(base64.b64decode(private_b64), password=None)
+        if private_key.__class__.__name__ != "Ed25519PrivateKey":
+            raise ValueError("unexpected signing key type")
+        payload = {
+            "v": 1,
+            "key": key.strip().upper(),
+            "hwid": hwid.strip().lower(),
+            "plan": plan or "unknown",
+            "exp": int(expires_at.timestamp()),
+            "max_threads": int(max_threads),
+            "max_recipients": int(max_recipients),
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        signature = private_key.sign(encoded)
+        return {
+            "payload": base64.urlsafe_b64encode(encoded).decode("ascii").rstrip("="),
+            "signature": base64.urlsafe_b64encode(signature).decode("ascii").rstrip("="),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("license receipt signing failed")
+        raise HTTPException(status_code=503, detail="License signing service is unavailable") from exc
+
+
+_license_rate_buckets: dict[str, deque[float]] = defaultdict(deque)
+
+def _enforce_license_rate_limit(request: Request, action: str, license_key: str, limit: int, window_seconds: int = 60) -> None:
+    """Bound activation/verify attempts without retaining or logging network addresses."""
+    host = request.client.host if request.client else "unknown"
+    fingerprint = hashlib.sha256(f"{host}:{license_key.strip().upper()}".encode("utf-8")).hexdigest()[:16]
+    bucket = _license_rate_buckets[f"{action}:{fingerprint}"]
+    now = datetime.now(timezone.utc).timestamp()
+    while bucket and now - bucket[0] >= window_seconds:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        raise HTTPException(status_code=429, detail="Too many license requests. Try again shortly.")
+    bucket.append(now)
 
 
 class AiTemplateRequest(BaseModel):
@@ -2947,9 +3004,10 @@ class VerifyRequest(BaseModel):
 
 
 @api_app.post("/v1/verify")
-async def verify_license(req: VerifyRequest):
+async def verify_license(req: VerifyRequest, request: Request):
     key = req.key.strip().upper()
     hwid = req.hwid.strip().upper()
+    _enforce_license_rate_limit(request, "verify", key, limit=60)
 
     lic = await db.get_license(key)
     if not lic:
@@ -2972,7 +3030,8 @@ async def verify_license(req: VerifyRequest):
     if existing_hwid and existing_hwid.upper() != hwid.upper():
         raise HTTPException(status_code=403, detail="HWID mismatch")
 
-    return {"valid": True, "plan": lic.get("plan"), "expires_at": expires_at_str}
+    receipt = _license_receipt(key, hwid, lic.get("plan", ""), expires_at, lic["max_threads"], lic["max_recipients"])
+    return {"valid": True, "plan": lic.get("plan"), "expires_at": expires_at_str, "receipt": receipt}
 
 
 class AdminRevokeRequest(BaseModel):

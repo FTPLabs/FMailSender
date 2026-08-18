@@ -14,6 +14,8 @@ const VALIDATE_URL     = LICENSE_SERVER + '/v1/verify'
 const ACTIVATE_URL     = LICENSE_SERVER + '/v1/activate'
 const CACHE_TTL_MS     = 24 * 3600 * 1000
 const RECHECK_INTERVAL = 3600 * 1000
+// Public Ed25519 SPKI key only. The corresponding private key stays in VPS .env.
+const LICENSE_RECEIPT_PUBLIC_KEY_DER_B64 = 'MCowBQYDK2VwAyEAgqKnQkvJG/dSiKRuIh6S8I9n8LjBa0EB6QbWPnVqUgQ='
 
 
 const IPV4_OR_PORT_RE = /\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?::\d{1,5})?\b/g
@@ -105,6 +107,26 @@ function _isValidKeyFormat(key) {
   return k.startsWith('FMSND-') || k.startsWith('FM-')
 }
 
+function _fromBase64Url(value) {
+  const raw = String(value || '').replace(/-/g, '+').replace(/_/g, '/')
+  return Buffer.from(raw + '='.repeat((4 - raw.length % 4) % 4), 'base64')
+}
+
+function _verifyLicenseReceipt(receipt, expectedKey, expectedHwid) {
+  try {
+    if (!receipt || typeof receipt !== 'object') return { valid: false, reason: 'missing' }
+    const payload = _fromBase64Url(receipt.payload)
+    const signature = _fromBase64Url(receipt.signature)
+    const key = crypto.createPublicKey({ key: Buffer.from(LICENSE_RECEIPT_PUBLIC_KEY_DER_B64, 'base64'), format: 'der', type: 'spki' })
+    if (!crypto.verify(null, payload, key, signature)) return { valid: false, reason: 'signature' }
+    const data = JSON.parse(payload.toString('utf8'))
+    const hwid = String(expectedHwid || '').toLowerCase()
+    if (data.v !== 1 || data.key !== String(expectedKey || '').trim().toUpperCase() || data.hwid !== hwid) return { valid: false, reason: 'binding' }
+    if (!Number.isFinite(data.exp) || data.exp * 1000 <= Date.now()) return { valid: false, reason: 'expired' }
+    return { valid: true, data }
+  } catch { return { valid: false, reason: 'invalid' } }
+}
+
 function _decodeJwtPayload(token) {
   try {
     const parts = token.split('.')
@@ -121,10 +143,14 @@ function getCachedLicenseStatus() {
   if (!cached || !cached.key) {
     return { valid: false, hwid, message: 'Лицензия не активирована', requires_activation: true, from_cache: true }
   }
+  const receipt = _verifyLicenseReceipt(cached.receipt, cached.key, _getHwid())
+  if (!cached.valid || !receipt.valid) {
+    return { valid: false, hwid: _getHwid(), key: cached.key.slice(0, 12) + '****', message: 'Локальная лицензия требует подтверждения сервера.', from_cache: true, requires_activation: false }
+  }
   return {
-    valid: Boolean(cached.valid),
-    plan: cached.plan,
-    expires_at: cached.expires_at,
+    valid: true,
+    plan: receipt.data.plan,
+    expires_at: new Date(receipt.data.exp * 1000).toISOString(),
     hwid,
     key: cached.key.slice(0, 12) + '****',
     message: cached.message || '',
@@ -164,13 +190,15 @@ async function validateOnStartup() {
   }
   const result = await _validateOnline(cached.key, hwid)
   if (!result.offline) {
-    const isValid = Boolean(result.valid)
+    const signed = _verifyLicenseReceipt(result.receipt, cached.key, hwid)
+    const isValid = Boolean(result.valid && signed.valid)
     const updated = {
       ...cached,
       valid: isValid,
-      plan: result.plan || cached.plan,
-      expires_at: result.expires_at || cached.expires_at,
-      message: result.message || result.error || '',
+      receipt: isValid ? result.receipt : cached.receipt,
+      plan: isValid ? signed.data.plan : (result.plan || cached.plan),
+      expires_at: isValid ? new Date(signed.data.exp * 1000).toISOString() : (result.expires_at || cached.expires_at),
+      message: isValid ? (result.message || '') : 'Лицензия не подтверждена серверной подписью.',
       validated_at: Date.now(),
     }
     storage.saveLicenseCache(updated)
@@ -212,8 +240,11 @@ async function activateLicenseKey(key) {
     }
   }
 
+  const signed = _verifyLicenseReceipt(result.receipt, key, hwid)
+  if (!signed.valid) throw new Error('Лицензионная квитанция не прошла проверку. Повторите активацию при подключении к интернету.')
   const cacheData = {
-    key, valid: true, plan: plan || 'unknown', expires_at, hwid,
+    key, receipt: result.receipt, valid: true, plan: signed.data.plan || plan || 'unknown',
+    expires_at: new Date(signed.data.exp * 1000).toISOString(), hwid,
     message: result.message || 'Активировано',
     activated_at: Date.now(), validated_at: Date.now(),
   }
@@ -267,7 +298,7 @@ function stopPeriodicCheck() {
 }
 
 module.exports = {
-  _getHwid, _isValidKeyFormat,
+  _getHwid, _isValidKeyFormat, _verifyLicenseReceipt,
   getCachedLicenseStatus, validateOnStartup, activateLicenseKey, requestAiTemplate, publicLicenseError,
   setLicenseOk, getLicenseOk, setBgChecking, isBgChecking,
   startPeriodicCheck, stopPeriodicCheck,

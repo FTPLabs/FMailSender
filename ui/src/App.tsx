@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { StatusProvider } from './contexts/StatusContext'
 import { I18nProvider } from './i18n'
 import StartupOverlay from './components/StartupOverlay'
+import AppTour from './components/AppTour'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Accounts from './pages/Accounts'
@@ -15,6 +16,7 @@ import Guide from './pages/Guide'
 export default function App() {
   return <I18nProvider><StatusProvider>
     <StartupOverlay />
+    <AppTour />
     <Layout><Routes>
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<Dashboard />} />

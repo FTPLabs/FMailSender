@@ -1,3 +1,21 @@
+## [7.5.6] — 2026-08-18
+
+### Experience and accessibility
+- Completed RU/EN coverage for visible interface strings, added an optional seven-step in-app tour, and added a restart control for the tour.
+- Replaced standard UI iconography with the custom Nocturne Sigils vector set and improved responsive layout, text wrapping, and cross-theme semantic colors.
+- Simplified proxy import with URI, host/port, credential-first, host-first and CSV/semicolon formats; duplicate and invalid lines are reported without exposing credentials in diagnostics.
+
+### Delivery quality and reliability
+- Added a server-enforced campaign readiness preflight for required campaign fields and transparent warnings for reply handling, text alternatives, unsubscribe links, delay and daily capacity.
+- Made daily/hourly account counters calendar-aware and persist them after successful sends.
+
+### License and desktop hardening
+- Added Ed25519-signed license receipts bound to license key, hardware identifier and expiration; unsigned or modified local license cache entries are rejected.
+- Added activation and verification rate limiting without persistent IP storage, and hardened Electron navigation, permission, webview and production DevTools controls.
+
+### Gemini
+- Clarified that no Gemini API tier is unlimited: availability, billing and quotas are controlled by the Google project. Personal keys remain session-only.
+
 ## [7.5.5] — 2026-08-18
 
 ### Usability

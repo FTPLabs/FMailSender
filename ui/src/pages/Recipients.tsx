@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef } from 'react'
-import { Upload, Trash2, Mail, Search, Plus, RefreshCw } from 'lucide-react'
+import { GothicIcon } from '../components/GothicIcon'
 import { api, type Recipient } from '../api'
+import { useI18n } from '../i18n'
 
 export default function Recipients() {
+  const { language } = useI18n()
   const [recipients, setRecipients] = useState<Recipient[]>([])
   const [filter, setFilter]         = useState('')
   const [loading, setLoading]       = useState(true)
@@ -72,14 +74,14 @@ export default function Recipients() {
         <div className="flex items-center gap-2">
           <button onClick={clear} disabled={recipients.length === 0}
             className="btn btn-danger btn-sm">
-            <Trash2 size={13} /> Очистить
+            <GothicIcon name="delete" size={13} /> Очистить
           </button>
           <button onClick={() => fileRef.current?.click()} className="btn btn-secondary btn-sm">
-            <Upload size={13} /> Импорт .txt
+            <GothicIcon name="import" size={13} /> Импорт .txt
           </button>
           <input ref={fileRef} type="file" accept=".txt,.csv" className="hidden" onChange={importFile} />
           <button onClick={() => setAdding(!adding)} className="btn btn-primary btn-sm">
-            <Plus size={13} /> Добавить
+            <GothicIcon name="add" size={13} /> Добавить
           </button>
         </div>
       </div>
@@ -112,26 +114,23 @@ export default function Recipients() {
       )}
 
       {/* Format hint */}
-      <div className="card-inset text-xs text-[#6666aa]">
-        <span className="text-[#e8e8ff] font-medium">Формат файла:</span>{' '}
-        каждая строка — <code className="text-[#8b5cf6]">email|имя</code> или просто{' '}
-        <code className="text-[#8b5cf6]">email</code>.
-        Поддерживается: .txt, .csv
+      <div className="card-inset text-xs text-muted">
+        {language === 'en' ? <><span className="text-text font-medium">File format:</span>{' '}one line — <code className="text-purple-light">email|name</code> or simply <code className="text-purple-light">email</code>. Supports .txt and .csv.</> : <><span className="text-text font-medium">Формат файла:</span>{' '}каждая строка — <code className="text-purple-light">email|имя</code> или просто <code className="text-purple-light">email</code>. Поддерживается: .txt, .csv</>}
       </div>
 
       {/* Search */}
       <div className="relative">
-        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6666aa] pointer-events-none" />
+        <GothicIcon name="search" size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
         <input className="input pl-9" placeholder="Поиск по email или имени..."
           value={filter} onChange={e => setFilter(e.target.value)} />
       </div>
 
       {/* List */}
       {loading ? (
-        <div className="empty"><RefreshCw size={24} className="animate-spin" /></div>
+        <div className="empty"><GothicIcon name="refresh" size={24} className="animate-spin" /></div>
       ) : filtered.length === 0 ? (
         <div className="empty">
-          <Mail size={36} />
+          <GothicIcon name="recipients" size={36} />
           <p className="font-medium text-sm text-[#e8e8ff] mb-1">
             {filter ? 'Нет совпадений' : 'Список пуст'}
           </p>
@@ -157,7 +156,7 @@ export default function Recipients() {
                 <span className="w-40 text-xs text-[#6666aa] truncate">{r.name || '—'}</span>
                 <button onClick={() => remove(r.email)}
                   className="w-8 flex justify-center text-[#6666aa] hover:text-[#ef4444] transition-colors">
-                  <Trash2 size={12} />
+                  <GothicIcon name="delete" size={12} />
                 </button>
               </div>
             ))}

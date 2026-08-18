@@ -1,4 +1,4 @@
-import { BookOpen, KeyRound, ExternalLink } from 'lucide-react'
+import { GothicIcon } from '../components/GothicIcon'
 import { useI18n } from '../i18n'
 
 const STEPS = [
@@ -17,7 +17,7 @@ export default function Guide() {
     <div className="page flex-1">
       <div className="page-header">
         <div>
-          <h1 className="page-title flex items-center gap-2"><BookOpen size={20} className="text-purple-light" />{t('guide.title')}</h1>
+          <h1 className="page-title flex items-center gap-2"><GothicIcon name="guide" size={20} className="text-purple-light" />{t('guide.title')}</h1>
           <p className="page-sub">{t('guide.sub')}</p>
         </div>
       </div>
@@ -33,10 +33,10 @@ export default function Guide() {
         </section>
 
         <aside className="card h-fit space-y-3">
-          <div className="flex items-center gap-2 text-purple-light"><KeyRound size={16} /><h2 className="text-sm font-semibold text-text">{t('guide.keyTitle')}</h2></div>
+          <div className="flex items-center gap-2 text-purple-light"><GothicIcon name="key" size={16} /><h2 className="text-sm font-semibold text-text">{t('guide.keyTitle')}</h2></div>
           <p className="text-sm leading-6 text-muted">{t('guide.keyText')}</p>
           <a className="btn btn-secondary btn-sm w-full justify-center" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
-            Google AI Studio <ExternalLink size={13} />
+            Google AI Studio <GothicIcon name="external" size={13} />
           </a>
         </aside>
       </div>

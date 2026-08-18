@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
-import { Shield, Upload, RefreshCw, Trash2, Share2, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { GothicIcon } from '../components/GothicIcon'
 import { api } from '../api'
 
 interface ProxyResult {
+  id: string
   proxy: string
   ok: boolean
   smtp_ok: boolean
@@ -32,14 +33,18 @@ export default function Proxies() {
 
   useEffect(() => { load() }, [])
 
-  async function save() {
+  async function save(lines = textarea.split(/\r?\n/)) {
     setError(null)
-    const list = textarea.split('\n').map(s => s.trim()).filter(Boolean)
     try {
-      await api.proxies.set(list)
+      const result = await api.proxies.set(lines)
       await load()
-      setInfo(`Сохранено: ${list.length} прокси`)
-      setTimeout(() => setInfo(null), 3000)
+      const notes = [
+        `Сохранено: ${result.count} прокси`,
+        result.duplicates ? `повторы: ${result.duplicates}` : '',
+        result.invalid ? `некорректные: ${result.invalid}` : '',
+      ].filter(Boolean)
+      setInfo(notes.join(' · '))
+      setTimeout(() => setInfo(null), 4000)
     } catch (e: any) { setError(e.response?.data?.detail ?? e.message) }
   }
 
@@ -55,7 +60,7 @@ export default function Proxies() {
       const r = await api.proxies.check()
       const map: Record<string, ProxyResult> = {}
       for (const item of (r.results ?? r ?? [])) {
-        map[item.proxy] = item
+        if (item.id) map[item.id] = item
       }
       setResults(map)
     } catch (e: any) { setError(e.response?.data?.detail ?? e.message) }
@@ -74,10 +79,12 @@ export default function Proxies() {
 
   async function importFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return
-    const text = await file.text()
-    const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
-    const merged = [...new Set([...proxies, ...lines])]
-    setTextarea(merged.join('\n'))
+    setError(null)
+    try {
+      const text = await file.text()
+      const lines = text.split(/\r?\n/)
+      await save([...proxies, ...lines])
+    } catch (err: any) { setError(err?.message || 'Не удалось прочитать файл прокси.') }
     e.target.value = ''
   }
 
@@ -104,22 +111,22 @@ export default function Proxies() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => fileRef.current?.click()} className="btn btn-secondary btn-sm">
-            <Upload size={13} /> Импорт
+            <GothicIcon name="import" size={13} /> Импорт
           </button>
           <input ref={fileRef} type="file" accept=".txt" className="hidden" onChange={importFile} />
           <button onClick={distribute} disabled={distributing || proxies.length === 0}
             className="btn btn-secondary btn-sm">
-            <Share2 size={13} className={distributing ? 'animate-spin' : ''} />
+            <GothicIcon name="distribute" size={13} className={distributing ? 'animate-spin' : ''} />
             Распределить
           </button>
           <button onClick={checkAll} disabled={checking || proxies.length === 0}
             className="btn btn-secondary btn-sm">
-            <RefreshCw size={13} className={checking ? 'animate-spin' : ''} />
+            <GothicIcon name="refresh" size={13} className={checking ? 'animate-spin' : ''} />
             Проверить
           </button>
           <button onClick={clear} disabled={proxies.length === 0}
             className="btn btn-danger btn-sm">
-            <Trash2 size={13} /> Очистить
+            <GothicIcon name="delete" size={13} /> Очистить
           </button>
         </div>
       </div>
@@ -139,9 +146,10 @@ export default function Proxies() {
       <div className="card-inset text-xs text-[#6666aa]">
         <span className="text-[#e8e8ff] font-medium">Формат:</span>{' '}
         по одному прокси на строку.{' '}
-        Поддерживается: <code className="text-[#8b5cf6]">socks5://user:pass@host:port</code>,{' '}
-        <code className="text-[#8b5cf6]">http://host:port</code>,{' '}
-        <code className="text-[#8b5cf6]">host:port:user:pass</code>
+        Поддерживается URI, <code className="text-[#8b5cf6]">host:port</code>,{' '}
+        <code className="text-[#8b5cf6]">host:port:user:pass</code>,{' '}
+        <code className="text-[#8b5cf6]">user:pass:host:port</code>,{' '}
+        <code className="text-[#8b5cf6]">host:port@user:pass</code> и CSV/; форматы.
       </div>
 
       {/* Main layout: editor + results — column on small, row on lg+ when results exist */}
@@ -150,14 +158,15 @@ export default function Proxies() {
         <div className={`card flex flex-col space-y-3 ${hasResults ? 'flex-1 min-w-0' : 'flex-1'}`}>
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-[#e8e8ff]">Список прокси</h2>
-            <button onClick={save} className="btn btn-primary btn-sm">
+            <button onClick={() => void save()} className="btn btn-primary btn-sm">
               Сохранить
             </button>
           </div>
           <textarea
             className="input font-mono text-xs leading-relaxed resize-none flex-1"
             style={{ minHeight: '200px' }}
-            placeholder={'socks5://user:pass@1.2.3.4:1080\nhttp://1.2.3.5:8080\n1.2.3.6:1080:user:pass'}
+                          placeholder={'socks5://user:pass@host:1080\nhost:8080:user:pass\nuser:pass:host:1080\nhost:1080@user:pass'}
+
             value={textarea}
             onChange={e => setTextarea(e.target.value)}
             spellCheck={false}
@@ -178,15 +187,16 @@ export default function Proxies() {
             </div>
             <div className="flex-1 overflow-y-auto divide-y divide-[#3a3a66]/20">
               {proxies.map(proxy => {
-                const r = results[proxy]
+                                    const r = results[proxy]
+
                 if (!r) return null
                 return (
                   <div key={proxy} className="px-4 py-2.5 flex items-center gap-3 text-xs hover:bg-[#141424]/60">
                     {r.ok
-                      ? <CheckCircle size={12} className="text-[#10b981] flex-shrink-0" />
-                      : <XCircle size={12} className="text-[#ef4444] flex-shrink-0" />
+                      ? <GothicIcon name="check" size={12} className="text-success flex-shrink-0" />
+                      : <GothicIcon name="error" size={12} className="text-error flex-shrink-0" />
                     }
-                    <span className="font-mono text-[#e8e8ff] flex-1 truncate">{proxy}</span>
+                    <span className="font-mono text-[#e8e8ff] flex-1 truncate">{r.proxy}</span>
                     {r.ping_ms != null && (
                       <span className="text-[#6666aa] tabular-nums">{r.ping_ms}ms</span>
                     )}
@@ -209,7 +219,7 @@ export default function Proxies() {
       {/* Empty state */}
       {!loading && proxies.length === 0 && !hasResults && (
         <div className="empty flex-1">
-          <Shield size={36} />
+          <GothicIcon name="proxies" size={36} />
           <p className="font-medium text-sm text-[#e8e8ff] mb-1">Прокси не загружены</p>
           <p className="text-xs">Вставьте список выше или импортируйте .txt файл</p>
         </div>

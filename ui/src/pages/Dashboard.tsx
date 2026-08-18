@@ -1,17 +1,16 @@
-import { Users, Mail, Shield, Send, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { GothicIcon, type GothicIconName } from '../components/GothicIcon'
 import { useStatus } from '../contexts/StatusContext'
 
-function StatCard({ label, value, sub, icon: Icon, color }: {
+function StatCard({ label, value, sub, icon, color }: {
   label: string; value: string | number; sub?: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  icon: React.ElementType<any>
+  icon: GothicIconName
   color: string
 }) {
   return (
     <div className="card flex items-center gap-4">
       <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
         style={{ background: `${color}18`, border: `1px solid ${color}30` }}>
-        <Icon size={17} style={{ color }} />
+        <GothicIcon name={icon} size={17} style={{ color }} />
       </div>
       <div className="min-w-0">
         <div className="text-xl font-bold text-[#e8e8ff] tabular-nums">{value}</div>
@@ -61,11 +60,11 @@ export default function Dashboard() {
       {/* Stats */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         <StatCard label="Аккаунтов готово" value={s?.accounts.ready ?? 0}
-          sub={s ? `из ${s.accounts.total} всего` : undefined} icon={Users} color="#8b5cf6" />
-        <StatCard label="Получателей" value={s?.recipients ?? 0} icon={Mail} color="#06b6d4" />
-        <StatCard label="Прокси" value={s?.proxies ?? 0} icon={Shield} color="#10b981" />
+          sub={s ? `из ${s.accounts.total} всего` : undefined} icon="accounts" color="#8b5cf6" />
+        <StatCard label="Получателей" value={s?.recipients ?? 0} icon="recipients" color="#06b6d4" />
+        <StatCard label="Прокси" value={s?.proxies ?? 0} icon="proxies" color="#10b981" />
         <StatCard label="Отправлено" value={cp?.sent ?? 0}
-          sub={cp?.total ? `из ${cp.total}` : 'в этой кампании'} icon={Send} color="#f59e0b" />
+          sub={cp?.total ? `из ${cp.total}` : 'в этой кампании'} icon="sending" color="#f59e0b" />
       </div>
 
       {/* Campaign */}
@@ -116,12 +115,12 @@ export default function Dashboard() {
         <h2 className="text-sm font-semibold text-[#e8e8ff]">Аккаунты</h2>
         <div className="space-y-2">
           {[
-            { label: 'Активны и проверены', value: s?.accounts.valid ?? 0,   icon: CheckCircle, color: '#10b981' },
-            { label: 'Не прошли проверку',  value: s?.accounts.invalid ?? 0, icon: XCircle,     color: '#ef4444' },
-            { label: 'Не проверены',        value: s?.accounts.untested ?? 0,icon: Clock,       color: '#6666aa' },
+            { label: 'Активны и проверены', value: s?.accounts.valid ?? 0,   icon: 'check' as GothicIconName, color: '#10b981' },
+            { label: 'Не прошли проверку',  value: s?.accounts.invalid ?? 0, icon: 'error' as GothicIconName, color: '#ef4444' },
+            { label: 'Не проверены',        value: s?.accounts.untested ?? 0,icon: 'waiting' as GothicIconName, color: '#6666aa' },
           ].map(row => (
             <div key={row.label} className="flex items-center gap-3 text-sm">
-              <row.icon size={13} style={{ color: row.color }} className="flex-shrink-0" />
+              <GothicIcon name={row.icon} size={13} style={{ color: row.color }} className="flex-shrink-0" />
               <span className="text-[#6666aa] flex-1 text-xs">{row.label}</span>
               <span className="font-semibold text-sm tabular-nums" style={{ color: row.color }}>{row.value}</span>
             </div>

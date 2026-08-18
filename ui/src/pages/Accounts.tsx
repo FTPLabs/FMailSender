@@ -1,13 +1,13 @@
 import { useEffect, useState, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Plus, Trash2, RefreshCw, Upload, CheckCircle, XCircle, Clock, Globe, Users, Loader2 } from 'lucide-react'
+import { GothicIcon } from '../components/GothicIcon'
 import { api, getBaseUrl, type Account, type SmtpPreset } from '../api'
 
 function StatusIcon({ ok, testing }: { ok: boolean | null; testing?: boolean }) {
-  if (testing) return <Loader2 size={13} className="text-[#a78bfa] animate-spin" />
-  if (ok === true)  return <CheckCircle size={13} className="text-[#10b981]" />
-  if (ok === false) return <XCircle size={13} className="text-[#ef4444]" />
-  return <Clock size={13} className="text-[#6666aa]" />
+  if (testing) return <GothicIcon name="waiting" size={13} className="text-purple-light animate-spin" />
+  if (ok === true)  return <GothicIcon name="check" size={13} className="text-success" />
+  if (ok === false) return <GothicIcon name="error" size={13} className="text-error" />
+  return <GothicIcon name="waiting" size={13} className="text-muted" />
 }
 
 interface Frm {
@@ -227,7 +227,7 @@ export default function Accounts() {
         <div className="flex items-center gap-2 flex-wrap justify-end">
           {selected.size > 0 && (
             <button onClick={delSelected} className="btn btn-danger btn-sm">
-              <Trash2 size={13} /> Удалить {selected.size}
+              <GothicIcon name="delete" size={13} /> Удалить {selected.size}
             </button>
           )}
           <button
@@ -236,17 +236,17 @@ export default function Accounts() {
             className={`btn btn-sm ${testAll ? 'btn-danger' : 'btn-secondary'}`}
           >
             {testAll
-              ? <><Loader2 size={13} className="animate-spin" /> Стоп ({testProgress?.done ?? 0}/{testProgress?.total ?? accounts.length})</>
-              : <><RefreshCw size={13} /> Проверить все</>
+              ? <><GothicIcon name="waiting" size={24} className="animate-spin" /> Стоп ({testProgress?.done ?? 0}/{testProgress?.total ?? accounts.length})</>
+              : <><GothicIcon name="refresh" size={13} /> Проверить все</>
             }
           </button>
           <button onClick={() => fileRef.current?.click()} className="btn btn-secondary btn-sm">
-            <Upload size={13} /> Импорт
+            <GothicIcon name="import" size={13} /> Импорт
           </button>
           <input ref={fileRef} type="file" accept=".txt,.csv" className="hidden" onChange={importFile} />
           <button onClick={() => { setShowForm(true); setEditEmail(null); setForm(EMPTY) }}
             className="btn btn-primary btn-sm">
-            <Plus size={13} /> Добавить
+            <GothicIcon name="add" size={13} /> Добавить
           </button>
         </div>
       </div>
@@ -377,10 +377,10 @@ export default function Accounts() {
 
       {/* List */}
       {loading ? (
-        <div className="empty"><RefreshCw size={24} className="animate-spin" /></div>
+        <div className="empty"><GothicIcon name="refresh" size={24} className="animate-spin" /></div>
       ) : accounts.length === 0 ? (
         <div className="empty">
-          <Users size={36} />
+          <GothicIcon name="accounts" size={36} />
           <p className="font-medium text-sm text-[#e8e8ff] mb-1">Нет аккаунтов</p>
           <p className="text-xs">Добавьте вручную или импортируйте .txt файл</p>
         </div>
@@ -430,7 +430,7 @@ export default function Accounts() {
                     </td>
                     <td>
                       {acc.proxy
-                        ? <span className="badge badge-cyan"><Globe size={9} /> Прокси</span>
+                        ? <span className="badge badge-cyan"><GothicIcon name="proxies" size={9} /> Прокси</span>
                         : <span className="text-xs text-[#6666aa]">—</span>
                       }
                     </td>
@@ -461,11 +461,11 @@ export default function Accounts() {
                           title="Проверить SMTP"
                           className="btn btn-ghost btn-sm p-1.5"
                         >
-                          <RefreshCw size={12} className={isTesting ? 'animate-spin' : ''} />
+                          <GothicIcon name="refresh" size={12} className={isTesting ? 'animate-spin' : ''} />
                         </button>
                         <button onClick={() => del(acc.email)} title="Удалить"
                           className="btn btn-ghost btn-sm p-1.5 hover:text-[#ef4444]">
-                          <Trash2 size={12} />
+                          <GothicIcon name="delete" size={12} />
                         </button>
                       </div>
                     </td>

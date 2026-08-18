@@ -1,6 +1,6 @@
 'use strict'
 /**
- * FMailSender — Node.js Express Backend v7.5.5
+ * FMailSender — Node.js Express Backend v7.5.6
  * Drop-in replacement for Python FastAPI core/server.py
  * All endpoints identical, port 7531.
  */
@@ -16,7 +16,7 @@ const license  = require('./license')
 const { createTemplateWithPersonalKey } = require('./gemini_local')
 const { getSmtpConfigForDomain, getSmtpPresetForEmail } = require('./smtp_configs')
 
-const APP_VERSION = '7.5.5'
+const APP_VERSION = '7.5.6'
 const PORT        = parseInt(process.env.FMAIL_PORT || '7531', 10)
 const TEST_MODE   = process.argv.includes('--test')
 
@@ -29,6 +29,7 @@ let _campaignStatus = { state: 'idle', sent: 0, failed: 0, total: 0, current_ema
 let _engine     = null
 let _stopEvent  = null
 let _runId      = 0
+let _accountsSaveTimer = null
 
 // ── Load state on startup ─────────────────────────────────────────────────────
 function _init() {
@@ -36,6 +37,14 @@ function _init() {
   _proxies     = storage.loadProxies()
   _recipients  = storage.loadRecipients()
   _campaignCfg = storage.loadCampaign()
+}
+
+function _scheduleAccountsSave() {
+  if (_accountsSaveTimer) return
+  _accountsSaveTimer = setTimeout(() => {
+    _accountsSaveTimer = null
+    storage.saveAccounts(_accounts)
+  }, 500)
 }
 
 // ── Express setup ─────────────────────────────────────────────────────────────
@@ -220,14 +229,15 @@ app.post('/api/accounts/import-txt', upload.single('file'), (req, res) => {
 app.get('/api/proxies', (req, res) => res.json({ proxies: _proxies, count: _proxies.length }))
 
 app.post('/api/proxies', (req, res) => {
-  _proxies = (req.body.proxies || []).map(proxy.parseProxy).filter(Boolean)
+  const normalized = proxy.normalizeProxyList(req.body?.proxies || [])
+  _proxies = normalized.proxies
   storage.saveProxies(_proxies)
-  res.json({ count: _proxies.length })
+  res.json({ count: _proxies.length, imported: _proxies.length, invalid: normalized.invalid, duplicates: normalized.duplicates, ignored: normalized.ignored })
 })
 
 app.post('/api/proxies/check', async (req, res) => {
-  const raw     = req.body.proxies || _proxies
-  const toCheck = raw.map(proxy.parseProxy).filter(Boolean)
+  const raw = req.body?.proxies || _proxies
+  const toCheck = proxy.normalizeProxyList(raw).proxies
   const sem = _semaphore(4)
   const results = await Promise.all(toCheck.map(async item => {
     await sem.acquire()
@@ -315,13 +325,36 @@ app.post('/api/campaign', (req, res) => {
   res.json({ ok: true })
 })
 
+function _campaignReadiness() {
+  const errors = []
+  const warnings = []
+  const active = _accounts.filter(a => a.is_active && a.last_test_ok === true)
+  const subject = String(_campaignCfg.subject || '').trim()
+  const bodyHtml = String(_campaignCfg.body_html || '').trim()
+  const bodyText = String(_campaignCfg.body_text || '').trim()
+  const replyTo = String(_campaignCfg.reply_to || '').trim()
+  const delayMin = Number(_campaignCfg.delay_min || 1)
+  const availableDaily = active.reduce((sum, account) => sum + Math.max(0, Number(account.daily_limit || 0) - Number(account.sent_today || 0)), 0)
+  if (!active.length) errors.push('no_ready_accounts')
+  if (!_recipients.length) errors.push('no_recipients')
+  if (!subject) errors.push('missing_subject')
+  if (!bodyHtml && !bodyText) errors.push('missing_body')
+  if (!replyTo) warnings.push('missing_reply_to')
+  if (!bodyText) warnings.push('missing_text_version')
+  if (!/unsubscribe|отпис/i.test(`${bodyHtml} ${bodyText}`)) warnings.push('missing_unsubscribe')
+  if (delayMin < 30) warnings.push('short_delay')
+  if (availableDaily > 0 && _recipients.length > availableDaily) warnings.push('daily_capacity')
+  return { ready: errors.length === 0, errors, warnings, active_accounts: active.length, recipients: _recipients.length, available_daily: availableDaily }
+}
+
+app.get('/api/campaign/readiness', (req, res) => res.json(_campaignReadiness()))
+
 app.post('/api/campaign/start', (req, res) => {
   if (_campaignStatus.state === 'running') return res.status(400).json({ detail: 'Campaign already running' })
-  if (!_accounts.length)  return res.status(400).json({ detail: 'No accounts loaded' })
-  if (!_recipients.length) return res.status(400).json({ detail: 'No recipients loaded' })
+  const readiness = _campaignReadiness()
+  if (!readiness.ready) return res.status(400).json({ detail: 'Campaign is not ready. Review the readiness panel.', readiness })
 
   const active = _accounts.filter(a => a.is_active && a.last_test_ok === true)
-  if (!active.length) return res.status(400).json({ detail: 'No validated accounts. Run account test first.' })
 
   _runId++
   const currentRun = _runId
@@ -358,6 +391,7 @@ app.post('/api/campaign/start', (req, res) => {
       _campaignStatus.failed++
       if (result.error) _campaignStatus.errors.push(`${result.recipient_email}: ${result.error}`)
     }
+    if (result?.success) _scheduleAccountsSave()
     _campaignStatus.current_email   = result?.recipient_email || ''
     _campaignStatus.current_account = result?.account_used    || ''
   }
@@ -367,6 +401,8 @@ app.post('/api/campaign/start', (req, res) => {
     _campaignStatus.state  = 'done'
     _campaignStatus.sent   = results.filter(r => r.success).length
     _campaignStatus.failed = results.filter(r => !r.success).length
+    if (_accountsSaveTimer) { clearTimeout(_accountsSaveTimer); _accountsSaveTimer = null }
+    storage.saveAccounts(_accounts)
   }
 
   _engine.run().catch(err => {

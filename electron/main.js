@@ -1,6 +1,6 @@
 'use strict'
 /**
- * FMailSender Electron Main Process v7.5.5
+ * FMailSender Electron Main Process v7.5.6
  * Starts the Node.js backend then opens the BrowserWindow.
  * Replaces src-tauri/src/main.rs entirely.
  */
@@ -171,18 +171,34 @@ function createWindow() {
   // Remove default menu in production
   if (!isDev) Menu.setApplicationMenu(null)
 
-  _win.loadURL(`http://127.0.0.1:${CORE_PORT}`)
+  const localOrigin = `http://127.0.0.1:${CORE_PORT}`
+  _win.loadURL(localOrigin)
 
   _win.once('ready-to-show', () => {
     _win.show()
     if (isDev) _win.webContents.openDevTools()
   })
 
-  // Open external links in browser, not Electron window
+  // Local UI is the only navigable origin. Links may open only in the system browser.
+  _win.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith(localOrigin)) {
+      event.preventDefault()
+      if (/^https:\/\//i.test(url)) void shell.openExternal(url)
+    }
+  })
   _win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http')) shell.openExternal(url)
+    if (/^https:\/\//i.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
+  _win.webContents.on('will-attach-webview', event => event.preventDefault())
+  _win.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  _win.webContents.session.setPermissionCheckHandler(() => false)
+  if (!isDev) {
+    _win.webContents.on('before-input-event', (event, input) => {
+      const key = String(input.key || '').toLowerCase()
+      if (key === 'f12' || ((input.control || input.meta) && input.shift && ['i', 'j', 'c'].includes(key))) event.preventDefault()
+    })
+  }
 
   _win.on('closed', () => { _win = null })
 }

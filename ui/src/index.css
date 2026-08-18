@@ -94,6 +94,8 @@
   .theme-switch { @apply flex items-center gap-1 rounded-lg border border-dim/50 bg-surf2 p-1; }
   .theme-switch button { @apply grid h-7 w-7 place-items-center rounded-md text-muted transition-all hover:text-text hover:bg-surf3; }
   .theme-switch button[data-active='true'] { @apply bg-purple/20 text-purple-light shadow-glow-sm; }
+  .gothic-icon { filter: drop-shadow(0 0 5px rgb(var(--c-accent) / .16)); }
+  .gothic-icon path, .gothic-icon circle { vector-effect: non-scaling-stroke; }
 
   .btn {
     @apply inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold tracking-[.01em]
@@ -126,17 +128,26 @@
   .badge-purple { @apply badge bg-purple/15 text-purple-light border border-purple/20; }
 
   .page { @apply relative space-y-5 animate-fade-in mx-auto w-full max-w-[1480px]; }
-  .page-header { @apply flex items-center justify-between gap-4; }
+  .page-header { @apply flex items-center justify-between gap-4 flex-wrap; }
   .page-title { @apply font-display text-2xl font-semibold tracking-tight text-text; }
-  .page-sub { @apply text-sm text-muted mt-0.5; }
+  .page-sub { @apply text-sm text-muted mt-0.5 break-words; }
 
-  .tbl { @apply w-full text-sm; }
+  .tbl { @apply w-full text-sm min-w-[680px]; }
   .tbl th { @apply px-4 py-2.5 text-left text-[10px] font-bold text-muted uppercase tracking-[.14em] border-b border-dim/40 bg-surf2/85; }
   .tbl td { @apply px-4 py-2.5 border-b border-dim/30; }
   .tbl tr { @apply hover:bg-surf2/60 transition-colors; }
 
   .empty { @apply flex flex-col items-center justify-center py-16 text-muted text-center; }
   .empty svg { @apply mb-3 opacity-25; }
+  @media (max-width: 900px) {
+    .nocturne-shell { overflow: auto; }
+    .nocturne-shell > aside { width: 100%; min-height: auto; }
+    .nocturne-shell { flex-direction: column; }
+    .nocturne-shell > main { overflow: visible; }
+    .nocturne-shell > main > div { padding: 1rem; }
+    .nocturne-shell nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .nocturne-shell nav > div { grid-column: 1 / -1; }
+  }
 }
 
 /* Compatibility bridge for pre-v7.5 page components that use explicit Tailwind hex classes.
